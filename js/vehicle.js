@@ -43,6 +43,10 @@
  * The campaign's own surface:
  *   SM.vehicle.getHeading() getVelX() getVelY() isCutting() getDriveBurnRate()
  *   SM.vehicle.parkAtDoor()          set the machine down at this level's doors
+ *   SM.vehicle.parkInLift()          ...and its mirror, inside them
+ *   SM.vehicle.beginDoorGlide(out) setDoorGlide(p) endDoorGlide() isDoorGliding()
+ *                                    the LIFT driving the machine in or out. The
+ *                                    clock is js/adv.js's; the path is ours.
  *
  * Events emitted
  *   drill:blocked  {matIndex, hardness}   the bit met rock it cannot cut
@@ -157,6 +161,45 @@ SM.vehicle = (function () {
    * |getDepthM() - level.depthM| < 12 are written against (ARCHITECTURE.md §7 quotes
    * the old 120 units = 12 m); 70 units = 7 m keeps every one of them true. */
   var ADV_SPAWN_Y = 70;          // below the doors, on the centre line
+  /* --- AND WHERE THE CAGE HOLDS IT --------------------------------------
+   * ENTERING THE LIFT IS A MANOEUVRE, NOT A KEYPRESS (js/advterrain.js's chamber
+   * is sized for exactly this). The machine drives at the doors, the doorway
+   * catches it (advterrain.inDoorThreshold), and the lift takes over and puts it
+   * away: js/adv.js runs the clock and this file runs the MOTION, because a
+   * position glide is a thing the machine does and parkAtDoor() is already this
+   * module's verb for the same kind of job.
+   *
+   * WHY A GLIDE AND NOT AN AUTOPILOT ON SM.input.setStick(). Two reasons, and
+   * both are load-bearing. A HELD KEYBOARD KEY BEATS THE STICK (input.js's own
+   * rule, and a good one), so a player still leaning on W while the doors take
+   * them would be fighting the docking for its whole duration — the one input
+   * state that is GUARANTEED to be present, because holding W is how they got
+   * here. And the drive model is an acceleration budget with a turn rate: aiming
+   * it at a 165-unit-wide doorway would land somewhere different at every engine
+   * tier, on a move whose whole job is to arrive squarely in the same place every
+   * time. So the docking is scripted, and the drive model is simply not run.
+   *
+   * ADV_DOCK_Y is measured from the doorstep like ADV_SPAWN_Y, but UP: 120 puts
+   * the hull centre 74 units inside advterrain's interior box (its floor is 46
+   * above the sill), i.e. unambiguously in the lift by the one test that owns
+   * that question, and dead centre of the 430-tall opening.
+   *
+   * THE CAGE DOCKS AT ITS OWN SPEED, not the machine's. ADV_DOCK_SPEED is a
+   * little above what a mid rig drives at, so the pull-in reads as machinery
+   * taking hold rather than as the player still driving — and it is the same
+   * whichever engine is fitted, which is what makes the beat a fixed part of the
+   * game's rhythm instead of something the workshop shortens. The clamps are the
+   * real guarantee: no dock is ever a flash, and none ever outstays the beat. */
+  var ADV_DOCK_Y = 120;          // ABOVE the doorstep: the cage's own park
+  var ADV_DOCK_SPEED = 260;      // world units/sec the lift moves the machine at
+  var ADV_DOCK_MIN = 0.45;       // ...never quicker than this (seconds)
+  var ADV_DOCK_MAX = 0.80;       // ...and never slower
+  var ADV_DOCK_RAMP = 0.22;      // fraction of the move spent spinning up, and
+                                 // the same again settling. A trapezoidal speed
+                                 // profile is what a tracked machine actually
+                                 // has, and its peak is only 1/(1-RAMP) of the
+                                 // average — an ease-in-out would need half as
+                                 // long again to look this unhurried.
   var ADV_CEIL_MARGIN = 40;      // closest the hull centre may get to the roof
   var ADV_FLOOR_MARGIN = 40;     // ...and to the floor. THE LEVEL HAS A BOTTOM
                                  // NOW: there was no lower y clamp in this file
@@ -654,6 +697,8 @@ SM.vehicle = (function () {
     advDry = false;
     advTurning = 0;
     advTravel = 1;
+    // A re-descent must never inherit half a docking from the run before it.
+    glideOn = false;
 
     parkAtDoor();
     syncRig();
@@ -702,6 +747,192 @@ SM.vehicle = (function () {
     return true;
   }
 
+  /**
+   * THE CAGE'S OWN PARK: inside the doors, ADV_DOCK_Y above the threshold.
+   *
+   * The mirror of parkAtDoor(), and js/adv.js re-applies it every step while the
+   * machine is in the lift for the same reason it used to re-apply parkAtDoor()
+   * — a parked machine cannot be nudged by anything. WHICH of the two it holds
+   * matters even though nothing is drawn: js/camera.js frames the machine,
+   * js/effects.js hangs the headlight on it and js/advterrain.js streams around
+   * it, so holding it 190 units below the doors it is supposed to be standing in
+   * meant the view, the light and the window all lurched at the exact frame the
+   * door menu opened and again at the frame it closed. Holding it where the lift
+   * actually is costs nothing and removes both.
+   *
+   * FACING DOWN, like parkAtDoor(), because the next thing that happens to this
+   * machine is rolling out into the level. The docking glide squares it up to the
+   * doors facing UP on the way in; that is over by the time this is called, and
+   * by then nothing is drawn.
+   */
+  function parkInLift() {
+    x = advDoorX();
+    y = advDoorY() - ADV_DOCK_Y;
+    speed = 0;
+    vx = 0;
+    dvx = 0; dvy = 0;
+    heading = Math.PI;
+    stalled = false;
+    cutting = false;
+    advLoad = 0;
+    loadPeak = 0;
+    stallHold = 0;
+    stallFxTimer = 0;
+    stallPrev = false;
+    ramCool = 0;
+    lurchCool = 0;
+    blockedMat = -1;
+    blockedHard = 0;
+    driveBurn = 0;
+    return true;
+  }
+
+  /* =====================================================================
+   * THE DOOR GLIDE — driving into the lift, and out of it
+   * ---------------------------------------------------------------------
+   * See the ADV_DOCK_* tunables for WHY this is a scripted path rather than an
+   * autopilot on the stick. What follows is the path itself, and the division of
+   * labour around it: js/adv.js owns the CLOCK (it is the state machine, it knows
+   * what a transition is for and when the door menu may open), this file owns the
+   * MOTION, and js/advterrain.js owns the leaves. One number crosses each seam.
+   *
+   * THE PROFILE IS A TRAPEZOID. Constant speed with a ramp at each end, which is
+   * what a tracked machine's speed actually does and — unlike a smoothstep — has
+   * a peak barely above its own average, so the move never looks like a yank. The
+   * position is the integral of it, normalised to 1 over the whole move.
+   * ================================================================== */
+  var glideOn = false;
+  var glideOut = false;                // false = docking IN, true = rolling OUT
+  var glideP = 0;                      // 0..1 along the path, set by js/adv.js
+  var glideX0 = 0, glideY0 = 0, glideH0 = 0;
+  var glideX1 = 0, glideY1 = 0, glideH1 = 0;
+  var glideLen = 0, glideDur = 0;      // world units, and the seconds we asked for
+
+  /** Normalised distance travelled at 0..1 through a trapezoidal move. */
+  function trapPos(p) {
+    var k = ADV_DOCK_RAMP, vm = 1 / (1 - k);
+    if (p <= 0) return 0;
+    if (p >= 1) return 1;
+    if (p < k) return vm * p * p / (2 * k);
+    if (p > 1 - k) { var u = 1 - p; return 1 - vm * u * u / (2 * k); }
+    return vm * (k * 0.5 + (p - k));
+  }
+
+  /** ...and the normalised SPEED at the same point, for the camera's lead. */
+  function trapVel(p) {
+    var k = ADV_DOCK_RAMP, vm = 1 / (1 - k);
+    if (p <= 0 || p >= 1) return 0;
+    if (p < k) return vm * p / k;
+    if (p > 1 - k) return vm * (1 - p) / k;
+    return vm;
+  }
+
+  /**
+   * TAKE THE MACHINE. `out` false docks it (from wherever the doorway caught it,
+   * squaring up to the doors as it goes); `out` true rolls it out (from the cage,
+   * straight down to the park). Returns the number of SECONDS the move wants,
+   * which js/adv.js uses as its drive phase — the duration belongs here because
+   * the distance and the docking speed both do.
+   *
+   * A ROLL-OUT PLACES THE MACHINE AT THE START IMMEDIATELY, because its caller may
+   * be a descent: the world has just been built and the next thing that happens is
+   * a camera reset and a render, both of which have to find the machine in the
+   * cage rather than at the park it has not driven to yet.
+   */
+  function beginDoorGlide(out) {
+    var dx = advDoorX(), dy = advDoorY();
+    glideOut = !!out;
+    if (glideOut) {
+      glideX0 = dx; glideY0 = dy - ADV_DOCK_Y; glideH0 = Math.PI;
+      glideX1 = dx; glideY1 = dy + ADV_SPAWN_Y; glideH1 = Math.PI;
+    } else {
+      glideX0 = x; glideY0 = y; glideH0 = heading;
+      glideX1 = dx; glideY1 = dy - ADV_DOCK_Y; glideH1 = 0;
+    }
+    /* THE SHORT WAY ROUND. heading is kept in (-PI, PI] by the drive model, so a
+     * machine that nosed in at 175 degrees must not unwind the long way. */
+    var hd = glideH1 - glideH0;
+    while (hd > Math.PI) hd -= TAU;
+    while (hd < -Math.PI) hd += TAU;
+    glideH1 = glideH0 + hd;
+
+    var ax = glideX1 - glideX0, ay = glideY1 - glideY0;
+    glideLen = Math.sqrt(ax * ax + ay * ay);
+    glideDur = glideLen / ADV_DOCK_SPEED;
+    if (glideDur < ADV_DOCK_MIN) glideDur = ADV_DOCK_MIN;
+    else if (glideDur > ADV_DOCK_MAX) glideDur = ADV_DOCK_MAX;
+
+    glideOn = true;
+    glideP = 0;
+    applyGlide();
+    return glideDur;
+  }
+
+  /** Where along the path we are. js/adv.js's clock writes this every step. */
+  function setDoorGlide(p) {
+    if (!glideOn) return false;
+    glideP = p < 0 ? 0 : (p > 1 ? 1 : p);
+    return true;
+  }
+
+  /** Hand the machine back. It is left exactly where the path put it. */
+  function endDoorGlide() {
+    if (!glideOn) return false;
+    glideOn = false;
+    dvx = 0; dvy = 0;
+    speed = 0;
+    vx = 0;
+    return true;
+  }
+
+  /** True while the lift, and not the player, is moving the machine. */
+  function isDoorGliding() { return glideOn; }
+
+  /** Position, heading and the velocity the rest of the game reads off us. */
+  function applyGlide() {
+    var e = trapPos(glideP);
+    x = glideX0 + (glideX1 - glideX0) * e;
+    y = glideY0 + (glideY1 - glideY0) * e;
+    heading = glideH0 + (glideH1 - glideH0) * e;
+    if (heading > Math.PI) heading -= TAU; else if (heading < -Math.PI) heading += TAU;
+
+    /* REPORTED VELOCITY IS REAL, and it has to be: js/camera.js's lead, the
+     * engine note in js/sound.js and the tread scroll below all read it, and a
+     * machine that slid a screen's worth with all three saying "stopped" is the
+     * difference between being driven in and being placed there. It is analytic
+     * — the profile's own derivative — so no dt is needed and no step can drift. */
+    var sp = glideLen > 0 ? trapVel(glideP) * glideLen / glideDur : 0;
+    var ax = glideX1 - glideX0, ay = glideY1 - glideY0;
+    if (glideLen > 0.0001) { ax /= glideLen; ay /= glideLen; } else { ax = 0; ay = 0; }
+    dvx = ax * sp; dvy = ay * sp;
+    speed = sp;
+    vx = dvx;
+  }
+
+  /**
+   * One step of a scripted move. The drive model does not run at all — there is
+   * no stick to read, no heading to solve and no thrust budget to spend — and
+   * neither does the cut: the machine is crossing a carved chamber, and a bit
+   * left running in here would chew the doorway it is being parked in. What DOES
+   * run is everything that makes it look alive (the treads, the auger, the
+   * exhaust) and its handover to js/particles.js, because the machine is still
+   * visibly in the world and should still shove what it drives past.
+   */
+  function advGlideStep(dt) {
+    applyGlide();
+    stalled = false;
+    cutting = false;
+    var kLoad = 1 - Math.exp(-ADV_LOAD_LERP * dt);
+    advLoad -= advLoad * kLoad;
+    resistance -= resistance * kLoad;
+    blockedMat = -1;
+    blockedHard = 0;
+    driveBurn = 0;
+    var fx = Math.sin(heading), fy = -Math.cos(heading);
+    advPushToParticles(dt, fx, fy);
+    animateMachinery(dt, 0);
+  }
+
   /* WHERE THE DOORS ARE. js/advterrain.js is asked FIRST and js/adv.js second, and
    * that order is deliberate: the world module owns the geometry (it carved the
    * chamber), while adv.js's getters are aliases over the same answer. Asking the
@@ -746,6 +977,11 @@ SM.vehicle = (function () {
    * machine in there through a menu, which no geometry test could know — and
    * js/advterrain.js's chamber geometry is the fallback, so this file behaves
    * correctly whichever half of the seam has landed.
+   *
+   * NOTE WHAT THIS IS FALSE FOR: the whole of a DOCKING. adv.js only sets the
+   * flag once the manoeuvre has parked the machine and shut the doors, which is
+   * exactly what lets render() keep drawing it (fading, see getDoorFade) while
+   * the lift drives it in. "In the lift" is the end of the move, not the start.
    */
   function advInLift() {
     var v;
@@ -945,6 +1181,15 @@ SM.vehicle = (function () {
     /* ...and whether the machine is INSIDE THE LIFT, which suspends everything it
      * does to the world. See advInLift(). */
     inLift = advInLift();
+
+    /* --- 0. IS THE LIFT DRIVING? --------------------------------------
+     * Before anything else, because a scripted move is not a slower version of
+     * the drive model — it is INSTEAD OF it. Running blocks 1-5 and overwriting
+     * the result would still spend a fuel budget, still cut whatever the bit was
+     * pointing at and still let the wall clamps argue with a path that is already
+     * inside the chamber. See beginDoorGlide().
+     * ------------------------------------------------------------------ */
+    if (glideOn) { advGlideStep(dt); return; }
 
     /* --- 1. the stick ------------------------------------------------
      * SM.input.getMove() is a REUSED object. Copy the three numbers out now;
@@ -3127,7 +3372,20 @@ SM.vehicle = (function () {
      * parkAtDoor()      set the machine down just below THIS LEVEL'S doors,
      *                   stopped and facing down into the level. SM.adv.rideTo()
      *                   and SM.adv.enterMine() are the callers.
+     * parkInLift()      ...and its mirror: inside the doors, where the cage
+     *                   holds it while the door menu is up
      * renderPreview()   draw the current build into a garage transform
+     *
+     * --- THE DOOR GLIDE: the lift driving the machine --------------------
+     * beginDoorGlide(out)  take the machine. false docks it in from wherever the
+     *                   doorway caught it; true puts it in the cage and rolls it
+     *                   out to the park. RETURNS THE SECONDS the move wants, which
+     *                   is the caller's drive phase. A roll-out places the machine
+     *                   at the start of the path on the spot.
+     * setDoorGlide(p)   0..1 along that path. js/adv.js owns the clock; this file
+     *                   owns the shape. Safe to call before the next step.
+     * endDoorGlide()    hand it back, stopped, wherever the path left it
+     * isDoorGliding()   true while the lift, not the player, is moving it
      * ---------------------------------------------------------------- */
     getHeading: function () { return heading; },
     getDrillX: getDrillX,
@@ -3146,6 +3404,11 @@ SM.vehicle = (function () {
     parkAtDoor: parkAtDoor,
     /* TRANSITIONAL ALIAS: js/adv.js prefers parkAtDoor and falls back to this. */
     parkAtStation: parkAtDoor,
+    parkInLift: parkInLift,
+    beginDoorGlide: beginDoorGlide,
+    setDoorGlide: setDoorGlide,
+    endDoorGlide: endDoorGlide,
+    isDoorGliding: isDoorGliding,
     renderPreview: renderPreview
   };
 })();

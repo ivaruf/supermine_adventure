@@ -290,7 +290,10 @@ SM.advterrain = (function () {
    *   trailing UP behind it) and then driven UP INTO the doorway, which is the
    *   owner's refinement — entering the lift is a manoeuvre, not a keypress. Park
    *   at ceiling + 600 leaves the tail 162 clear of the ceiling and the bit 69
-   *   clear of the floor, and the climb into the interior is 116 units.
+   *   clear of the floor. The manoeuvre itself starts 16 units above that park
+   *   (DOOR_CATCH) and ends at ceiling + 410, the cage's own park — by which
+   *   point the machine is at alpha 0, so the ore bed hanging past the chamber
+   *   floor from there is not something that can be on screen.
    *   it is 1280 WIDE (2 * DOOR_HW) so the whole EXIT_RADIUS boarding circle, and
    *   the hull at any heading inside it, is in the excavation.
    *   the DOORS are 470 x 430, wider than the widest hull and taller than the
@@ -320,6 +323,29 @@ SM.advterrain = (function () {
   var DOOR_IN_PAD_X = 70;      // ...from each jamb
   var DOOR_IN_TOP = 30;        // ...below the lintel
   var DOOR_IN_BOT = 46;        // ...above the threshold
+  /* THE CATCH — where the DOORWAY TAKES THE MACHINE OFF THE PLAYER.
+   *
+   * The interior box above is the answer to "is the machine IN the lift". It is
+   * not the answer to "has the machine started to go in", and the difference is
+   * the whole of js/adv.js's docking manoeuvre: at the interior line the machine
+   * is ALREADY at alpha 0 (see DOOR_FADE_H below — the two lines are 100 units
+   * apart by construction), so a takeover that began there would have nothing
+   * left to show and would read as the hard cut it is meant to replace.
+   *
+   * So the catch line is DOOR_CATCH further out, and it is set OUTSIDE the fade's
+   * own outer edge (DOOR_FADE_DEEP below) rather than on it: the 40 units between
+   * the two are a stretch where the machine is being driven by the lift and is
+   * still FULLY DRAWN, which is the frame that says "it is going IN" more clearly
+   * than any part of the move that follows it. The rest of the drive is the fade,
+   * and the fade is what says "it has gone in".
+   *
+   * THE PARK IS 16 UNITS OUTSIDE THIS LINE (js/vehicle.js's ADV_SPAWN_Y, 70 below
+   * the doorstep, against a catch at 54). That is the margin that keeps a machine
+   * which has just rolled out from being caught again before it has moved — and
+   * it does not need to be bigger, because the roll-out leaves it stopped and
+   * FACING DOWN: reaching the catch again means deliberately turning round and
+   * driving at the doors, which is exactly the input that should dock you. */
+  var DOOR_CATCH = 100;
   /* AND THE MACHINE SINKS IN RATHER THAN POPPING OUT OF EXISTENCE.
    *
    * The machine is about 560 units long (121 of bit ahead of centre, 438.7 of ore
@@ -328,16 +354,41 @@ SM.advterrain = (function () {
    * a few hundred units of ore bed is still hanging out of the door on the frame
    * it disappears. Screenshotted, that is exactly the pop it sounds like.
    *
-   * So the last 100 units of the approach are a FADE, and js/vehicle.js multiplies
-   * the machine's alpha by getDoorFade(). By the time the interior test flips, the
-   * machine is already at alpha 0 — so "nothing is drawn while in the lift" stays
-   * strictly true AND nothing vanishes. It is also the cheapest possible version:
-   * one globalAlpha on a transform that was already being built.
+   * So 100 units of the way in are a FADE, and js/vehicle.js multiplies the
+   * machine's alpha by getDoorFade(). By the time the lift has finished parking
+   * the machine, alpha is already 0 — so "nothing is drawn while in the lift"
+   * stays strictly true AND nothing vanishes. It is also the cheapest possible
+   * version: one globalAlpha on a transform that was already being built.
+   * DOOR_FADE_DEEP below is where the ramp ends and why it is not the same line
+   * the interior box is drawn at any more.
    *
    * FADE_X is the lateral ramp, so a machine driving PAST the doorway on its way
    * somewhere else does not flicker as it crosses the door's x range. */
   var DOOR_FADE_H = 100;
   var DOOR_FADE_X = 90;
+  /* HOW FAR PAST THE INTERIOR LINE THE FADE FINISHES.
+   *
+   * It used to finish exactly ON that line, because the line was where the
+   * machine stopped existing: cross it and js/vehicle.js drew nothing, so alpha
+   * had to be zero by then and there was nowhere further to put it.
+   *
+   * The docking manoeuvre moved the vanishing point. Being in the lift is now a
+   * flag the manoeuvre sets when it has finished PARKING the machine, deeper in
+   * (js/vehicle.js's ADV_DOCK_Y), so there are 74 more units of travel to spend
+   * and the ramp is no longer pinned to the line. Spending 40 of them buys the
+   * one thing the manoeuvre exists for: a stretch at the start of the drive-in
+   * where the machine is FULLY DRAWN and unmistakably moving into the doorway,
+   * rather than one that begins dissolving on the frame control is taken. Alpha
+   * still reaches 0 well before the machine is parked, so "nothing is drawn while
+   * in the lift" is as strictly true as it was.
+   *
+   * MEASURED against the leaves, because they are the other thing moving: at the
+   * frame the doors begin to close the machine is at ~50% and 34 units of clear
+   * air either side of the nearest leaf edge; it is at zero by the time they are
+   * a sixth shut. The machine is drawn OVER the panels (geometry pass, then the
+   * vehicle), so any overlap would read as driving in FRONT of a closing door —
+   * this is the number that keeps that from ever being on screen. */
+  var DOOR_FADE_DEEP = 40;
   /* PROXIMITY OPENS THEM, and the ramp is not decoration: a door that snapped
    * would read as a trigger, and the whole point of putting the lift in the
    * world is that walking up to it is a physical act. NEAR is a little outside
@@ -541,8 +592,11 @@ SM.advterrain = (function () {
 
   /* THE DOORS. Geometry derived from the band in setBand(); `doorOpen` is the
    * only animated state in this file and it is driven by machine proximity in
-   * update(), not by an event — see DOOR_NEAR. `doorArt` is the red level board,
-   * baked by readoutFor() the way a station's board was. */
+   * update(), not by an event — see DOOR_NEAR — EXCEPT while js/adv.js is docking
+   * or undocking the machine, which borrows the leaves through setDoorHold()
+   * because that manoeuvre is about ordering and proximity has no opinion about
+   * order. `doorArt` is the red level board, baked by readoutFor() the way a
+   * station's board was. */
   var doorCeilY = 0;              // the chamber's ceiling = the seal's inner face
   var doorCY = 0;                 // the chamber's centre
   var doorTopY = 0;               // the lintel
@@ -550,6 +604,7 @@ SM.advterrain = (function () {
   var doorSillY = 0;              // the THRESHOLD — what getDoorY() publishes
   var doorY = 0;                  // = doorSillY. Named for the getter it feeds.
   var doorOpen = 0;               // 0 shut .. 1 wide open
+  var doorHeld = false;           // ...and the lift, not proximity, is setting it
   var doorArt = null;
   var doorFlick = 1;              // last geometry-pass flicker, for renderLit()
   var headMix = 0;                // 0..1, how solidly the doorway occludes
@@ -848,10 +903,15 @@ SM.advterrain = (function () {
     doorSillY = doorTopY + DOOR_H;
     doorMidY = doorTopY + DOOR_H * 0.5;
     doorY = doorSillY;                 // the doorstep: see the DOOR_* note
-    /* OPEN, because the machine has just come out of them. Closing behind you as
-     * you drive off is the read we want; snapping shut the frame you arrive is
-     * not, and it is also not what happened. */
-    doorOpen = 1;
+    /* SHUT, because the cage has only just arrived and the machine is still in
+     * it. js/adv.js opens a band by UNDOCKING — the leaves part, the machine
+     * rolls out, and they close again behind it as it drives off — so the honest
+     * starting frame is a closed door with someone behind it. (This used to open
+     * at 1, from the build where a descent materialised the machine already
+     * outside; nothing between here and the first step can see the difference,
+     * because adv.js takes the leaves over in the same call.) */
+    doorOpen = 0;
+    doorHeld = false;
     /* The board quotes the DOORS' own depth rather than the level's stated one.
      * They differ by the seal and the lintel (about 5 m), and the number a sign
      * in the world shows has to agree with the DEPTH gauge standing under it —
@@ -946,6 +1006,23 @@ SM.advterrain = (function () {
   }
 
   /**
+   * HAS THE MACHINE STARTED TO GO IN? The same column as the interior, but its
+   * floor is DOOR_CATCH further out — see that tunable for why the two lines are
+   * not the same line and why this one is where it is.
+   *
+   * js/adv.js polls this instead of inDoorInterior() to decide when to take the
+   * machine off the player and DRIVE IT IN. The interior box keeps its old job
+   * unchanged: it is still the one answer to "is the machine in the lift", and
+   * the docking manoeuvre ends by putting the machine well inside it.
+   */
+  function inDoorThreshold(x, y) {
+    if (!bandN) return false;
+    var hw = DOOR_W * 0.5 - DOOR_IN_PAD_X;
+    if (x < -hw || x > hw) return false;
+    return y > doorTopY + DOOR_IN_TOP && y < doorSillY - DOOR_IN_BOT + DOOR_CATCH;
+  }
+
+  /**
    * HOW SOLID IS A MACHINE AT (x, y)? 1 out in the rock, 0 at the cage.
    *
    * The geometry lives here with the rest of the door, and js/vehicle.js just
@@ -959,7 +1036,7 @@ SM.advterrain = (function () {
     var hw = DOOR_W * 0.5 - DOOR_IN_PAD_X;
     var ax = x < 0 ? -x : x;
     var kx = clamp01((hw + DOOR_FADE_X - ax) / DOOR_FADE_X);
-    var ky = clamp01((y - (doorSillY - DOOR_IN_BOT)) / DOOR_FADE_H);
+    var ky = clamp01((y - (doorSillY - DOOR_IN_BOT - DOOR_FADE_DEEP)) / DOOR_FADE_H);
     return 1 - kx * (1 - ky);
   }
 
@@ -992,12 +1069,39 @@ SM.advterrain = (function () {
     if (!bandN) return;
     var dx = focusX(), dy = focusY() - doorY;
     var d = Math.sqrt(dx * dx + dy * dy);
-    var inside = machineInLift();
-    var t = inside ? 0 : clamp01((DOOR_FAR - d) / (DOOR_FAR - DOOR_NEAR));
-    var rate = inside ? DOOR_SHUT_LERP : DOOR_LERP;
-    doorOpen += (t - doorOpen) * (1 - Math.exp(-rate * dt));
+    /* PROXIMITY IS THE DEFAULT, NOT THE ONLY DRIVER. While js/adv.js is docking
+     * or undocking the machine it drives the leaves itself, because the ORDER of
+     * those two moves is the whole point of them — the doors must finish closing
+     * BEHIND a machine that has already driven in, and finish opening BEFORE one
+     * rolls out. A distance ramp cannot express "after"; it only knows "near".
+     * See setDoorHold(). */
+    if (!doorHeld) {
+      var inside = machineInLift();
+      var t = inside ? 0 : clamp01((DOOR_FAR - d) / (DOOR_FAR - DOOR_NEAR));
+      var rate = inside ? DOOR_SHUT_LERP : DOOR_LERP;
+      doorOpen += (t - doorOpen) * (1 - Math.exp(-rate * dt));
+    }
     var h = clamp01((HEAD_FAR - d) / (HEAD_FAR - HEAD_NEAR));
     headMix += (h - headMix) * (1 - Math.exp(-6 * dt));
+  }
+
+  /**
+   * HAND THE LEAVES TO THE LIFT, or take them back.
+   *
+   * `v` in 0..1 pins doorOpen to it and suspends the proximity ramp; anything
+   * else (null, -1) releases them. The holder is expected to hand over a value
+   * that STARTS at whatever the doors were already showing and to walk it from
+   * there, which is why this assigns rather than lerps: two easings stacked on
+   * one number is how a door ends up arriving late for its own animation.
+   *
+   * Releasing is safe at any value because the ramp resumes from wherever it is
+   * left — js/adv.js releases at each end of a transition, where the proximity
+   * answer and the held value already agree, so nothing jumps.
+   */
+  function setDoorHold(v) {
+    if (typeof v !== 'number' || !(v >= 0)) { doorHeld = false; return; }
+    doorHeld = true;
+    doorOpen = clamp01(v);
   }
 
   /* ======================================================================
@@ -2563,6 +2667,7 @@ SM.advterrain = (function () {
     needFill = false;
     doorArt = null;
     doorOpen = 0;
+    doorHeld = false;
   }
 
   /**
@@ -4057,8 +4162,18 @@ SM.advterrain = (function () {
     getDoorX: function () { return 0; },
     /** World y of the doors' centre: the point EXIT_RADIUS is measured from. */
     getDoorY: function () { return doorY; },
-    /** 0 shut .. 1 wide open. For the HUD, if it ever wants to say so. */
+    /** 0 shut .. 1 wide open. For the HUD, if it ever wants to say so — and for
+     *  js/adv.js, which reads the leaves' current position before it starts
+     *  walking them itself so a transition never begins with a jump. */
     getDoorOpen: function () { return doorOpen; },
+    /**
+     * PIN THE LEAVES (0..1) for the length of a docking or an undocking, or pass
+     * null/-1 to hand them back to the proximity ramp. js/adv.js is the only
+     * caller: the doors have to close AFTER the machine is in and open BEFORE it
+     * comes out, and "after" is not something a distance can say. See
+     * setDoorHold() for why it assigns rather than eases.
+     */
+    setDoorHold: setDoorHold,
     /**
      * IS THIS POINT INSIDE THE LIFT? The chamber region behind the door line, and
      * the ONE source of truth for it: js/adv.js's isInLift() and js/vehicle.js's
@@ -4067,9 +4182,21 @@ SM.advterrain = (function () {
      */
     inDoorInterior: inDoorInterior,
     /**
+     * HAS IT STARTED TO GO IN? The same column, caught DOOR_CATCH further out —
+     * this is what js/adv.js polls to take the machine over and drive it in, and
+     * it is deliberately NOT inDoorInterior(), which by then has nothing left to
+     * show. See DOOR_CATCH.
+     */
+    inDoorThreshold: inDoorThreshold,
+    /**
      * Alpha for a machine at (x, y): 1 in the rock, 0 in the cage, ramped across
      * the doorway. js/vehicle.js multiplies its render by this so driving into the
      * lift reads as sinking into it. See DOOR_FADE_H.
+     *
+     * IT IS ALSO WHAT MAKES THE DOCKING GLIDE READ. adv.js's manoeuvre is a
+     * straight line along this ramp, so the machine is fully drawn where the
+     * player lost control of it and gone by the time it is in the cage, with no
+     * second alpha channel anywhere and nothing to keep in step.
      */
     getDoorFade: getDoorFade,
     /** Current level index (1-based), or 0 when no mine is loaded. */

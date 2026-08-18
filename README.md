@@ -42,9 +42,11 @@ Upgrade → Unlock.**
 
 * Each **level** is its own sealed map. Deeper levels are wider, hotter and
   harder, and are bought one at a time.
-* The **lift** is a set of big doors at the top-centre of every level. Drive in
-  and the machine disappears into the cage; the door menu is the whole surface
-  loop — sell, refuel, ride to another level, or leave for the map.
+* The **lift** is a set of big doors at the top-centre of every level. Drive at
+  them and the lift takes the machine, pulls it in and shuts the doors behind
+  it; the door menu is then the whole surface loop — sell, refuel, ride to
+  another level, or leave for the map. Coming down, and arriving from a ride,
+  work the other way round: the doors open and you drive out into the rock.
 * The **workshop** sells eight categories of part across priced tiers. Every one
   of them shows up on the machine — a bought upgrade you cannot see is a bug by
   definition.

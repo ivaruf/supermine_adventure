@@ -377,6 +377,8 @@ SM.vehicle.getSpeed()           // world units / second
 SM.vehicle.getMiningPower()     // hardness points removed per second
 SM.vehicle.getCollectRadius() / getBladeWidth() / getBladeFrontY()
 SM.vehicle.getLateralSpeed() / getResistance() / getPartLevel(name)
+SM.vehicle.parkInLift()
+SM.vehicle.beginDoorGlide(out) / setDoorGlide(p) / endDoorGlide() / isDoorGliding()
 
 // the run
 SM.vehicle.getHeading()         // radians; 0 = -y, straight up the screen
@@ -457,7 +459,8 @@ SM.adv.getCash/getDay/getDepthM/getManifest/fragValue(matIndex)
 SM.adv.burnFuel(n) / addHeat(n) / damage(n, source) / offerCargo(matIndex)
 SM.adv.getPiles() / dump() / consumePile(i)
 SM.adv.buyRights/buyFuel/buyPart/buyRepair/buyLevel/sell
-SM.adv.getLevels() / getLevel() / rideTo(L) / getBoardable() / isInLift() / exitLift()
+SM.adv.getLevels() / getLevel() / rideTo(L) / getBoardable()
+SM.adv.isInLift() / isInTransit() / exitLift()
 SM.adv.sellAtDoor() / refuelAtDoor() / getDoorFuelQuote() / leaveToMap()
 ```
 
@@ -512,7 +515,8 @@ Payload shapes are exact. Anything that can fire more than a few times a second
 | `adv:day` | `{day}` | adv |
 | `adv:heat` | `{pct}` | adv |
 | `adv:damage` | `{integrity, source}` | adv |
-| `lift:bought` / `lift:ride` / `lift:entered` / `lift:exited` | see adv.js | adv |
+| `lift:bought` / `lift:ride` | see adv.js | adv |
+| `lift:docking` / `lift:entered` / `lift:undocking` / `lift:exited` | `{level, reason}` — see adv.js | adv |
 | `rail:bought` / `rail:deposit` / `rail:fuel` | see adv.js (dormant) | adv |
 | `drill:blocked` | `{x, y, matIndex, hardness, cap}` | vehicle |
 | `scan:contact` | `{matIndex, dist, bearing}` | scanner |
@@ -628,8 +632,8 @@ colours at runtime will not take effect.
 **The model:** each level is ITS OWN MAP, conceptually stacked; the lift is the
 ONLY way between levels; levels are **SEALED ABSOLUTELY** (no drill tier digs
 through, ever). The lift is BIG CLOSED DOORS at the level's TOP-CENTRE:
-approach → they open → the door menu (SELL / REFUEL / level list / MAP). Surface
-is UI only. L1 comes with the mining rights. Stranding drops the hold as a pile
+approach → they open → **drive in → the lift docks you** → the door menu (SELL /
+REFUEL / level list / MAP). Surface is UI only. L1 comes with the mining rights. Stranding drops the hold as a pile
 on that level. Levels can be hopped freely mid-run, hold intact. All levels are
 big; deeper = bigger (width grows with level index).
 
@@ -660,30 +664,60 @@ advterrain.beginLevel(mineDef, L)   activate band L: streaming clamped to the
 advterrain.getLevelBounds()   REUSED {level, topY, botY, halfW} — vehicle and
                      camera clamp against THIS, nothing else
 advterrain.getDoorX() / getDoorY()   door centre. The door-open animation is
-                     advterrain's own, driven by machine proximity; no event
+                     advterrain's own, driven by machine proximity; no event —
+                     EXCEPT while adv.js is docking or undocking, when it takes
+                     the leaves over through setDoorHold(v) (v<0 releases)
 advterrain.inDoorInterior(x, y)      the chamber behind the door line — the
-                     single geometric source of truth
+                     single geometric source of truth for BEING inside
+advterrain.inDoorThreshold(x, y)     ...and for STARTING to go in: the same
+                     column, DOOR_CATCH further out. This is what adv.js polls
+advterrain.getDoorFade(x, y)         the machine's alpha across the doorway;
+                     reaches 0 before the cage's park, not at the door line
 adv.getLevels()      LIVE band entries plus owned:bool
 adv.getLevel()       current level index (1-based)
-adv.rideTo(L)        mid-run, hold intact: beginLevel + parkAtDoor +
-                     camera.reset + lift:ride {from,to}
+adv.rideTo(L)        mid-run, hold intact: beginLevel + camera.reset +
+                     lift:ride {from,to}, then UNDOCKS at the far end
 adv.getBoardable()   current level index while inside the door circle
                      (EXIT_RADIUS about the door), else -1
-adv.isInLift()       true once the machine centre is inside; on entry emits
-                     lift:entered {level}, freezes driving, OPENS THE MENU.
-                     Proximity only opens the DOORS; the menu waits for entry
-adv.exitLift()       (= dismissing the menu) re-emerge just below the doors
+adv.isInLift()       the machine is IN the cage: hidden, undriveable, MENU UP.
+                     Set by the DOCKING manoeuvre, not by geometry. False for
+                     the whole of both manoeuvres and false on arrival
+adv.isInTransit()    the lift has the machine and the player does not
+adv.exitLift()       (= dismissing the menu) start the UNDOCKING; control comes
+                     back ~1.1 s later at the park below the doors
 adv.sellAtDoor()     banks hold + secured, rolls the day (the door IS surface
                      access). The results screen remains for STRAND only
 adv.leaveToMap()     teardown -> map state
-vehicle.parkAtDoor() spawn just below the doors, heading down; the FOUR-SIDE
+vehicle.parkAtDoor() set down just below the doors, heading down; the FOUR-SIDE
                      clamps from getLevelBounds() are the seal guarantee
-vehicle.render       draws NO machine while isInLift(). Doors slide closed
-                     behind an occupied lift; interior light in the seam
+vehicle.parkInLift() ...and its mirror, ADV_DOCK_Y INSIDE them — where the cage
+                     holds the machine while the menu is up
+vehicle.beginDoorGlide(out) / setDoorGlide(p) / endDoorGlide() / isDoorGliding()
+                     the scripted path. adv.js owns the clock, vehicle.js owns
+                     the shape, advterrain.js owns the leaves — one number each
+vehicle.render       draws NO machine while isInLift(), and fades it across the
+                     doorway before that. Doors slide closed behind an occupied
+                     lift; interior light in the seam
 ```
 
-Rides happen from inside and ARRIVE inside the destination lift with the menu
-up; `enterMine()` likewise — a run begins by stepping out of the lift.
+**ENTERING AND LEAVING ARE MANOEUVRES, NOT FLAGS.** Driving at the doors does not
+put you in the lift; it hands the machine to the lift, which then drives it in
+(~0.67 s, still drawn, fading as the doorway swallows it), shuts the leaves
+behind it from 55% of that drive, and only THEN hides it and opens the menu —
+about 0.87 s end to end. Dismissing the menu runs the mirror: the leaves part
+(0.38 s), the machine rolls out to the park (~0.73 s), control returns.
+
+**AND YOU ARRIVE OUTSIDE.** A descent and a ride both set the machine down IN
+the cage with the doors shut and then UNDOCK it, so a run opens — and a ride
+lands — with the doors opening, the machine driving out, and no menu at all. The
+menu is what ENTERING looks like. (Both used to arrive inside with the menu up,
+which meant every descent began with a panel to dismiss and every ride ended by
+re-asking the question the player had just answered.)
+
+While either manoeuvre runs the player has no control, the machine burns no
+fuel, and **the dry-tank strand timer is held** — the grace is 1.8 s and a
+manoeuvre is over half of it, so a player who limps into the doorway on fumes
+must not be stranded by the rescue that is already happening.
 
 ### Shipped amendments (verified)
 
@@ -696,7 +730,8 @@ up; `enterMine()` likewise — a run begins by stepping out of the lift.
 * `leaveToMap()` **banks anything aboard** on the way out — walking out of your
   own doorway must not destroy ore. `sellAtDoor()` refuses an empty sale so a day
   cannot be rolled for free. `escape()` survives, working, called by nothing.
-* You cannot strand INSIDE the lift (the dry timer pauses in the cage).
+* You cannot strand INSIDE the lift, nor DURING a docking or an undocking (the
+  dry timer pauses for all three).
 * Old saves load: company/rig/levels intact; in-band tunnels persist; tunnels
   that crossed a boundary seal over (accepted).
 

@@ -26,6 +26,19 @@
  *                                       |    | sellAtDoor()/refuelAtDoor() stay
  *                                       |      in the mine: the door IS the shop
  *                                       +-- leaveToMap() ------------> map
+ *
+ *   Inside MINE there is a second, smaller machine — the LIFT. It has three
+ *   states and the two moves between them are ANIMATED, about a second each:
+ *
+ *        driving  --catch--> DOCKING --> in the lift --OUT/ride--> UNDOCKING
+ *           ^                (drive in,  (hidden,      (doors open, |
+ *           |                 doors shut) menu up)      machine out)|
+ *           +-------------------------------------------------------+
+ *
+ *   A descent enters this diagram at UNDOCKING, not at "in the lift": the cage
+ *   brought you down, so the run opens by driving out of it. While either move
+ *   runs the player has no control, the machine is still drawn and still moving,
+ *   and the dry-tank timer is held — see "BEING IN THE LIFT".
  *                                       | strand()
  *                                     results   <-- STRAND ONLY now
  *                                       | sell() (banks the secured ledger)
@@ -96,15 +109,28 @@
  *                                                moved" — the results screen's
  *                                                beat AND the door sale's
  *   lift:bought   {i, price, mineId}          <- a level was bought
- *   lift:entered  {level, reason}             <- the machine drove INTO the cage
- *                                                (or arrived in one). It is
- *                                                hidden and parked from here
- *   lift:exited   {level}                     <- ...and rolled back out
+ *   lift:docking  {level, reason}             <- the doorway CAUGHT the machine.
+ *                                                Control is gone; it is driving
+ *                                                itself in and is still visible
+ *   lift:entered  {level, reason}             <- ...and it is now IN the cage,
+ *                                                doors shut, hidden, menu up.
+ *                                                reason: 'drive'
+ *   lift:undocking{level, reason}             <- the doors are opening and the
+ *                                                machine is about to roll out.
+ *                                                reason: 'menu'|'ride'|'descent'
+ *   lift:exited   {level, reason}             <- ...and it is out, stopped at the
+ *                                                park, under the player's hand
  *   lift:ride     {from, to}                  <- the lift moved between LEVEL
  *                                                MAPS, both 1-based. Emitted
  *                                                BEFORE the world swaps, so a
  *                                                presentation layer can put the
  *                                                screen to black over the seam
+ *
+ *   THE FOUR LIFT EVENTS BRACKET THE TWO MANOEUVRES, and the pairs are not
+ *   guaranteed to alternate: an ARRIVAL (a descent, or a ride's far end) emits
+ *   undocking/exited with nothing entered, because the machine came down in the
+ *   cage rather than driving into it. "Is the machine hidden?" is isInLift() and
+ *   nothing else; these say when that changed and why.
  *   rail:bought   {L, k, price, mineId}       <- a checkpoint was bought
  *   rail:fuel     {units, cost}               <- refuelled at a checkpoint
  *   rail:deposit  {value, units}              <- the hold was SECURED; the
@@ -128,11 +154,19 @@
  *   THE LIFT IS BIG CLOSED DOORS at the top-centre of the level, and it is a
  *   PLACE YOU ENTER. Proximity (getBoardable(), a circle of ADV.EXIT_RADIUS about
  *   advterrain.getDoorX/getDoorY) only makes the doors open. Driving INTO them
- *   puts the machine in the cage: it disappears, it cannot be driven, and THE
- *   DOOR MENU comes up — SELL the haul / REFUEL / OUT / the level list / MAP.
- *   See "BEING IN THE LIFT" below for the state, and note there is NO ARMING
- *   RULE on the door circle: the old one existed because the mouth extracted ON
- *   CONTACT, and the menu replaced auto-extraction with explicit verbs.
+ *   hands the machine to the lift, which DOCKS it — drives it the rest of the way
+ *   in, shuts the leaves behind it, and only then hides it and raises THE DOOR
+ *   MENU: SELL the haul / REFUEL / OUT / the level list / MAP. Dismissing the
+ *   menu UNDOCKS it, the same move backwards. See "BEING IN THE LIFT" below for
+ *   both, and note there is NO ARMING RULE on the door circle: the old one
+ *   existed because the mouth extracted ON CONTACT, and the menu replaced
+ *   auto-extraction with explicit verbs. (There is one on the CATCH, which is a
+ *   different line and a different question — see there.)
+ *
+ *   YOU ARRIVE OUTSIDE. A descent and a ride both put the machine down IN the
+ *   cage and then undock it, so a run opens — and a ride lands — with the doors
+ *   parting, the machine rolling out, and no menu at all. The menu is what
+ *   ENTERING looks like, and entering is something the player does on purpose.
  *
  *   THE DOOR IS SURFACE ACCESS. sellAtDoor() banks the hold (and the secured
  *   ledger) and rolls the day, exactly as a surface sale did; refuelAtDoor()
@@ -530,13 +564,52 @@ SM.adv = (function () {
    * length down is where a chamber would be carved anyway. */
   var DOOR_INSET_U = 90;
 
-  /* THE CAGE'S OWN FOOTPRINT, as a fraction of ADV.EXIT_RADIUS, for a build
-   * where js/advterrain.js cannot yet answer inDoorInterior(). Deliberately much
-   * smaller than the door circle: the circle is "the doors notice you and open",
-   * the interior is "you have driven INTO the lift and the doors close on you".
-   * Two different questions, and conflating them is what would make the menu
-   * open at arm's length. */
-  var LIFT_INTERIOR_K = 0.55;
+  /* THE CATCH'S OWN FOOTPRINT, as a fraction of ADV.EXIT_RADIUS, for a build
+   * where js/advterrain.js cannot yet answer inDoorThreshold(). Deliberately much
+   * smaller than the door circle, because they are two different questions: the
+   * circle is "the doors notice you and open", the catch is "you are going in,
+   * and the lift has you". Conflating them would take the machine off the player
+   * at arm's length from a door they were only driving past. */
+  var LIFT_CATCH_K = 0.75;
+
+  /* --- HOW LONG THE LIFT TAKES ------------------------------------------
+   * The machine's half of each move is js/vehicle.js's to time — it knows the
+   * distance and the cage's docking speed (ADV_DOCK_*), and it hands the answer
+   * back from beginDoorGlide(). These two are the LEAVES' half, and they are here
+   * because they are pacing, not geometry: how long the player watches the doors
+   * work is a decision about the beat of the game, and the beat belongs to the
+   * director.
+   *
+   * MEASURED AGAINST THE WHOLE MOVE, which is what the player experiences: a dock
+   * is a ~0.67 s drive plus SHUT, an undock is OPEN plus a ~0.73 s roll. Both land
+   * near 1.1 s — long enough to read as a mechanism operating, short enough that
+   * it never becomes the thing you are waiting for. Shutting is the slower of the
+   * two on purpose: doors closing on you is the beat that wants weight, doors
+   * opening in front of you is the one that wants to get out of the way. */
+  var DOCK_SHUT_S = 0.50;              // leaves closing behind a docked machine
+  var UNDOCK_OPEN_S = 0.38;            // ...and parting in front of one leaving
+  /* THE LEAVES START BEFORE THE MACHINE STOPS, and this number is measured, not
+   * chosen. The machine is invisible for the last stretch of its drive in — it
+   * has crossed advterrain's fade and the cage swallowed it (see getDoorFade) —
+   * and screenshotted, waiting for it to finish parking before starting the doors
+   * left about a quarter-second of LIT EMPTY DOORWAY in the middle of the move.
+   * That reads as the machine having been deleted, which is the exact thing this
+   * whole manoeuvre exists to stop. Starting the close at 55% of the drive puts
+   * the leaves in motion on the frame the machine goes, so what the eye follows
+   * is one continuous handover: something went in, and the doors are shutting on
+   * it. A real lift does the same thing the moment the car is clear.
+   *
+   * The SETTLE (the clank, the knock through the camera) is NOT moved with it —
+   * that fires when the machine actually stops, which by then is a sound coming
+   * from behind a half-closed door, exactly as it should be. */
+  var DOCK_SHUT_AT = 0.55;             // fraction of the drive-in the doors wait
+
+  /* THE SKIP, as a rising edge. See trSkipWanted() for why it cannot simply be
+   * "any input": the player is almost always still holding the key that drove
+   * them into the doors. The gap between the two thresholds is what makes a
+   * key-repeat or a trembling thumb on the stick not count as a press. */
+  var SKIP_QUIET = 0.18;               // below this, the input has gone quiet
+  var SKIP_PRESS = 0.55;               // ...and above this it is a fresh press
 
   function yOfDepth(m) {
     if (SM.advterrain && SM.advterrain.yOfDepth) {
@@ -793,45 +866,78 @@ SM.adv = (function () {
   function isAtDoor() { return getBoardable() >= 0; }
 
   /* =====================================================================
-   * BEING IN THE LIFT
+   * BEING IN THE LIFT — AND THE TWO MANOEUVRES EITHER SIDE OF IT
    * ---------------------------------------------------------------------
    * OWNER'S CALL, AND IT IS THE RIGHT ONE: you do not stand NEAR the lift, you
    * DRIVE INTO IT AND DISAPPEAR. Proximity only makes the doors open (that is
-   * advterrain's own animation, off getBoardable()); crossing into the cage is
-   * what puts you inside, hides the machine (js/vehicle.js reads isInLift()) and
-   * raises the door menu.
+   * advterrain's own animation, off the machine's distance); crossing the
+   * threshold is what puts you inside, hides the machine (js/vehicle.js reads
+   * isInLift()) and raises the door menu.
    *
-   * IT IS A STATE FLAG, NOT A PURE GEOMETRY TEST, and that is deliberate:
+   * THE MENU IS THE END OF A MOVE, NOT THE START OF ONE. That is the whole of
+   * the owner's second change, and it is why this section is a small state
+   * machine rather than a boolean:
    *
-   *   ARRIVING IS ENTERING. A descent and a ride both put the machine down in the
-   *   cage, so the run OPENS inside the lift with the menu up — which is a good
-   *   beat and it is also how the player learns the menu exists. A pure position
-   *   test could not distinguish that from "drove past the door".
+   *   DOCKING (dock -> lift:docking -> ... -> lift:entered). The doorway CATCHES
+   *   the machine (advterrain.inDoorThreshold — see DOOR_CATCH, it is a good deal
+   *   further out than the cage itself), control is taken, and the machine DRIVES
+   *   ITSELF the rest of the way in while the player watches; then the leaves
+   *   close behind it; and ONLY THEN is it in the lift and the menu up. Crossing
+   *   a line used to do all three on one frame, which read as the machine being
+   *   deleted and a panel appearing — a hard cut in a game that has no cuts.
    *
-   *   LEAVING HAS TO STICK. exitLift() re-places the machine with
-   *   vehicle.parkAtDoor(), whose offset belongs to js/vehicle.js and may well
-   *   still be inside the cage. So geometry cannot re-trigger until the machine
-   *   has been OUTSIDE the interior at least once (`liftArmed`) — the same
-   *   argument the old mouth-arming rule made, and this time it is load-bearing
-   *   rather than a trap, because entry here IS by contact.
+   *   UNDOCKING (undock -> lift:undocking -> ... -> lift:exited) is the same move
+   *   backwards, and it is the ONLY way a machine ever leaves the cage: the
+   *   leaves part, the machine rolls out to the park below the doors, and control
+   *   comes back. Dismissing the menu runs it. So does ARRIVING.
+   *
+   * ARRIVING IS NOT ENTERING ANY MORE — the owner's first change. A descent and a
+   * ride both used to set the machine down INSIDE the cage with the menu up, so
+   * every descent opened on a panel the player had to dismiss before they could
+   * drive, and every ride greeted them with the very menu they had just used to
+   * choose where to go. Both now ARRIVE OUTSIDE: the doors open, the machine
+   * rolls out, and the run is already running. The menu opens on ENTRY and on
+   * nothing else, which is also what makes it mean something.
+   *
+   * WHAT IS LEFT OF THE OLD ARMING RULE, and why it is still needed. Geometry
+   * cannot re-catch the machine until it has been outside the catch line at least
+   * once (`liftArmed`), or the frame after a roll-out would hand the player
+   * straight back to the menu they just dismissed. The roll-out ends at
+   * vehicle.js's park, 16 units clear of the catch (see advterrain's DOOR_CATCH),
+   * so that is one step and then the player is free — drive up and you dock
+   * again, which is exactly what driving up at a lift should do.
    *
    * WHILE INSIDE, THE MACHINE IS PARKED IN THE CAGE. update() re-parks it every
    * step and clears the stick, so it cannot be driven, cannot cut and cannot burn
    * fuel (isWorking() reads false with the stick cleared and the hull at rest).
-   * This does not fight js/vehicle.js: parkAtDoor() is that module's own verb for
-   * exactly this, and it is what the ride path calls.
+   * vehicle.parkInLift() is that module's own verb for it — the park it holds is
+   * INSIDE the doors rather than below them, which is what stops the camera, the
+   * headlight and the streaming window from lurching 190 units at the exact frame
+   * the menu opens and again at the frame it closes.
    * ================================================================== */
   var inLift = false;                  // the machine is inside the cage
   var liftArmed = false;               // ...and geometry may put it there again
   var evLiftIn = { level: 0, reason: '' };
-  var evLiftOut = { level: 0 };
+  var evLiftOut = { level: 0, reason: '' };
+  var evLiftMove = { level: 0, reason: '' };
 
-  /** Is (x, y) inside the CAGE — not merely in the door circle? */
-  function inDoorInterior(x, y) {
+  /* THERE IS NO inDoorInterior() HERE ANY MORE. This file used to ask it every
+   * step, because crossing that box WAS entering the lift. Entering is a
+   * manoeuvre now, started at the CATCH and finished by finishDock(), so the
+   * interior box has exactly one owner again — js/advterrain.js, which carved it
+   * — and this file no longer has an opinion about the geometry of being inside.
+   * isInLift() is the flag the manoeuvre sets, and that is the whole answer. */
+
+  /**
+   * HAS THE MACHINE STARTED TO GO IN? js/advterrain.js owns the answer, because
+   * it owns the doorway; the fallback is a circle about the doorstep, which is
+   * the same relationship the real geometry has to the boarding circle.
+   */
+  function inDoorThreshold(x, y) {
     var t = SM.advterrain;
-    if (t && t.inDoorInterior) return !!t.inDoorInterior(x, y);
+    if (t && t.inDoorThreshold) return !!t.inDoorThreshold(x, y);
     var dx = x - lvMouthX, dy = y - doorY();
-    var r = A.EXIT_RADIUS * LIFT_INTERIOR_K;
+    var r = A.EXIT_RADIUS * LIFT_CATCH_K;
     return dx * dx + dy * dy <= r * r;
   }
 
@@ -841,35 +947,286 @@ SM.adv = (function () {
   /** Either answer is "the door menu's verbs are legal here". */
   function atDoorOrInLift() { return inLift || getBoardable() >= 0; }
 
+  /* ---------------------------------------------------------------------
+   * THE TRANSITIONS
+   *
+   * ONE CLOCK, HERE. js/vehicle.js owns the machine's PATH and js/advterrain.js
+   * owns the LEAVES, and each of them takes a single number from this file every
+   * step — a 0..1 along the path, and a 0..1 of openness. Two easings on one
+   * timeline cannot drift apart, which is the failure this shape is chosen to
+   * make impossible: doors that finish closing before the machine is in, or a
+   * machine that rolls out through a door still opening.
+   *
+   * THE ORDER IS THE POINT. Docking is DRIVE then SHUT; undocking is OPEN then
+   * DRIVE. Everything else about the two moves is symmetric.
+   * ------------------------------------------------------------------ */
+  var TR_NONE = 0, TR_DOCK = 1, TR_UNDOCK = 2;
+  var trMode = TR_NONE;
+  var trT = 0;                         // seconds into the whole move
+  var trDrive = 0;                     // ...how much of it the machine's part is
+  var trDoors = 0;                     // ...and the leaves'
+  var trShutOn = false;                // the leaves have begun their half
+  var trLatched = false;               // ...and the machine has come to rest
+  var trFrom = 0;                      // door openness the leaves' half starts at
+  var trReason = '';
+  var trSkipArmed = false;             // a FRESH press may skip; a held key may not
+
+  /** True while the lift has the machine and the player does not. */
+  function isInTransit() { return state === 'mine' && trMode !== TR_NONE; }
+
+  /** Either answer is "the machine is the lift's, not the player's". */
+  function liftHoldsMachine() { return inLift || trMode !== TR_NONE; }
+
+  /* HOW LONG THE WHOLE MOVE IS. Docking OVERLAPS its two halves (see
+   * DOCK_SHUT_AT) so it is whichever of them finishes last; undocking is strictly
+   * sequential, because a machine must not start out through a door that is still
+   * opening. */
+  function trTotal() {
+    if (trMode === TR_DOCK) {
+      var shut = trDrive * DOCK_SHUT_AT + trDoors;
+      return shut > trDrive ? shut : trDrive;
+    }
+    return trDoors + trDrive;
+  }
+
+  /** Hand the leaves to js/advterrain.js, or take them back with `v` < 0. */
+  function holdDoors(v) {
+    var t = SM.advterrain;
+    if (t && t.setDoorHold) t.setDoorHold(v);
+  }
+
+  /** Whatever the doors are showing right now, so a phase never starts on a jump. */
+  function doorsNow() {
+    var t = SM.advterrain;
+    if (t && t.getDoorOpen) {
+      var v = t.getDoorOpen();
+      if (typeof v === 'number' && isFinite(v)) return v;
+    }
+    return 1;
+  }
+
   /**
-   * Step into the cage. Called by the drive-in test, by a ride's arrival and by
-   * a descent's — every one of which is genuinely "you are now in the lift".
+   * A TAP SKIPS IT, A LEAN DOES NOT. The player who is about to be docked is,
+   * nine times in ten, still holding the key that drove them in — so "any input
+   * ends the animation" would mean nobody ever sees it. What ends it is a FRESH
+   * press: the move has to see the input go quiet before it will accept one, and
+   * that is a rising edge on the one vector this game has, so it costs nothing
+   * and works identically for the keyboard and the thumbstick.
    */
-  function enterLift(reason) {
-    if (state !== 'mine' || inLift) return false;
-    inLift = true;
+  function trSkipWanted() {
+    var m = (SM.input && SM.input.getMoveMag) ? SM.input.getMoveMag() : 0;
+    if (!trSkipArmed) { if (m < SKIP_QUIET) trSkipArmed = true; return false; }
+    return m > SKIP_PRESS;
+  }
+
+  /** Put the machine in the cage and shut the leaves on it, with no clock yet. */
+  function armUndock() {
+    inLift = false;                    // ...it is about to be visibly outside
     liftArmed = false;
+    if (SM.vehicle && SM.vehicle.beginDoorGlide) {
+      trDrive = SM.vehicle.beginDoorGlide(true);
+    } else {
+      parkAtDoor();                    // no glide in this build: the old teleport
+      trDrive = 0;
+    }
+    holdDoors(0);
+  }
+
+  /**
+   * ROLL OUT: the leaves open, the machine drives out to the park, control comes
+   * back. The ONE way out of the cage — the menu's OUT plate, a ride's arrival
+   * and a descent's all run this, so leaving the lift is one move with one look
+   * however the player got here.
+   */
+  function startUndock(reason) {
+    trMode = TR_UNDOCK;
+    trT = 0;
+    trShutOn = false;
+    trLatched = false;
+    trDoors = UNDOCK_OPEN_S;
+    trReason = reason || '';
+    trFrom = 0;                        // shut: armUndock() just said so
+    trSkipArmed = false;
     if (SM.input && SM.input.clearStick) SM.input.clearStick();
-    parkAtDoor();
-    evLiftIn.level = runLevel;
-    evLiftIn.reason = reason || '';
-    SM.events.emit('lift:entered', evLiftIn);
+    evLiftMove.level = runLevel;
+    evLiftMove.reason = trReason;
+    SM.events.emit('lift:undocking', evLiftMove);
+    return true;
+  }
+
+  function beginUndock(reason) { armUndock(); return startUndock(reason); }
+
+  /**
+   * DOCK: the doorway has the machine, so drive it the rest of the way in and
+   * shut the leaves behind it. Only from open ground — a machine already in the
+   * lift, or already being moved by it, has nothing to dock.
+   */
+  function beginDock(reason) {
+    if (state !== 'mine' || inLift || trMode !== TR_NONE) return false;
+    trMode = TR_DOCK;
+    trT = 0;
+    trShutOn = false;
+    trLatched = false;
+    trDoors = DOCK_SHUT_S;
+    trReason = reason || '';
+    trSkipArmed = false;
+    if (SM.input && SM.input.clearStick) SM.input.clearStick();
+    if (SM.vehicle && SM.vehicle.beginDoorGlide) {
+      trDrive = SM.vehicle.beginDoorGlide(false);
+    } else {
+      trDrive = 0;
+    }
+    evLiftMove.level = runLevel;
+    evLiftMove.reason = trReason;
+    SM.events.emit('lift:docking', evLiftMove);
     return true;
   }
 
   /**
+   * One step of whichever move is running. Called from update() INSTEAD of the
+   * in-lift park and the catch test, because a transition is neither.
+   */
+  function stepTransit(dt) {
+    trT += dt;
+    if (trSkipWanted()) trT = trTotal();
+
+    var p;
+    if (trMode === TR_DOCK) {
+      /* THE MACHINE'S HALF. It runs to trDrive and then holds at the end of the
+       * path while the leaves catch up — the glide is idempotent at p = 1, so
+       * there is nothing to guard. */
+      setGlide(trT < trDrive ? trT / trDrive : 1);
+
+      /* IT IS IN: latch it. One clank, one small knock through the camera, and
+       * that is the whole of the "settle" — both are already in the game, both
+       * are already rate-limited, and neither needs a frame of its own. */
+      if (!trLatched && trT >= trDrive) {
+        trLatched = true;
+        if (SM.sound) {
+          SM.sound.play('impact', { variation: 0.05 });
+          SM.sound.play('clank', { variation: 0.12 });
+        }
+        if (SM.camera && SM.camera.shake) SM.camera.shake(5);
+      }
+
+      /* THE LEAVES' HALF, which started before that — see DOCK_SHUT_AT. `trFrom`
+       * is whatever they were showing when they were handed over, so a player who
+       * arrived before the doors had finished opening does not see them jump to
+       * wide before closing. */
+      var shutAt = trDrive * DOCK_SHUT_AT;
+      if (trT >= shutAt) {
+        if (!trShutOn) { trShutOn = true; trFrom = doorsNow(); }
+        p = trDoors > 0 ? (trT - shutAt) / trDoors : 1;
+        holdDoors(trFrom * (1 - easeShut(p)));
+      }
+      if (trT >= trTotal()) finishDock();
+      return;
+    }
+
+    // TR_UNDOCK: the leaves FIRST, then the machine. Strictly, in that order.
+    if (trT < trDoors) {
+      p = trDoors > 0 ? trT / trDoors : 1;
+      holdDoors(easeShut(p));
+      return;
+    }
+    if (!trShutOn) {
+      trShutOn = true;
+      /* THE LEAVES ARE HOME AND THE MACHINE IS COMING OUT. Pin them wide, then
+       * give them back to proximity in the same breath: from this frame the two
+       * agree — the machine is at the doorstep, so the distance ramp holds them
+       * exactly as open as this move just left them, and it closes them behind
+       * the player as they drive away without anyone having to decide to. */
+      holdDoors(1);
+      holdDoors(-1);
+      if (SM.sound) SM.sound.play('clank', { variation: 0.62 });
+    }
+    if (trDrive > 0 && trT < trTotal()) {
+      setGlide((trT - trDoors) / trDrive);
+      return;
+    }
+    finishUndock();
+  }
+
+  /** 0..1, eased at both ends: the leaves are heavy and they are on rails. */
+  function easeShut(p) {
+    if (p <= 0) return 0;
+    if (p >= 1) return 1;
+    return p * p * (3 - 2 * p);
+  }
+
+  function setGlide(p) {
+    if (SM.vehicle && SM.vehicle.setDoorGlide) SM.vehicle.setDoorGlide(p);
+  }
+
+  /** The machine is in the cage, the doors are shut: NOW it is in the lift. */
+  function finishDock() {
+    trMode = TR_NONE;
+    trShutOn = false;
+    trLatched = false;
+    if (SM.vehicle && SM.vehicle.endDoorGlide) SM.vehicle.endDoorGlide();
+    holdDoors(-1);                     // shut, and machineInLift() keeps them so
+    inLift = true;
+    liftArmed = false;
+    if (SM.input && SM.input.clearStick) SM.input.clearStick();
+    parkInLift();
+    evLiftIn.level = runLevel;
+    evLiftIn.reason = trReason;
+    SM.events.emit('lift:entered', evLiftIn);
+  }
+
+  /** The machine is out and stopped at the park: control goes back. */
+  function finishUndock() {
+    trMode = TR_NONE;
+    trShutOn = false;
+    trLatched = false;
+    setGlide(1);
+    if (SM.vehicle && SM.vehicle.endDoorGlide) SM.vehicle.endDoorGlide();
+    holdDoors(-1);
+    inLift = false;
+    liftArmed = false;                 // one step outside the catch and it arms
+    parkAtDoor();                      // stopped, square, facing the level
+    evLiftOut.level = runLevel;
+    evLiftOut.reason = trReason;
+    SM.events.emit('lift:exited', evLiftOut);
+  }
+
+  /**
+   * ABANDON whatever the lift was doing, quietly and with no completion event.
+   * teardownRun() and a fresh descent are the callers: a half-finished manoeuvre
+   * is run state, and run state does not survive the run. Nothing here can be
+   * saved or loaded mid-move — none of it is in the save record (js/save.js's
+   * schema has no machine position and no lift flag at all), so the only thing
+   * that has to be true is that the next run does not inherit it.
+   */
+  function cancelTransit() {
+    if (trMode === TR_NONE) return false;
+    trMode = TR_NONE;
+    trShutOn = false;
+    trLatched = false;
+    trT = 0;
+    if (SM.vehicle && SM.vehicle.endDoorGlide) SM.vehicle.endDoorGlide();
+    holdDoors(-1);
+    return true;
+  }
+
+  /* THERE IS NO enterLift() ANY MORE. There used to be — one call that set the
+   * flag, parked the machine and emitted `lift:entered` — and three callers used
+   * it as "and now you are in the lift": the drive-in test, a ride's arrival and
+   * a descent's. Two of those three are the thing the owner cut (you ARRIVE
+   * OUTSIDE now), and the third is the thing the owner wanted animated. What is
+   * left is finishDock(), which is the same body with the manoeuvre in front of
+   * it — so entering the lift has exactly one spelling, and it is a move. */
+
+  /**
    * ROLL OUT. The menu's OUT plate, and what dismissing the menu means — a
    * player who waves the panel away wants to be back in the rock, not standing
-   * in a lift with no controls.
+   * in a lift with no controls. It no longer teleports: it starts the undocking
+   * move and returns immediately, and the machine is back under the player's hand
+   * about a second later, when finishUndock() emits `lift:exited`.
    */
   function exitLift() {
-    if (state !== 'mine' || !inLift) return false;
-    inLift = false;
-    liftArmed = false;                 // leave the cage before it can re-take you
-    parkAtDoor();
-    evLiftOut.level = runLevel;
-    SM.events.emit('lift:exited', evLiftOut);
-    return true;
+    if (state !== 'mine' || !inLift || trMode !== TR_NONE) return false;
+    return beginUndock('menu');
   }
 
   /**
@@ -890,14 +1247,18 @@ SM.adv = (function () {
    */
   function rideTo(i) {
     if (state !== 'mine') return false;
-    /* RIDES HAPPEN FROM INSIDE THE CAGE. A caller that is merely parked in the
-     * doorway (a console, or a UI built before the lift became a place) steps in
-     * first rather than being refused — the machine is at the doors either way,
-     * and refusing would be pedantry about which frame it crossed the threshold. */
-    if (!inLift) {
-      if (getBoardable() < 0) return false;
-      enterLift('ride');
-    }
+    /* NOT MID-MANOEUVRE. The door menu is the only thing that offers a ride and
+     * it is not up during a docking, so this is a console/test guard — but it is
+     * a real one: a ride that started while the lift was still closing its doors
+     * would swap the world under a transition that is holding both the machine
+     * and the leaves. */
+    if (trMode !== TR_NONE) return false;
+    /* RIDES HAPPEN FROM THE DOORS. From INSIDE them normally, because that is
+     * where the menu is; a caller merely parked in the doorway (a console, or a
+     * UI built before the lift became a place) is taken at their word rather than
+     * refused — the machine is at the doors either way, and it arrives by rolling
+     * out of them regardless of which side of the threshold it left from. */
+    if (!inLift && getBoardable() < 0) return false;
     ensureLevels();
     i = Math.floor(i);
     if (!(i >= 1) || i > levels.length || !levels[i - 1].owned) return false;
@@ -910,17 +1271,20 @@ SM.adv = (function () {
     runLevel = i;
     beginLevel(i);
     parkAtDoor();
+    /* YOU ARRIVE OUTSIDE THE DESTINATION LIFT, and the cage puts you there. The
+     * doors on the new level are shut with the machine behind them; they open,
+     * it rolls out, and the run continues in the new rock with no panel in the
+     * way. THE PLAYER HAS JUST CHOSEN THIS LEVEL FROM THE MENU — greeting them
+     * with the same menu again is asking a question they have answered.
+     *
+     * ARMED BEFORE THE CAMERA RESET, because armUndock() is what puts the machine
+     * in the cage: reset onto the park it has not driven to yet and the first
+     * thing the new level does is a 190-unit camera slide. `lift:entered` is NOT
+     * re-announced — nothing entered anything; the ride's own `lift:ride` above
+     * says the cage moved, and `lift:exited` will say the machine is out. */
+    armUndock();
     if (SM.camera && SM.camera.reset) SM.camera.reset();
-    /* YOU ARRIVE INSIDE THE DESTINATION LIFT. The cage is the thing that moved,
-     * so the doors on the new level open onto the same machine in the same cage:
-     * the menu stays up, the machine stays hidden, and OUT is what puts you in
-     * the new rock. `lift:entered` is re-announced because it is a different
-     * lift on a different map, and both the HUD and the world want to know. */
-    inLift = true;
-    liftArmed = false;
-    evLiftIn.level = runLevel;
-    evLiftIn.reason = 'ride';
-    SM.events.emit('lift:entered', evLiftIn);
+    startUndock('ride');
     return true;
   }
 
@@ -954,6 +1318,14 @@ SM.adv = (function () {
     if (SM.vehicle.parkAtDoor) return !!SM.vehicle.parkAtDoor();
     if (SM.vehicle.parkAtStation) return !!SM.vehicle.parkAtStation();
     return false;
+  }
+
+  /** ...and inside it, which is where the cage holds it. Falls back to the
+   *  doorway park in a build without the verb: nothing is drawn either way, and
+   *  the only difference is where the camera and the headlight sit. */
+  function parkInLift() {
+    if (SM.vehicle && SM.vehicle.parkInLift) return !!SM.vehicle.parkInLift();
+    return parkAtDoor();
   }
 
   /* =====================================================================
@@ -1919,14 +2291,18 @@ SM.adv = (function () {
      * re-done against the real answer. Both are idempotent and neither touches
      * the rig sync or the hold. */
     parkAtDoor();
+    /* ...AND THEN THE CAGE, because a descent ARRIVES. The lift brought you down
+     * and it is still holding you: the doors are shut, the machine is behind
+     * them, and the run OPENS BY DRIVING OUT — which is the beat this used to
+     * skip. The old flow set inLift and put the door menu up on the first frame,
+     * so every descent began with a panel to dismiss after the player had already
+     * done all their preparing on the prep screen. The menu is for ENTERING now.
+     *
+     * BEFORE THE CAMERA RESET, so the reset lands on the cage and the roll-out is
+     * something the camera FOLLOWS rather than something it chases. */
+    armUndock();
     SM.camera.reset();
     SM.advterrain.reset();
-    /* THE RUN OPENS INSIDE THE LIFT. The cage brought you down, so it is where
-     * you are: the machine is hidden, the door menu is up, and the first thing a
-     * descent asks for is OUT. That is a better opening beat than materialising
-     * in a chamber, and it is how a player finds the menu without being told. */
-    inLift = true;
-    liftArmed = false;
     SM.effects.reset();
     SM.sound.reset();
     SM.input.reset();
@@ -1940,11 +2316,13 @@ SM.adv = (function () {
     evEntered.depth = def.depth || 0;
     evEntered.level = runLevel;      // ADDITION: which level map the lift opened on
     SM.events.emit('adv:entered', evEntered);
-    // ...and the machine is in the cage — announced AFTER adv:entered so a
-    // listener that rebuilds itself on a descent has already done so.
-    evLiftIn.level = runLevel;
-    evLiftIn.reason = 'descent';
-    SM.events.emit('lift:entered', evLiftIn);
+    /* ...and then the doors open and the machine drives out. Started AFTER
+     * adv:entered so a listener that rebuilds itself on a descent has already
+     * done so before it is told the lift is moving, and after clearPause()
+     * because the move is animated by the fixed step and a run that opened frozen
+     * would open on a shut door. There is no `lift:entered` on a descent any
+     * more: nothing entered anything. */
+    startUndock('descent');
 
     // Chrome comes up AFTER the state event, so an Agent-4 handler that opens
     // its own HUD off `adv:state` has already run and these are no-ops.
@@ -1966,7 +2344,10 @@ SM.adv = (function () {
   /** Close the mine down and hand the carve mask back to the save record. */
   function teardownRun() {
     clearPause();
-    // The cage does not follow you to the world map.
+    // The cage does not follow you to the world map — and neither does a
+    // half-finished manoeuvre. cancelTransit() hands the machine and the leaves
+    // back before the world under them is taken apart.
+    cancelTransit();
     inLift = false;
     liftArmed = false;
     var ms = mineRecord(runMineId);
@@ -2163,25 +2544,39 @@ SM.adv = (function () {
 
     runTime += dt;
 
-    /* --- THE LIFT: driving in, and being in ---------------------------
-     * Cheapest possible: one point-in-region test per step, and while inside,
-     * two assignments that keep the machine parked in the cage. Entry is by
-     * CONTACT (that is the whole feel of it — you drive into the doors and you
-     * are gone), so it needs the arming rule: the machine must have been outside
-     * the cage at least once since it was last put in one, or exitLift() would
-     * hand you straight back to the menu you just dismissed.
+    /* --- THE LIFT: driving in, being in, and the moves between ---------
+     * Three states and one point-in-region test per step. Entry is by CONTACT
+     * (that is the whole feel of it — you drive into the doors and the lift takes
+     * you), so it needs the arming rule: the machine must have been outside the
+     * CATCH at least once since the lift last had it, or the frame after a
+     * roll-out would start docking it again.
+     *
+     * A TRANSITION COMES FIRST because it is neither of the other two: the
+     * machine is out of the player's hands but still in the world, still drawn
+     * and still moving, and the test that would catch it is standing exactly
+     * where it is being driven.
      * ------------------------------------------------------------------ */
-    if (inLift) {
+    if (trMode !== TR_NONE) {
+      /* THE STICK IS CLEARED EVERY STEP, not just at the start. A thumb resting
+       * on the joystick would otherwise keep feeding a machine nobody is driving
+       * — and js/vehicle.js's glide ignores the stick anyway, so this is really
+       * about the fuel budget and about the stick being centred when control
+       * comes back. (A held KEY beats the stick and cannot be cleared from here;
+       * that is exactly why the docking is a scripted path and not an autopilot
+       * — see js/vehicle.js's ADV_DOCK_* note.) */
+      if (SM.input && SM.input.clearStick) SM.input.clearStick();
+      stepTransit(dt);
+    } else if (inLift) {
       /* PARKED, NOT PAUSED. Time passes, heat sheds, the world streams — the
        * machine simply cannot be driven, cut with or burn fuel while it is in a
        * cage. Clearing the stick each step is what stops a held joystick from
        * pouring drive input into a machine nobody can see. */
       if (SM.input && SM.input.clearStick) SM.input.clearStick();
-      parkAtDoor();
+      parkInLift();
     } else if (SM.vehicle) {
-      var inside = inDoorInterior(SM.vehicle.getX(), SM.vehicle.getY());
-      if (!liftArmed) { if (!inside) liftArmed = true; }
-      else if (inside) enterLift('drive');
+      var caught = inDoorThreshold(SM.vehicle.getX(), SM.vehicle.getY());
+      if (!liftArmed) { if (!caught) liftArmed = true; }
+      else if (caught) beginDock('drive');
     }
 
     /* --- depth ------------------------------------------------------- */
@@ -2227,7 +2622,12 @@ SM.adv = (function () {
      * come to rest and a bit that is not in rock. Anything else bills as normal,
      * so this cannot be exploited by feathering the stick — coasting still burns.
      * ------------------------------------------------------------------ */
-    if (isWorking()) {
+    /* ...AND A MACHINE THE LIFT IS MOVING BURNS NOTHING EITHER. isWorking() is a
+     * test on the hull's velocity, and during a docking the hull is very much
+     * moving — but none of that motion is the player's engine, it is the cage's.
+     * Billing it would charge the player fuel for being taken somewhere, which is
+     * the same argument that made idling free. */
+    if (isWorking() && trMode === TR_NONE) {
       var standing = rigNum('getIdleBurn', FALLBACK_IDLE_BURN)
                    + rigNum('getLightBurn', FALLBACK_LIGHT_BURN)
                    + rigNum('getCoolBurn', 0)
@@ -2290,8 +2690,14 @@ SM.adv = (function () {
      * works — so a dry tank in here is a decision to make, not a run to end. The
      * timer does not even start, which also means a player who limps into the
      * doors on fumes is safe the moment the doors close. (No soft-lock: with no
-     * money and no ore, MAP still leaves.) */
-    if (fuel <= 0 && !inLift) {
+     * money and no ore, MAP still leaves.)
+     *
+     * NOR MID-MANOEUVRE, and that one is not a nicety. The grace is 1.8 s and a
+     * transition is about 1.1 s of it, so a player who coasted into the doorway
+     * on the last of the tank could be stranded WHILE THE LIFT WAS PULLING THEM
+     * IN — losing the hold to a rescue that was already happening. The safe frame
+     * is the frame the doorway catches them, not the frame the doors finish. */
+    if (fuel <= 0 && !liftHoldsMachine()) {
       if (dryTimer < 0) dryTimer = 0;
       dryTimer += dt;
       // The machine is already limp — vehicle.js sees an empty tank — so this
@@ -2908,17 +3314,26 @@ SM.adv = (function () {
      *                 the prep screen AND the door menu. Does not move the
      *                 machine — ride to it.
      * rideTo(L)       change level map, hold intact, free. Only from the door
-     *                 circle. Emits lift:ride {from,to} BEFORE the swap.
+     *                 circle, and never mid-manoeuvre. Emits lift:ride {from,to}
+     *                 BEFORE the swap, and ARRIVES OUTSIDE the destination lift:
+     *                 the doors open and the machine rolls out, with no menu.
      * getBoardable()  this level's index while the machine is in the DOOR CIRCLE
      *                 (proximity — this is what makes advterrain's doors open),
      *                 else -1. No arming: the menu replaced auto-extraction.
      * isAtDoor()      the same question as a bool
-     * isInLift()      the machine has driven INTO the cage: it is hidden
-     *                 (js/vehicle.js reads this), it cannot be driven, and the
-     *                 DOOR MENU is up. True on arrival from a descent or a ride.
-     * exitLift()      roll out: re-park below the doors and give control back.
-     *                 Also what dismissing the door menu means.
-     * lift:entered {level, reason}  / lift:exited {level}   are the events
+     * isInLift()      the machine is IN the cage: hidden (js/vehicle.js reads
+     *                 this), undriveable, DOOR MENU up. False during both
+     *                 manoeuvres and false on arrival from a descent or a ride —
+     *                 those arrive OUTSIDE. This is the one flag the door menu
+     *                 polls, so it is also "should the menu be up".
+     * isInTransit()   the lift has the machine and the player does not: it is
+     *                 docking in or rolling out, ~1.1 s either way. Still drawn,
+     *                 still moving, no fuel, cannot strand.
+     * exitLift()      roll out: opens the doors, drives the machine to the park
+     *                 and gives control back about a second later. Returns
+     *                 immediately. Also what dismissing the door menu means.
+     * lift:docking / lift:entered / lift:undocking / lift:exited are the events;
+     *                 see the file header for what brackets what
      * getDoorX/Y()    door centre (aliases of getStationX/Y, which js/vehicle.js
      *                 already reads)
      * sellAtDoor()    bank hold + secured, roll the day, stay in the mine.
@@ -2939,6 +3354,7 @@ SM.adv = (function () {
     getBoardable: getBoardable,
     isAtDoor: isAtDoor,
     isInLift: isInLift,
+    isInTransit: isInTransit,
     exitLift: exitLift,
     getStationX: getStationX,
     getStationY: getStationY,

@@ -1021,10 +1021,14 @@ SM.advhud = (function () {
    * and not about the money.
    */
   /**
-   * ROLL OUT. adv.exitLift() re-places the machine below the doors and gives the
-   * stick back; the panel goes down with it. In a build where adv.js has no lift
-   * interior yet, this falls back to the old dismissal — the panel is an offer
-   * either way, and a player who waves it away wants to be drilling.
+   * ROLL OUT. adv.exitLift() opens the doors and drives the machine out to the
+   * park, handing the stick back about a second later; the panel goes down NOW,
+   * because the manoeuvre is the answer to the tap and nothing should be drawn
+   * over it. (adv.js emits `lift:undocking` in the same call, which takes the
+   * panel down on its own — this is belt and braces for a build where that event
+   * does not exist yet.) In a build where adv.js has no lift interior at all,
+   * this falls back to the old dismissal: the panel is an offer either way, and a
+   * player who waves it away wants to be drilling.
    */
   function onDoorOut() {
     var a = A();
@@ -1108,10 +1112,16 @@ SM.advhud = (function () {
      *
      * The owner's call, and it is the difference between a menu that pops at
      * arm's length and a lift you drive into: proximity only opens the doors
-     * (js/advterrain.js animates that off getBoardable()), and the panel waits
-     * for the machine to be IN the cage. adv.isInLift() is the flag; a build
-     * without it falls back to the door circle so this file still works against
-     * a half-landed seam. */
+     * (js/advterrain.js animates that off the machine's distance), and the panel
+     * waits for the machine to be IN the cage. adv.isInLift() is the flag; a
+     * build without it falls back to the door circle so this file still works
+     * against a half-landed seam.
+     *
+     * AND "IN THE CAGE" NOW MEANS "the docking manoeuvre finished". That flag is
+     * false for the whole second the lift spends driving the machine in, and
+     * false again from the frame it starts driving it out, so this poll raises
+     * the panel on the frame the doors finish closing and drops it on the frame
+     * they start to open — without knowing that either thing exists. */
     var at = -1;
     if (a.isInLift) at = a.isInLift() ? num(a.getLevel && a.getLevel(), 1) : -1;
     else at = num(a.getBoardable(), -1);
@@ -1418,6 +1428,23 @@ SM.advhud = (function () {
         liftSig = '';
         mapArmed = 0;
       });
+      /* LEAVING THE CAGE STARTS WHEN THE DOORS DO, not when the machine is out.
+       * `lift:undocking` is the frame the leaves begin to part, and the panel has
+       * to be gone by then — it is a menu about a lift you are no longer standing
+       * in, drawn over the one shot the manoeuvre exists to show. Waiting for the
+       * poll would leave it up for an eighth of a second of that second, which is
+       * exactly the frames the doors are opening in.
+       *
+       * `lift:exited` still clears too. The two are not redundant: an undocking
+       * can be abandoned (a strand, a teardown) without ever exiting, and an
+       * arrival exits without this file having seen an entry. Clearing on both is
+       * what makes either order safe. */
+      SM.events.on('lift:undocking', function () {
+        liftAt = -2;
+        liftSig = '';
+        mapArmed = 0;
+        hideLift();
+      });
       SM.events.on('lift:exited', function () {
         liftAt = -2;
         liftSig = '';
@@ -1485,13 +1512,13 @@ SM.advhud = (function () {
     // shaft. paintDrawer() runs AFTER last = {} above, so the write lands.
     drawerOpen = false;
     paintDrawer();
-    /* THE DOOR MENU STARTS THE RUN CLOSED — AND THEN OPENS BY ITSELF.
+    /* THE DOOR MENU STARTS THE RUN CLOSED — AND STAYS CLOSED.
      * -2 rather than -1 so the very first poll always registers as a change and
-     * the panel is painted from scratch. A descent LANDS in the doorway, so the
-     * first slow tick will raise the menu: that is deliberate now, and it is the
-     * difference between "levels are maps" and the old shaft — arriving somewhere
-     * should show you what the place offers. Driving off dismisses it; the cross
-     * dismisses it; it never blocks the stick.
+     * the panel is painted from scratch. A descent no longer lands in the cage:
+     * it lands IN IT and immediately drives OUT (js/adv.js undocks the arrival),
+     * so isInLift() is false from the first poll onward and the run opens on the
+     * rock rather than on a panel. The menu is what ENTERING the lift looks like,
+     * and the player has not entered anything yet.
      * liftOpen is forced true so the hideLift() below writes through the
      * freshly-cleared `last` cache instead of being guarded out. */
     liftAt = -2;

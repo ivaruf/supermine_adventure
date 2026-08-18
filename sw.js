@@ -53,7 +53,19 @@
 //         no save format and no module contract was touched. The bump is here
 //         because a cached client would otherwise keep serving the old icons,
 //         the old title and the old manifest forever.
-const VERSION = 'v2.1.0';
+// v2.2.0  THE LIFT IS A MANOEUVRE. Driving at the doors hands the machine to the
+//         lift, which drives it the rest of the way in, shuts the leaves behind
+//         it and only THEN opens the door menu; dismissing the menu runs the
+//         mirror. And a descent and a ride both ARRIVE OUTSIDE now — the doors
+//         open, the machine rolls out, and the run is already running, where
+//         both used to land inside the cage with a panel to dismiss. Touches
+//         adv.js (the clock and the state machine), vehicle.js (the scripted
+//         path), advterrain.js (the catch line, the fade depth, the held doors)
+//         and advhud.js (the panel drops on `lift:undocking`). No save format,
+//         no module load order and no asset changed, so the list below is
+//         unchanged; the bump is here because a cached client would otherwise
+//         keep the old flow forever.
+const VERSION = 'v2.2.0';
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 
