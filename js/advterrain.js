@@ -607,7 +607,9 @@ SM.advterrain = (function () {
   var doorHeld = false;           // ...and the lift, not proximity, is setting it
   var doorArt = null;
   var doorFlick = 1;              // last geometry-pass flicker, for renderLit()
-  var headMix = 0;                // 0..1, how solidly the doorway occludes
+  var headMix = 0;                // 0..1, the DISTANCE half of the head overlay
+                                  // (the other half is the machine's own fade —
+                                  // see headOcclusion(), which multiplies them)
 
   /* ----- focus override (diagnostics / scripted tests) ---------------- */
   var focusOn = false, focusFX = 0, focusFY = 0;
@@ -1040,6 +1042,41 @@ SM.advterrain = (function () {
     return 1 - kx * (1 - ky);
   }
 
+  /**
+   * HOW SOLIDLY THE DOORWAY IS DRAWN OVER THE MACHINE — the exact complement of
+   * how solidly the machine itself is drawn.
+   *
+   * THE BUG THIS EXISTS TO KILL. The head overlay used to ride distance alone
+   * (headMix), so it was at FULL strength whenever the machine was anywhere near
+   * the doors — including parked outside them, and including the whole roll-out.
+   * The threshold plate is a wide hazard-striped bar at the sill, and the parked
+   * machine's ore bed reaches 438 units UP past it into the doorway, so the bar
+   * was laid across a fully opaque machine: the hopper above it, the tracks below
+   * it, the machine apparently squeezing UNDER the building's floor lip instead of
+   * standing in its doorway. Owner-caught, and correct — a floor plate seen from
+   * above must never be in front of a vehicle standing on it.
+   *
+   * WHY THE COMPLEMENT AND NOT A DIRECTION TEST. The obvious fix is "occlude only
+   * while docking", or "only while the machine's centre is inside the sill". Both
+   * are a switch, and a switch on a bar this wide POPS: the machine crosses the
+   * sill at 86% opacity, so the plate would snap from fully over to fully under on
+   * one frame, in the middle of a move whose whole purpose is to have no seams.
+   *
+   * Tying the overlay to `1 - getDoorFade(machine)` instead makes the two exactly
+   * conjugate — the doorway closes over the machine precisely as fast as the
+   * machine dissolves into it, their alphas sum to 1 at every position, and the
+   * question "which is in front" simply stops having a wrong answer. It needs no
+   * state, no direction and no knowledge that a manoeuvre is running, so it is
+   * right going in, coming out, parked, and for a machine that never enters at all.
+   *
+   * `headMix` still multiplies it: that is the distance guard the emissive pass
+   * needs (this runs after the darkness composite, so an overlay drawn from across
+   * the level would be a bar of lit steel floating in the black). See HEAD_FAR.
+   */
+  function headOcclusion() {
+    return headMix * (1 - getDoorFade(focusX(), focusY()));
+  }
+
   /** Is the MACHINE in there? Feature-detected: js/adv.js's flag is authoritative
    *  once it exists (it owns the run state and may hold the machine in the lift
    *  through a menu), and the geometry test is the fallback that keeps this file
@@ -1061,9 +1098,11 @@ SM.advterrain = (function () {
    * where the doors are, and it is a RAMP rather than a threshold because a door
    * that snapped would read as a trigger firing instead of as a mechanism working.
    *
-   * `headMix` rides the same distance: it is how solidly the doorway's own
-   * structure is re-drawn over the machine in the emissive pass, which is what
-   * makes driving in read as passing INTO something. See HEAD_FAR.
+   * `headMix` rides the same distance, and it is HALF of how solidly the doorway's
+   * own structure is re-drawn over the machine in the emissive pass — the distance
+   * half, which keeps a lit bar of steel off the screen from across the level. The
+   * other half is the machine's own fade, and headOcclusion() is where the two
+   * meet. See HEAD_FAR.
    */
   function animateDoor(dt) {
     if (!bandN) return;
@@ -3630,11 +3669,17 @@ SM.advterrain = (function () {
    * Drawn TWICE per frame, at two different alphas, and that is the whole trick
    * behind driving into the lift. In the geometry pass (alpha 1) it is the frame,
    * darkening with the rock like everything else. In the EMISSIVE pass, which runs
-   * after the vehicle, it is re-laid at `headMix` over the top — so as the machine
-   * climbs into the doorway its tracks go BEHIND the threshold and its roof BEHIND
-   * the lintel, and it reads as passing into a structure rather than sliding across
-   * a picture of one. Without it the machine simply vanishes at the boundary, which
+   * after the vehicle, it is re-laid OVER the top — so as the machine climbs into
+   * the doorway its tracks go BEHIND the threshold and its roof BEHIND the lintel,
+   * and it reads as passing into a structure rather than sliding across a picture
+   * of one. Without it the machine simply vanishes at the boundary, which
    * screenshotted exactly as badly as it sounds.
+   *
+   * THE SECOND ALPHA IS headOcclusion(), NOT headMix, and the difference is a real
+   * bug: the overlay must fade OUT again as the machine comes back out of the
+   * doorway, or the threshold plate is laid across a solid machine parked in front
+   * of it. Read that function — the rule is one line and it is the only thing
+   * keeping this pass honest in both directions.
    *
    * One function so the overlay is provably the same door frame. Any asymmetry
    * between the two passes would show up as a bright ghost edge.
@@ -3736,8 +3781,11 @@ SM.advterrain = (function () {
 
     /* --- THE DOORWAY, OVER THE MACHINE -------------------------------
      * FIRST in this pass, so everything emissive below it still reads. This is the
-     * occlusion that makes driving into the lift a manoeuvre — see drawDoorHead. */
-    drawDoorHead(ctx, headMix);
+     * occlusion that makes driving into the lift a manoeuvre — see drawDoorHead —
+     * and it is drawn at exactly the strength the machine is NOT: see
+     * headOcclusion(), which is the whole reason a machine standing outside the
+     * doors is in front of them and one halfway in is behind them. */
+    drawDoorHead(ctx, headOcclusion());
 
     /* The spill out of the cage. One cached radial glow, scaled by how far open the
      * doors are, which is what turns the approach into an event: the light arrives
@@ -4020,7 +4068,11 @@ SM.advterrain = (function () {
     bandTopM: 0, bandBotM: 0, bandHalfW: 0,
     lvlTopY: 0, lvlBotY: 0, lvlHalfW: 0,
     doorX: 0, doorY: 0, doorOpen: 0, needFill: false,
-    doorTopY: 0, doorSillY: 0, inLift: false, headMix: 0
+    doorTopY: 0, doorSillY: 0, inLift: false, headMix: 0,
+    /* The alpha the doorway is actually laid over the machine at, and the
+     * machine's own alpha. They are conjugate by construction (headOcclusion),
+     * so a scripted test can assert the z-order without reading pixels. */
+    headOcc: 0, machineFade: 1
   };
   function getDebug() {
     var st = SM.particles.getStats();
@@ -4064,6 +4116,8 @@ SM.advterrain = (function () {
     dbg.doorTopY = doorTopY; dbg.doorSillY = doorSillY;
     dbg.inLift = bandN ? machineInLift() : false;
     dbg.headMix = headMix;
+    dbg.machineFade = bandN ? getDoorFade(focusX(), focusY()) : 1;
+    dbg.headOcc = bandN ? headOcclusion() : 0;
     return dbg;
   }
   function resetPeaks() {
