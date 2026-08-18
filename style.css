@@ -1552,7 +1552,20 @@ html, body {
 }
 
 /* ===========================================================================
- * START OVERLAY
+ * START OVERLAY — THE TITLE SCREEN
+ * ---------------------------------------------------------------------------
+ * The front door: a black shaft, a headlight sweeping across it, ore catching
+ * the edge of the light, and the wordmark in the middle of it. js/ui.js's
+ * buildTitle() builds the DOM; this section is the whole of the artwork. There
+ * are no images anywhere in it — the mark is eight divs, the beam is a
+ * clip-path, the rock is a repeating gradient.
+ *
+ * THE ANIMATION BUDGET IS THE ONE RULE HERE. Every keyframe below animates
+ * transform, opacity, filter or (on exactly one small element) box-shadow.
+ * Nothing animates a layout property, nothing runs on the main thread, and
+ * .sm-start-off pauses the lot — a dismissed overlay is opacity-0, not gone,
+ * and a sweeping beam nobody can see is battery burned 600 m underground while
+ * the player is trying to get a full hold back to the lift.
  * ======================================================================== */
 .sm-start {
   position: absolute;
@@ -1560,23 +1573,137 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(ellipse at center, rgba(6,8,12,0.55) 0%, rgba(2,3,5,0.92) 78%);
+  /* Two layers: a warm bloom hanging at the top where the light comes from,
+     over the black the rest of the game is painted on.
+
+     THE LOWER LAYER IS NEARLY OPAQUE, and that is a fix, not a preference. The
+     canvas keeps RENDERING behind all three simulation gates (see main.js), so
+     at boot there is a rig parked at the origin in an empty world, and the old
+     0.55-alpha centre left it showing straight through the wordmark as a ghost
+     machine. The title screen has its own machine — the mark — and two of them
+     on one screen is just muddle. */
+  background:
+    radial-gradient(115% 78% at 50% -12%, rgba(255, 176, 60, 0.12) 0%, rgba(255, 140, 20, 0) 62%),
+    radial-gradient(ellipse at center, rgba(5, 6, 9, 0.93) 0%, rgba(2, 3, 5, 0.985) 74%);
   pointer-events: auto;
   cursor: pointer;
   opacity: 1;
   transition: opacity 0.45s ease;
   z-index: 20;
+  overflow: hidden;             /* the sweep is deliberately bigger than the screen */
 }
 .sm-start-off { opacity: 0; pointer-events: none; }
 
+/* See the section header. This is not a nicety: showTitle()/hideTitle() only
+   fade the overlay, so without it every animation on this screen keeps running
+   for the whole session behind the mine.
+
+   SELECTED AS `.sm-start.sm-start-off` — both classes on the one element — for
+   a reason that cost a debugging round. `animation` is a SHORTHAND and setting
+   it resets animation-play-state to `running`. Every rule below sets that
+   shorthand, and at equal specificity the one further down the file wins, so a
+   plain `.sm-start-off .sm-start-go` was silently overturned by START's own
+   `animation:` a few hundred lines later. Measured paused, not assumed. */
+.sm-start.sm-start-off .sm-start-sweep,
+.sm-start.sm-start-off .sm-ore,
+.sm-start.sm-start-off .sm-start-sub,
+.sm-start.sm-start-off .sm-mark-beam,
+.sm-start.sm-start-off .sm-mark-gem,
+.sm-start.sm-start-off .sm-start-go { animation-play-state: paused; }
+
+/* --- the stage: everything behind the panel ---------------------------- */
+.sm-start-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* Decoration only. A tap here has to reach .sm-start's click handler, and
+     the whole overlay is one big start button. */
+  pointer-events: none;
+}
+
+/* THE HEADLIGHT SWEEP. A soft wedge pivoting about a point just above the top
+   edge, 19s out and 19s back: something with a lamp is moving around off frame.
+   It is one composited transform on one element — the cheapest possible way to
+   make a still screen feel like it is underground.
+
+   IT HAS TO STAY ALMOST INVISIBLE. The first pass ran it at 0.17 alpha with a
+   3px blur, and a hard-edged wedge that bright over black does not read as a
+   beam at all — it reads as a diagonal stripe painted across the title. Very
+   low alpha and a blur measured in tens of pixels is the whole difference
+   between atmosphere and a graphic. The pivot sits near the top edge on purpose
+   too: a wedge whose apex is far off screen arrives as a parallel band. */
+.sm-start-sweep {
+  position: absolute;
+  left: 50%;
+  top: -7vmax;
+  width: 66vmax;
+  height: 150vmax;
+  margin-left: -33vmax;
+  background: linear-gradient(180deg,
+    rgba(255, 226, 170, 0.11) 0%,
+    rgba(255, 176, 60, 0.05) 30%,
+    rgba(255, 140, 20, 0) 68%);
+  clip-path: polygon(46% 0, 54% 0, 100% 100%, 0 100%);
+  transform-origin: 50% 4%;
+  filter: blur(34px);
+  animation: sm-sweep 19s ease-in-out infinite alternate;
+}
+@keyframes sm-sweep {
+  from { transform: rotate(-15deg); }
+  to   { transform: rotate(15deg); }
+}
+
+/* ORE IN THE DARK. Seven specks near the edges of the frame — never in the
+   middle, where the wordmark lives — each twinkling once per cycle on its own
+   offset, so no two ever flash together and the field reads as depth rather
+   than as decoration. */
+.sm-start-field { position: absolute; inset: 0; }
+.sm-ore {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--sm-gold);
+  box-shadow: 0 0 11px 2px rgba(255, 194, 31, 0.5);
+  opacity: 0;
+  animation: sm-ore-twinkle 9s ease-in-out infinite;
+}
+@keyframes sm-ore-twinkle {
+  0%, 58%, 100% { opacity: 0;    transform: rotate(45deg) scale(0.45); }
+  70%           { opacity: 0.92; transform: rotate(45deg) scale(1); }
+  82%           { opacity: 0.10; transform: rotate(45deg) scale(0.7); }
+}
+.sm-ore-0 { left:  9%; top: 63%; animation-delay: 0s; }
+.sm-ore-1 { left: 17%; top: 32%; animation-delay: 3.1s; }
+.sm-ore-2 { left: 88%; top: 71%; animation-delay: 1.4s; }
+.sm-ore-3 { left: 79%; top: 26%; animation-delay: 5.6s; }
+.sm-ore-4 { left: 31%; top: 86%; animation-delay: 7.2s; }
+.sm-ore-5 { left: 67%; top: 89%; animation-delay: 4.3s; }
+/* One cold one. Gold is money in this game and cyan is the rare stuff; a field
+   of nothing but gold loses the "and something else is down here" note. */
+.sm-ore-6 {
+  left: 93%; top: 45%;
+  animation-delay: 2.2s;
+  background: var(--sm-cyan);
+  box-shadow: 0 0 11px 2px rgba(102, 226, 255, 0.5);
+}
+
 /* The menu is a real panel, vertically centred with a fixed rhythm, rather
    than a stack of margins that drifted apart as copy was added. `gap` on a
-   flex column keeps the spacing honest no matter which children exist. */
+   flex column keeps the spacing honest no matter which children exist.
+
+   --sm-mark IS DECLARED HERE, not on :root. Every breakpoint wants a different
+   size for the logo mark, and a custom property set on this element beats
+   anything the layout classes on #ui-root declare no matter how the specificity
+   falls — which is the trap the LAYOUT METRICS block at the top of this file
+   documents from the other direction. One place, one override per breakpoint. */
 .sm-start-inner {
+  --sm-mark: 144px;
+  position: relative;           /* over .sm-start-stage */
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 22px;
+  gap: 20px;
   width: min(880px, 92vw);
   max-height: 92vh;
   padding: 30px 26px;
@@ -1589,6 +1716,16 @@ html, body {
    of scrolling. Pin every direct child at its natural height and let the
    container's overflow do its job. */
 .sm-start-inner > * { flex: 0 0 auto; }
+
+/* Mark over wordmark by default; the short-screen rules turn this into a row so
+   a phone in landscape spends its 390px of height on the game's name instead of
+   on a stack. */
+.sm-start-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+}
 
 .sm-start-head { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 
@@ -1606,14 +1743,26 @@ html, body {
     0 0 110px rgba(255, 138, 31, 0.35),
     0 6px 0 rgba(0,0,0,0.7);
 }
+/* The gold line breathes, very slowly, and it is an OPACITY animation on one
+   element — the compositor handles it and the main thread never hears about it.
+   Animating the text-shadow instead would repaint a 90px glow every frame. */
+/* SUPERMINE / ADVENTURE IS ONE WORDMARK IN TWO LINES, so this has to scale with
+   the line above it. At the old 13px ceiling a 92px SUPERMINE had a caption
+   under it instead of a second half. The tracking is set so the two lines end up
+   close to the same measure. */
 .sm-start-sub {
   font-family: var(--sm-mono);
-  font-size: clamp(10px, 1.4vw, 13px);
+  font-size: clamp(11px, 2.3vw, 23px);
   font-weight: 800;
-  letter-spacing: 6px;
-  text-indent: 6px;
+  letter-spacing: clamp(4px, 1.2vw, 13px);
+  text-indent: clamp(4px, 1.2vw, 13px);
   color: var(--sm-gold);
   text-shadow: 0 0 16px rgba(255, 194, 31, 0.6);
+  animation: sm-sub-breathe 6.5s ease-in-out infinite;
+}
+@keyframes sm-sub-breathe {
+  0%, 100% { opacity: 0.78; }
+  50%      { opacity: 1; }
 }
 
 .sm-start-pick {
@@ -1622,7 +1771,222 @@ html, body {
   font-weight: 800;
   letter-spacing: 5px;
   text-indent: 5px;
+  color: var(--sm-dim);
+}
+
+/* The loop, in one line, under the button. Deliberately the dimmest thing on
+   the screen: it is there for the player who stops to read, not for the one
+   who already knows what they came for. */
+/* No max-width: `ch` does not know about letter-spacing, so 52ch measured 310px
+   for a 386px line and wrapped "TO THE LIFT" onto its own row. The panel's own
+   width is the constraint, and on a narrow phone wrapping here is fine. */
+.sm-start-tag {
+  font-family: var(--sm-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.7;
+  letter-spacing: 2.4px;
+  text-indent: 2.4px;
   color: var(--sm-dimmer);
+  /* Progressive enhancement: where it is supported this breaks the line into
+     two even halves instead of leaving "THE LIFT" orphaned under the centre.
+     Where it is not, the line wraps normally and nothing is lost. */
+  text-wrap: balance;
+}
+
+/* --- START ------------------------------------------------------------
+ * THE GOLD PLATE AND THE HAZARD STRIPE ARE NOT SET HERE. Every button in the
+ * campaign already wears them — `.sm-adv .sm-btn:not(.sm-iconbtn)` in
+ * style-adventure.css, which is the documented default for the whole mode and
+ * outranks anything this file says. START gets it for free by being a .sm-btn,
+ * and that is the right answer: the front door should be made of the same metal
+ * as every other control in the game. Do not restate the colours here — a
+ * second copy of the treatment is a second thing to keep in sync, and it would
+ * lose anyway.
+ *
+ * What is left is this button's own job:
+ *   * `width: auto` undoes .sm-btn-big's `width: 100%`, which was written for a
+ *     340px mode card and stretches to the full 880px panel in here;
+ *   * size and tracking, because START is the one word on the screen that has
+ *     to be found without reading;
+ *   * the glow — the ONE box-shadow animation on this title screen. It repaints
+ *     a 320px button and nothing else, and it is what says "press this" without
+ *     spending a line of copy on it.
+ *
+ * SELECTED AS `.sm-btn.sm-start-go`, AND THE BREAKPOINTS REPEAT THE PAIR.
+ * `.sm-compact .sm-btn:not(.sm-iconbtn)` and its `.sm-tiny` twin set
+ * `min-width: 62px` / `52px` for the small square-ish controls in the mine, and
+ * they are three-class selectors: a bare `.sm-start-go` loses to them and START
+ * collapsed to a 52px stub on a phone. Measured, not guessed. */
+.sm-btn.sm-start-go {
+  width: auto;
+  min-width: min(320px, 74vw);
+  margin-top: 2px;
+  font-size: 15px;
+  letter-spacing: 5px;
+  text-indent: 5px;
+  animation: sm-start-glow 3.6s ease-in-out infinite;
+}
+@keyframes sm-start-glow {
+  0%, 100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.45),
+      inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+      0 6px 18px rgba(0, 0, 0, 0.55);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.45),
+      inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+      0 6px 18px rgba(0, 0, 0, 0.55),
+      0 0 30px rgba(255, 194, 31, 0.42);
+  }
+}
+
+/* ===========================================================================
+ * THE MARK — the app icon, in eight divs
+ * ---------------------------------------------------------------------------
+ * icons/*.png and this are the same drawing, and tools/make-icons.py is the
+ * other half of it: a small tracked rig at the top of a black shaft, its
+ * headlight falling away into strata, gold and cyan deposits catching the edge
+ * of the beam. EDIT THEM TOGETHER — if the tile on the home screen and the mark
+ * on the title screen ever stop being the same object, this is why.
+ *
+ * Every dimension inside is a PERCENTAGE of the mark, so one custom property
+ * (--sm-mark, on .sm-start-inner) resizes the whole assembly and no breakpoint
+ * has to know what is inside it.
+ * ======================================================================== */
+.sm-mark {
+  position: relative;
+  width: var(--sm-mark);
+  height: var(--sm-mark);
+  flex: 0 0 auto;
+  border-radius: 23%;
+  overflow: hidden;
+  /* Same gradient as the icon's background, ending on the same --sm-bg the
+     canvas is cleared to. */
+  background: linear-gradient(180deg, #191c22 0%, #101218 44%, var(--sm-bg) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 14px 32px rgba(0, 0, 0, 0.66);
+}
+
+/* The rock face, with strata. The repeating gradient's hairlines are the band
+   edges. The TOP layer is a black wash that gets heavier with depth, so the
+   bands fade out as they go down instead of ruling the whole panel edge to edge
+   — in the PNG the strata are only really visible where the beam reaches them,
+   and unmasked hairlines across a dark tile read as scan lines. */
+.sm-mark-rock {
+  position: absolute;
+  left: -8%; right: -8%; top: 50%; bottom: -6%;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.55) 62%, rgba(0, 0, 0, 0.9) 100%),
+    repeating-linear-gradient(180deg,
+      rgba(255, 255, 255, 0.05) 0 1.5px,
+      rgba(255, 255, 255, 0) 1.5px 21%),
+    linear-gradient(180deg, #16181e 0%, #0a0b0e 100%);
+}
+
+/* The headlight. A trapezoid out of the lamp, brightest at the source and
+   dissolving before it reaches the bottom edge — the beam ends by fading, never
+   by stopping, which is the whole feeling the game is after. */
+.sm-mark-beam {
+  position: absolute;
+  left: 0; right: 0; top: 45%; bottom: 0;
+  clip-path: polygon(37% 0, 63% 0, 94% 100%, 6% 100%);
+  background: linear-gradient(180deg,
+    rgba(255, 246, 214, 0.95) 0%,
+    rgba(255, 212, 132, 0.55) 22%,
+    rgba(255, 172, 56, 0.20) 50%,
+    rgba(255, 140, 20, 0) 84%);
+  animation: sm-mark-pulse 5.5s ease-in-out infinite;
+}
+/* The bottom of the tile goes black over everything — beam, gems and all. It is
+   the same statement the PNG makes with its falloff ramp: the light runs out
+   before the rock does. */
+.sm-mark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0) 58%, rgba(0, 0, 0, 0.55) 100%),
+    radial-gradient(120% 90% at 50% 34%, rgba(0, 0, 0, 0) 52%, rgba(0, 0, 0, 0.4) 100%);
+}
+@keyframes sm-mark-pulse {
+  0%, 100% { opacity: 0.86; }
+  50%      { opacity: 1; }
+}
+
+/* Deposits. They sit where the beam reaches them and brighten on their own
+   offsets — a filter animation, so nothing moves and nothing reflows. */
+.sm-mark-gem {
+  position: absolute;
+  width: 10%;
+  height: 10%;
+  border-radius: 12%;
+  transform: rotate(45deg);
+  background: var(--sm-gold);
+  box-shadow: 0 0 9px rgba(255, 194, 31, 0.75);
+  animation: sm-gem-glint 6s ease-in-out infinite;
+}
+.sm-mark-gem-a { left: 24%; top: 67%; }
+.sm-mark-gem-b {
+  left: 60%; top: 58%;
+  animation-delay: 2s;
+  background: var(--sm-cyan);
+  box-shadow: 0 0 9px rgba(102, 226, 255, 0.75);
+}
+.sm-mark-gem-c { left: 46%; top: 82%; width: 7%; height: 7%; animation-delay: 4s; }
+@keyframes sm-gem-glint {
+  0%, 100% { filter: brightness(0.62); }
+  50%      { filter: brightness(1.38); }
+}
+
+/* The rig. Hull, cyan viewport, amber band, lamp bar — and the two tracks as
+   its own pseudo-elements, because they are part of the machine and not two
+   objects parked either side of it. */
+.sm-mark-rig {
+  position: absolute;
+  left: 32%; top: 22%; width: 36%; height: 24%;
+  border-radius: 15%;
+  background: linear-gradient(180deg, #cfd8e3 0%, #9aa4b1 52%, #78828f 100%);
+  box-shadow: 0 0 0 2px #07090c;
+}
+.sm-mark-rig::before,
+.sm-mark-rig::after {
+  content: '';
+  position: absolute;
+  top: 3%;
+  height: 94%;
+  width: 30%;
+  border-radius: 22%;
+  background: repeating-linear-gradient(180deg,
+    #828d9a 0 13%, #16191f 13% 27%);
+  box-shadow: 0 0 0 2px #07090c;
+}
+.sm-mark-rig::before { left: -40%; }
+.sm-mark-rig::after  { right: -40%; }
+.sm-mark-eye {
+  position: absolute;
+  left: 27%; top: 12%; width: 46%; height: 27%;
+  border-radius: 22%;
+  background: #79dcff;
+  box-shadow: 0 0 0 2px #07090c;
+}
+.sm-mark-band {
+  position: absolute;
+  left: 0; right: 0; top: 50%; height: 20%;
+  background: linear-gradient(180deg, #ffc94d 0 26%, #e09a10 26%);
+}
+/* A SLIT, not a slab. At 15% of the hull it filled the machine's whole lower
+   half and the rig read as a face with a mouth. It only has to be bright. */
+.sm-mark-lamp {
+  position: absolute;
+  left: 15%; right: 15%; bottom: 7%; height: 10%;
+  border-radius: 2px;
+  background: #fff6d2;
+  box-shadow: 0 0 13px 3px rgba(255, 240, 200, 0.85);
 }
 
 /* --- mode cards ------------------------------------------------------- */
@@ -1762,19 +2126,22 @@ html, body {
 }
 
 /* Build stamp, pinned to the overlay rather than the panel so it cannot be
-   pushed around by however tall the copy happens to be. */
+   pushed around by however tall the copy happens to be — and so a scrolling
+   panel on a short phone never scrolls it out of reach of a bug report.
+   Written to by the service worker (setVersionTag), so it also has to survive
+   whatever the title screen looks like. */
 .sm-start-version {
   position: absolute;
-  bottom: 14px;
+  bottom: max(12px, env(safe-area-inset-bottom, 0px));
   left: 0;
   right: 0;
   text-align: center;
   font-family: var(--sm-mono);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 3px;
   text-indent: 3px;
-  color: rgba(255,255,255,0.22);
+  color: rgba(255, 255, 255, 0.20);
 }
 
 /* Freestyle: no countdown panel at all. The centred column closes the gap by
@@ -1831,9 +2198,17 @@ html, body {
   .sm-mode { flex: 0 0 auto; width: 100%; max-width: 380px; }
   .sm-mode-blurb { flex: 0 0 auto; }
 }
+/* A SHORT WINDOW IS NOT THE SAME QUESTION AS A SMALL ONE. 1200x540 is not
+   compact by ui.js's rules (900 wide, 520 tall) and still has no vertical room,
+   so the brand turns into a ROW here: mark beside the wordmark, one line
+   instead of a stack. The .sm-compact rules below repeat this for phones, which
+   need it for the same reason and cannot inherit it (a class on #ui-root
+   outranks a bare class in here). */
 @media (max-height: 560px) {
   .sm-start-logo { font-size: clamp(30px, 6vw, 52px); }
-  .sm-start-inner { gap: 12px; }
+  .sm-start-inner { gap: 12px; --sm-mark: 74px; }
+  .sm-start-brand { flex-direction: row; gap: 16px; }
+  .sm-start-tag { display: none; }
   .sm-mode-blurb { display: none; }   /* keep both cards fully on screen */
 }
 
@@ -1960,7 +2335,26 @@ html, body {
 /* Compact can be short-and-wide (1280x600) as well as narrow, so this only
    tightens the rhythm — the side-by-side/stacked decision is a width call and
    lives in the media query below. */
-.sm-compact .sm-start-inner { gap: 15px; padding: 18px 16px; }
+.sm-compact .sm-start-inner { gap: 14px; padding: 18px 16px; --sm-mark: 78px; }
+/* A PHONE IN LANDSCAPE has ~390px of height and the wordmark is the only thing
+   on this screen that has to be big. Mark beside it, tagline gone, START still
+   a full-size touch target. :not(.sm-portrait) because a portrait phone is
+   compact too and wants the exact opposite — see the portrait block. */
+.sm-compact:not(.sm-portrait) .sm-start-brand { flex-direction: row; gap: 16px; }
+.sm-compact:not(.sm-portrait) .sm-start-tag { display: none; }
+/* Restates padding and font-size because it is overriding the generic compact
+   .sm-btn rule a few lines above, which shrank both for the mine's controls. */
+.sm-compact .sm-btn.sm-start-go {
+  min-width: min(300px, 78vw);
+  min-height: 48px;
+  padding: 13px 20px;
+  font-size: 13px;
+  letter-spacing: 4px;
+  text-indent: 4px;
+}
+/* The sweep is sized in vmax, which on a landscape phone is the LONG edge — it
+   ended up wider than the screen and stopped reading as a beam. */
+.sm-compact .sm-start-sweep { width: 62vmin; margin-left: -31vmin; }
 .sm-compact .sm-mode { padding: 15px 16px 13px; gap: 5px; }
 .sm-compact .sm-mode-title { font-size: 19px; }
 .sm-compact .sm-mode-blurb { font-size: 9.5px; line-height: 1.55; }
@@ -1983,9 +2377,26 @@ html, body {
    still want the readouts small enough to leave the mine visible. */
 .sm-portrait .sm-debug { display: none; }
 
-/* At 390px the tagline's 6px tracking pushes it onto a second line, orphaning
-   "DEEPER." under the centre. Tighten it just enough to stay on one. */
-.sm-tiny .sm-start-sub { font-size: 9.5px; letter-spacing: 3px; text-indent: 3px; }
+/* THE TITLE SCREEN IS AT ITS BEST IN PORTRAIT and this is where it gets the
+   room to show it: the mark stays stacked above the wordmark, the tagline stays,
+   and the shaft runs the full height of the screen the way it does in play. */
+.sm-portrait .sm-start-inner { --sm-mark: 104px; gap: 18px; }
+.sm-portrait .sm-start-brand { flex-direction: column; gap: 15px; }
+.sm-portrait .sm-start-tag { display: block; }
+
+/* At 390px "ADVENTURE" at the vw-scaled size is thin enough to lose the second
+   half of the wordmark, so it gets a floor of its own — but a small one: 6px of
+   tracking here pushes it onto a second line. */
+.sm-tiny .sm-start-sub { font-size: 11px; letter-spacing: 4px; text-indent: 4px; }
+/* Same argument, one line down: 5px of tracking on "RUN A MINING COMPANY" wraps
+   at 390px, and a two-line positioning statement is not a positioning
+   statement. The mark comes down with it to keep the button above the fold. */
+.sm-tiny .sm-start-inner { --sm-mark: 88px; }
+/* ...except upright, where a phone has 844px of height and the mark is the
+   thing worth spending it on. Three classes, so it beats the line above. */
+.sm-tiny.sm-portrait .sm-start-inner { --sm-mark: 100px; }
+.sm-tiny .sm-start-pick { letter-spacing: 3px; text-indent: 3px; }
+.sm-tiny .sm-start-tag { font-size: 9px; letter-spacing: 1.6px; text-indent: 1.6px; }
 
 .sm-tiny {
   --sm-top-h: 34px;
@@ -1997,6 +2408,18 @@ html, body {
 .sm-tiny .sm-statrow { gap: 4px; }
 .sm-tiny .sm-card-grid { grid-template-columns: 1fr; }
 .sm-tiny .sm-btn:not(.sm-iconbtn) { min-width: 52px; padding: 9px 6px; font-size: 9px; letter-spacing: 0.6px; }
+/* AFTER the rule above, not before it — same three-class weight, so this only
+   wins by coming second. START is the only button on the narrowest screen the
+   game supports that has to be unmissable; everything else in here is a control
+   in a crowded mine and wants to be small. */
+.sm-tiny .sm-btn.sm-start-go {
+  min-width: min(280px, 84vw);
+  min-height: 48px;
+  padding: 13px 16px;
+  font-size: 12px;
+  letter-spacing: 3.4px;
+  text-indent: 3.4px;
+}
 .sm-tiny .sm-btn-svg { width: 17px; height: 17px; }
 .sm-tiny .sm-clock { padding: 4px 9px 6px; min-width: 96px; }
 .sm-tiny .sm-clock-label { display: none; }
@@ -2022,8 +2445,20 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .sm-pop, .sm-flash, .sm-od-label, .sm-banner-final .sm-banner-text,
   .sm-clock-urgent, .sm-clock-kick, .sm-rail-pop, .sm-hs-cta, .sm-hs-row-new,
-  .sm-zonecore {
+  .sm-zonecore,
+  /* The title screen is all theatre: the sweep, the twinkling ore, the beam's
+     pulse, the breathing subtitle and START's glow. Every one of them is
+     removed here and NOTHING is lost — the beam, the ore and the button are all
+     still fully visible, they just stop moving. */
+  .sm-start-sweep, .sm-start-sub, .sm-mark-beam, .sm-mark-gem, .sm-start-go {
     animation: none !important;
+  }
+  /* ...except the ore field, which is invisible between twinkles. With the
+     animation gone it has to be pinned ON, or seven deposits simply vanish. */
+  .sm-ore {
+    animation: none !important;
+    opacity: 0.8;
+    transform: rotate(45deg);
   }
   /* The steering pads still have to CONFIRM a press — that is feedback, not
      theatre — so they keep the state change and lose only the fade. */

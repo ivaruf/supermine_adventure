@@ -59,6 +59,12 @@ Plain ES5-style JavaScript on a single `SM` namespace, classic `<script>` tags
 no libraries. The engine simulates ~5 000 pooled particles with a spatial hash,
 sleeping, and pre-baked sprite atlases, and holds 120 fps in headless Chrome.
 
+The only art files in the repo are the three PWA icons, and they are generated,
+not drawn: `python3 tools/make-icons.py` redraws `icons/*.png` from the code in
+that script. It needs Pillow, it is run by hand, and it is **not** part of
+running or building the game — the title screen rebuilds the same mark out of
+CSS, so the two are meant to be edited together.
+
 See **`ARCHITECTURE.md`** for the module map, the load and init order, the event
 contract, the levels-as-maps contract and the performance budget. Read it before
 changing anything — several of the constraints in there are silent when broken.

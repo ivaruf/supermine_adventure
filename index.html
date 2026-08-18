@@ -5,11 +5,25 @@
 <title>SUPERMINE ADVENTURE</title>
 <!-- viewport-fit + user-scalable=no so touch dragging drives instead of zooming -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<!--
+  ONE BLACK, USED EVERYWHERE. #0b0a0d is the canvas clear colour in
+  js/main.js render(), --sm-bg in style.css, background_color and theme_color in
+  the manifest, and — deliberately — the exact bottom stop of the icon's own
+  background gradient in tools/make-icons.py. The launcher tile, the PWA splash,
+  the browser chrome and the deepest rock in the game are all the same colour, so
+  there is no seam anywhere between tapping the icon and driving the rig. Change
+  it in one place and you must change it in all five.
+-->
 <meta name="theme-color" content="#0b0a0d">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="SUPERMINE ADVENTURE">
+<!-- Home-screen label. Matches the manifest's short_name, and is short for the
+     same reason: iOS truncates at ~12 characters, and "SUPERMINE…" would be
+     indistinguishable from the original game sitting next to it. ADV is the
+     abbreviation this codebase already uses for the campaign everywhere
+     (SM.adv, advhud.js, style-adventure.css, the `sm-adv` root class). -->
+<meta name="apple-mobile-web-app-title" content="SUPERMINE ADV">
 <meta name="description" content="Run a mining company. Buy the rights, fuel up and drive a tracked excavation rig down through sealed levels of rock. Fill the hold, get back to the lift and sell before the tank runs dry.">
 
 <!--

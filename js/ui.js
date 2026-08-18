@@ -61,7 +61,7 @@ SM.ui = (function () {
    * config.js because config.js is frozen, and ui.js is the only module that
    * ever displays it. Replaced at runtime by whatever the SERVICE WORKER
    * reports — this is only the fallback for a file:// or first-visit load. */
-  var GAME_VERSION    = 'v2.0.0';
+  var GAME_VERSION    = 'v2.1.0';
 
   var C = SM.config;
 
@@ -121,47 +121,77 @@ SM.ui = (function () {
   }
 
   /* ---------------------------------------------------------------------
-   * THE TITLE GATE
+   * THE TITLE GATE — the front door of the game
    * ---------------------------------------------------------------------
-   * >>> TODO — SPLASH SCREEN GOES HERE. <<<
+   * A dark shaft, a headlight sweeping across it, ore catching the light, and
+   * the wordmark sitting in the middle of it. Everything is DOM and CSS: no
+   * images, no canvas, no JS animation loop — the sweep, the twinkles and the
+   * button's glow are CSS keyframes on transform/opacity/box-shadow, so this
+   * screen costs the compositor a few percent and the main thread nothing.
+   * The styling lives in the START OVERLAY section of style.css.
    *
-   * This is the placeholder. Everything between this comment and the end of
-   * buildTitle() is free to be replaced wholesale: a logo, artwork, a menu,
-   * whatever the branding pass wants. Only three things are load-bearing and
-   * must survive whatever replaces them:
+   * THREE THINGS HERE ARE LOAD-BEARING and the previous version of this
+   * function was commented to say so. They all survive, in the same shapes:
    *
-   *   1. `els.start` is the overlay node. showTitle()/hideTitle() fade it with
-   *      the `sm-start-off` class (style.css), so keep the class name or update
-   *      those two functions with it.
-   *   2. SOMETHING on the overlay must call beginAdventure() on a real user
-   *      gesture. That single call is what unlocks WebAudio, releases main.js's
-   *      simulation gate and opens the campaign. Binding it to the whole
-   *      overlay (as below) is fine; so is binding it to one button.
-   *   3. `els.update` and `els.version` must stay somewhere on this overlay —
-   *      the service worker writes to both. See the PWA section.
+   *   1. `els.start` is still the overlay node, still classed `sm-start`, and
+   *      showTitle()/hideTitle() still fade it with `sm-start-off`. Everything
+   *      decorative is a CHILD of it, so one class still dismisses the lot —
+   *      and style.css pauses every animation under `.sm-start-off`, because a
+   *      dismissed overlay is opacity-0, not gone, and a twinkling ore field
+   *      nobody can see is pure battery drain 600 m underground.
+   *   2. beginAdventure() is bound to the overlay itself AND to the START
+   *      button AND to Enter/Space (see onTitleKey). All three are real user
+   *      gestures, which is what unlocks WebAudio and releases main.js's
+   *      simulation gate; the function is idempotent, so the pairs of events a
+   *      single keystroke or tap can produce cost nothing.
+   *   3. `els.update` and `els.version` are still on this overlay and still
+   *      written to by the service-worker code at the bottom of this file.
    *
    * The overlay is REACHABLE AGAIN: leaving the campaign brings it back, so
-   * this is a title screen and not a one-shot boot splash. Do not assume it is
-   * built once and discarded.
+   * this is a title screen and not a one-shot boot splash. Nothing in here may
+   * assume it is built once and discarded.
    * ------------------------------------------------------------------ */
   function buildTitle() {
     els.start = el('div', 'sm-start', root);
+
+    /* --- the stage: everything behind the panel ------------------------
+     * Purely decorative and pointer-events:none, so a tap anywhere on it
+     * still lands on the overlay's own click handler and starts the game. */
+    var stage = el('div', 'sm-start-stage', els.start);
+    el('div', 'sm-start-sweep', stage);
+    var field = el('div', 'sm-start-field', stage);
+    for (var i = 0; i < 7; i++) el('i', 'sm-ore sm-ore-' + i, field);
+
     var sc = el('div', 'sm-start-inner', els.start);
 
-    var head = el('div', 'sm-start-head', sc);
+    var brand = el('div', 'sm-start-brand', sc);
+    buildMark(brand);
+
+    var head = el('div', 'sm-start-head', brand);
     el('div', 'sm-start-logo', head, 'SUPERMINE');
     el('div', 'sm-start-sub', head, 'ADVENTURE');
 
     el('div', 'sm-start-pick', sc, 'RUN A MINING COMPANY');
 
-    els.startBtn = el('button', 'sm-btn sm-btn-primary sm-btn-big', sc, 'START');
+    els.startBtn = el('button', 'sm-btn sm-btn-big sm-start-go', sc, 'START');
     els.startBtn.setAttribute('type', 'button');
 
+    /* NON-BREAKING SPACE BEFORE EACH SEPARATOR. This line wraps to two rows on
+     * a phone, and with ordinary spaces the wrap point landed in front of a
+     * "·", orphaning the bullet onto the head of the second line. Tying each
+     * separator to the word it follows means a break can only happen AFTER it,
+     * which is the only place it looks deliberate. */
+    el('div', 'sm-start-tag', sc,
+      'DIG DEEP · FILL THE HOLD · GET BACK TO THE LIFT');
+
+    /* Runs of spaces COLLAPSE in HTML, so the columns the old copy tried to set
+     * up with whitespace all closed up into one ragged line. Explicit
+     * separators, and caps, like every other label in the game. */
     var keys = el('div', 'sm-start-keys', sc);
     el('div', 'sm-keys-desk', keys,
-      'W A S D  ·  ARROWS  to drive      M  mute');
+      'W A S D / ARROWS — DRIVE   ·   M — MUTE   ·   ENTER — START');
     el('div', 'sm-keys-touch', keys,
-      'DRAG THE STICK TO DRIVE');
+      'DRAG ANYWHERE TO DRIVE');
 
     /* --- opt-in update, shown only when a new build is parked and waiting --- */
     els.update = el('button', 'sm-update', sc, 'UPDATE READY — TAP TO INSTALL');
@@ -180,6 +210,62 @@ SM.ui = (function () {
      * been taken down — which is how the campaign used to get opened twice. */
     els.start.addEventListener('click', beginAdventure);
     els.startBtn.addEventListener('click', beginAdventure);
+  }
+
+  /**
+   * THE MARK — the app icon, rebuilt out of eight divs.
+   *
+   * icons/*.png is the same drawing: a small tracked rig at the top of a black
+   * shaft with its headlight falling away into rock, gold and cyan deposits
+   * catching the edge of the beam. Redrawing it here rather than <img>-ing the
+   * PNG is not stubbornness — the icon is 512px of raster tuned for a launcher
+   * tile, this has to scale from 74px to 120px and animate, and the house rule
+   * is that everything visual is procedural. tools/make-icons.py is the other
+   * half of this identity; the two are meant to be edited together.
+   *
+   * Every dimension inside the mark is a PERCENTAGE of it, so the whole thing
+   * is driven by one custom property (`--sm-mark`) and the breakpoints resize
+   * it with a single declaration.
+   */
+  function buildMark(parent) {
+    var mark = el('div', 'sm-mark', parent);
+    mark.setAttribute('aria-hidden', 'true');
+
+    el('div', 'sm-mark-rock', mark);      // strata, below the light line
+    el('div', 'sm-mark-beam', mark);      // the headlight cone
+    el('i', 'sm-mark-gem sm-mark-gem-a', mark);
+    el('i', 'sm-mark-gem sm-mark-gem-b', mark);
+    el('i', 'sm-mark-gem sm-mark-gem-c', mark);
+
+    var rig = el('div', 'sm-mark-rig', mark);   // tracks are its ::before/::after
+    el('div', 'sm-mark-eye', rig);
+    el('div', 'sm-mark-band', rig);
+    el('div', 'sm-mark-lamp', rig);
+
+    return mark;
+  }
+
+  /**
+   * ENTER / SPACE starts the game.
+   *
+   * The overlay's own click handler is the canonical path; this exists so a
+   * desktop player never has to find the button with a mouse, and so the title
+   * answers a keyboard the same way every other menu in the game does.
+   *
+   * Two details that are not decoration:
+   *   * The UPDATE button is excluded. It is a real focusable button on this
+   *     overlay, and without this test tabbing to it and pressing Enter would
+   *     start the campaign instead of installing the build that is waiting.
+   *   * No double-fire guard is needed beyond beginAdventure()'s own
+   *     `if (!titleUp) return;` — a focused button turns the same keystroke
+   *     into a synthetic click, and the second call simply returns.
+   */
+  function onTitleKey(e) {
+    if (!titleUp || !e) return;
+    if (els.update && e.target === els.update) return;
+    var k = e.key;
+    if (k !== 'Enter' && k !== ' ' && k !== 'Spacebar') return;
+    beginAdventure(e);
   }
 
   /* =====================================================================
@@ -277,6 +363,10 @@ SM.ui = (function () {
       subscribed = true;
       window.addEventListener('resize', onResize, false);
       window.addEventListener('orientationchange', onResize, false);
+      /* Registered ONCE here rather than in buildTitle(), which build() could
+       * in principle run again — a second listener would be harmless (the call
+       * is idempotent) but this is the file's existing discipline. */
+      window.addEventListener('keydown', onTitleKey, false);
     }
     initPWA();
   }
