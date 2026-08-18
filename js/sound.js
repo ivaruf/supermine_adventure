@@ -1,13 +1,18 @@
 /* =============================================================================
- * SUPERMINE — js/sound.js                      [OWNER: Agent 3 — presentation]
+ * SUPERMINE ADVENTURE — js/sound.js
  * -----------------------------------------------------------------------------
  * A small procedural WebAudio engine. No assets, no network, no libraries.
  *
  * SIGNAL PATH
  *   engineBus ─┐
- *   grindBus  ─┤
- *   rhythmBus ─┼─> master (gain, muted here) ─> limiter (compressor) ─> out
+ *   grindBus  ─┼─> master (gain, muted here) ─> limiter (compressor) ─> out
  *   sfxBus    ─┘
+ *
+ * A FOURTH BUS USED TO HANG OFF MASTER: `rhythmBus`, feeding a 16th-note grid
+ * that thickened as a time-attack run escalated through its zones. It is gone
+ * with the zones, and so is the sustained overdrive layer that rode the engine
+ * bus. What is left is the excavation itself — the drone, the grinder, and the
+ * one-shots the rock makes — which is what a mine should sound like.
  *
  * WHY THE HOT EVENTS ONLY INCREMENT COUNTERS
  *   material:destroyed fires ~150x per step and resource:collected ~30x.
@@ -23,10 +28,8 @@
  *
  * Public API (contract)
  *   SM.sound.init() / update(dt) / reset()
- *   SM.sound.play(name, opts?)   'break' 'hit' 'collect' 'impact' 'gate'
- *                                'upgrade' 'clank' 'sparkle' 'boom' 'riser'
- *                                'complete' 'ui' 'timeplus' 'timelow' 'tick'
- *                                'timeout' 'boost'
+ *   SM.sound.play(name, opts?)   'break' 'crunch' 'hit' 'impact' 'clank'
+ *                                'collect' 'sparkle' 'ui'
  *   SM.sound.setMuted(b) / toggleMute() / isMuted()
  *
  * PAUSE
@@ -42,13 +45,12 @@ SM.sound = (function () {
   'use strict';
 
   /* =====================================================================
-   * Agent-3 tunables
+   * Tunables
    * ================================================================== */
   var ENGINE_BASE_HZ   = 46;
   var ENGINE_GAIN      = 0.075;
   var GRIND_GAIN       = 0.13;
   var SFX_GAIN         = 0.9;
-  var RHYTHM_GAIN      = 0.5;
 
   var VOICE_LIMIT      = 18;     // hard cap on concurrent one-shot voices
   var VOICE_LIMIT_SOFT = 12;     // above this, only "important" sounds get in
@@ -63,11 +65,9 @@ SM.sound = (function () {
   var ARP_NOTE_GAP     = 0.055;  // spacing of the staggered ladder in update()
 
   var BREAK_MIN_GAP    = 0.05;
-  var TICK_MIN_GAP     = 0.30;   // ui.js fires one tick per second under 10s
   var CRUNCH_MIN_GAP   = 0.16;
   var CRUNCH_THRESHOLD = 26;     // destroys per step that counts as a collapse
 
-  var RHYTHM_BPM       = 128;
   var GRIND_ATTACK     = 6.0;
   var GRIND_RELEASE    = 2.6;
 
@@ -78,7 +78,7 @@ SM.sound = (function () {
    * ================================================================== */
   var actx = null;
   var master = null, limiter = null;
-  var sfxBus = null, engineBus = null, grindBus = null, rhythmBus = null;
+  var sfxBus = null, engineBus = null, grindBus = null;
   var dead = false;              // audio permanently unavailable
 
   var muted = false;
@@ -106,13 +106,6 @@ SM.sound = (function () {
 
   var grindTarget = 0, grindLevel = 0;
   var arpIndex = 0, arpLast = -999, arpGate = 0;
-
-  var zoneLevel = 0;             // 0..4 escalating rhythmic intensity
-  var overdrive = 0, overdriveTarget = 0, overdriveLeft = 0;
-  var odOsc = null, odGain = null, odFilt = null;
-
-  var beatPos = 0;               // 16th-note counter
-  var lastBeat = -1;
 
   var subscribed = false;
 
@@ -143,12 +136,10 @@ SM.sound = (function () {
       sfxBus = actx.createGain();    sfxBus.gain.value = SFX_GAIN;    sfxBus.connect(master);
       engineBus = actx.createGain(); engineBus.gain.value = 1;        engineBus.connect(master);
       grindBus = actx.createGain();  grindBus.gain.value = 1;         grindBus.connect(master);
-      rhythmBus = actx.createGain(); rhythmBus.gain.value = RHYTHM_GAIN; rhythmBus.connect(master);
 
       buildNoise();
       buildEngine();
       buildGrinder();
-      buildOverdrive();
       unlocked = true;
       return true;
     } catch (e) {
@@ -241,23 +232,6 @@ SM.sound = (function () {
     try { grindSrc.start(); } catch (e) { /* ignore */ }
   }
 
-  /** Sustained overdrive intensity layer — a pulsing filtered saw. */
-  function buildOverdrive() {
-    odGain = actx.createGain();
-    odGain.gain.value = 0;
-    odFilt = actx.createBiquadFilter();
-    odFilt.type = 'bandpass';
-    odFilt.frequency.value = 500;
-    odFilt.Q.value = 2.5;
-    odOsc = actx.createOscillator();
-    odOsc.type = 'sawtooth';
-    odOsc.frequency.value = 82;
-    odOsc.connect(odFilt);
-    odFilt.connect(odGain);
-    odGain.connect(engineBus);
-    try { odOsc.start(); } catch (e) { /* ignore */ }
-  }
-
   /* =====================================================================
    * VOICE PRIMITIVES
    * ================================================================== */
@@ -344,17 +318,16 @@ SM.sound = (function () {
   function play(name, opts) {
     if (muted || !unlocked || !actx) return;
 
-    // The clock outranks the excavation: a +10s or a run-over stinger must
-    // never be swallowed by a torrent of debris voices.
-    var important = (name === 'upgrade' || name === 'boom' || name === 'riser' ||
-                     name === 'complete' || name === 'gate' || name === 'ui' ||
-                     name === 'timeplus' || name === 'timeout' || name === 'timelow' ||
-                     name === 'boost');
+    // THE INTERFACE OUTRANKS THE EXCAVATION. A menu blip that never sounded
+    // because the drill was chewing granite reads as a dead button, so 'ui'
+    // gets the full voice allowance and no rate limit. It is the only name
+    // left on this list — the others were the clock's ('+10s', the run-over
+    // stinger) and the gate ceremony's.
+    var important = (name === 'ui');
     if (!canVoice(important)) return;
 
     var minGap = C.SOUND_MIN_INTERVAL;
-    if (name === 'tick') minGap = TICK_MIN_GAP;
-    else if (name === 'break') minGap = BREAK_MIN_GAP;
+    if (name === 'break') minGap = BREAK_MIN_GAP;
     else if (name === 'collect') minGap = ARP_MIN_GAP;
     else if (name === 'hit') minGap = 0.09;
     else if (name === 'crunch') minGap = CRUNCH_MIN_GAP;
@@ -408,166 +381,21 @@ SM.sound = (function () {
         break;
       }
 
-      /* --- events ---------------------------------------------------- */
-      case 'gate':
-        tone(392, 784, 0.16, 0.16, 'square');
-        tone(587, 1175, 0.14, 0.10, 'triangle', 0.05);
-        noiseBurst(0.18, 1800, 1.0, 0.18);
-        break;
-
-      case 'upgrade': {
-        // Rising arpeggio + chord stack + whoosh + a low boom underneath.
-        var root = 220;
-        var seq = [0, 4, 7, 12, 16, 19, 24];
-        for (var i = 0; i < seq.length; i++) {
-          var f = root * Math.pow(2, seq[i] / 12);
-          tone(f, f * 1.005, 0.30, 0.10, i > 3 ? 'triangle' : 'sawtooth', i * 0.055);
-        }
-        tone(root * 0.5, root * 0.5, 0.9, 0.16, 'sawtooth', 0.05);
-        tone(root * 2, root * 3, 0.55, 0.09, 'triangle', 0.30);
-        noiseBurst(0.55, 1100, 0.6, 0.32, 'lowpass');
-        noiseBurst(0.9, 320, 0.5, 0.30, 'lowpass', 0.04);
-        tone(120, 48, 0.5, 0.26, 'sine');
-        break;
-      }
-
-      case 'boom':                     // explosive mining pulse
-        noiseBurst(0.55, 160, 0.5, 0.85, 'lowpass');
-        noiseBurst(0.28, 900, 0.8, 0.34);
-        tone(150, 32, 0.55, 0.42, 'sine');
-        tone(78, 28, 0.75, 0.30, 'triangle', 0.02);
-        break;
-
-      case 'boost': {
-        // The little brother of 'riser'. Same gesture — an upward sweep — in
-        // a third of the time and an octave lower, so when a boost block is
-        // taken during an overdrive the two are still telling you about two
-        // different things. Ends on one bright ping so it lands rather than
-        // trailing off; the sweep alone read as "something is charging up".
-        tone(150, 560, 0.36, 0.20, 'sawtooth');
-        tone(75, 280, 0.42, 0.13, 'square', 0.01);
-        noiseBurst(0.30, 1300, 1.3, 0.20, 'bandpass');
-        tone(932, 1245, 0.13, 0.10, 'triangle', 0.28);
-        break;
-      }
-
-      case 'riser': {                  // overdrive spin-up
-        if (!actx) break;
-        var o = actx.createOscillator();
-        var f2 = actx.createBiquadFilter();
-        var g2 = actx.createGain();
-        var t2 = actx.currentTime;
-        var dur = (opts && opts.duration) || 1.1;
-        o.type = 'sawtooth';
-        o.frequency.setValueAtTime(70, t2);
-        o.frequency.exponentialRampToValueAtTime(620, t2 + dur);
-        f2.type = 'bandpass'; f2.Q.value = 4;
-        f2.frequency.setValueAtTime(300, t2);
-        f2.frequency.exponentialRampToValueAtTime(4200, t2 + dur);
-        g2.gain.setValueAtTime(0.0001, t2);
-        g2.gain.exponentialRampToValueAtTime(0.26, t2 + dur * 0.85);
-        g2.gain.exponentialRampToValueAtTime(0.0008, t2 + dur + 0.18);
-        o.connect(f2); f2.connect(g2); g2.connect(sfxBus);
-        o.start(t2); o.stop(t2 + dur + 0.22);
-        countVoice(o);
-        noiseBurst(dur, 2600, 1.0, 0.14, 'highpass');
-        break;
-      }
-
-      case 'complete': {
-        var rt = 261.63;
-        var chord = [0, 4, 7, 12, 16, 19, 24, 28];
-        for (var j = 0; j < chord.length; j++) {
-          var ff = rt * Math.pow(2, chord[j] / 12);
-          tone(ff, ff, 1.5 - j * 0.08, 0.085, j > 4 ? 'sine' : 'triangle', j * 0.07);
-        }
-        tone(rt * 0.5, rt * 0.5, 1.9, 0.16, 'sawtooth');
-        noiseBurst(1.4, 500, 0.5, 0.28, 'lowpass');
-        break;
-      }
-
-      /* --- the clock ------------------------------------------------- */
-      case 'timeplus': {
-        // Bright rising fifth + octave shimmer: unmistakably a REWARD, and
-        // pitched well above the engine drone so it cuts through the grind.
-        var tb = 523.25;                       // C5
-        tone(tb, tb, 0.14, 0.17, 'triangle');
-        tone(tb * 1.5, tb * 1.5, 0.16, 0.13, 'triangle', 0.07);
-        tone(tb * 2, tb * 2.01, 0.34, 0.10, 'sine', 0.15);
-        tone(tb * 0.5, tb * 0.75, 0.38, 0.11, 'sawtooth', 0.02);
-        noiseBurst(0.12, 5400, 8, 0.09, 'bandpass', 0.14);
-        break;
-      }
-
-      case 'timelow':                  // one-shot alarm as the wire is crossed
-        tone(880, 880, 0.11, 0.17, 'square');
-        tone(880, 660, 0.15, 0.15, 'square', 0.16);
-        noiseBurst(0.08, 2600, 4, 0.10, 'bandpass');
-        break;
-
-      case 'tick':                     // per-second pip inside the last 10s
-        tone(1500, 1400, 0.028, 0.075, 'square');
-        noiseBurst(0.026, 2400, 7, 0.10);
-        break;
-
-      case 'timeout':                  // the machine stops
-        tone(392, 62, 1.15, 0.26, 'sawtooth');
-        tone(196, 40, 1.35, 0.20, 'square', 0.05);
-        tone(110, 33, 0.95, 0.28, 'sine', 0.10);
-        noiseBurst(0.95, 250, 0.6, 0.44, 'lowpass');
-        break;
-
+      /* --- interface --------------------------------------------------
+       * Ten cases used to sit here: 'gate', 'upgrade', 'boom', 'boost',
+       * 'riser', 'complete', 'timeplus', 'timelow', 'tick' and 'timeout' —
+       * the whole ceremony of a scored 60-second run, from the gate chime to
+       * the per-second pip in the last ten seconds. Every one of them was
+       * reachable from exactly one classic event, and nothing emits any of
+       * them now. The excavation cases above are the ones the mine uses; the
+       * campaign's own moments are advhud/advui calling play('ui').
+       * ------------------------------------------------------------- */
       case 'ui':
         tone(660, 880, 0.06, 0.10, 'square');
         break;
 
       default:
         break;
-    }
-  }
-
-  /* =====================================================================
-   * RHYTHMIC INTENSITY LAYER
-   * A 16th-note grid. Which voices fire depends on the zone level, so the
-   * soundtrack thickens as the run escalates and goes big in the final zone.
-   * ================================================================== */
-  function rhythmStep(stepIdx) {
-    if (!actx || muted || zoneLevel <= 0) return;
-    var s = stepIdx & 15;
-    var lvl = zoneLevel;
-
-    // Kick on the downbeats from level 2.
-    if (lvl >= 2 && (s === 0 || s === 8 || (lvl >= 4 && s === 6))) {
-      tone(105, 40, 0.20, 0.42, 'sine', 0, rhythmBus);
-      noiseBurst(0.05, 140, 0.7, 0.18, 'lowpass');
-    }
-    // Industrial hat / shaker from level 3.
-    if (lvl >= 3 && (s & 1) === 0) {
-      var src = actx.createBufferSource();
-      src.buffer = noiseBuffer;
-      var f = actx.createBiquadFilter();
-      f.type = 'highpass'; f.frequency.value = 7000;
-      var g = actx.createGain();
-      var t = actx.currentTime;
-      var amp = (s % 4 === 0) ? 0.10 : 0.045;
-      g.gain.setValueAtTime(amp, t);
-      g.gain.exponentialRampToValueAtTime(0.0006, t + 0.045);
-      src.connect(f); f.connect(g); g.connect(rhythmBus);
-      try { src.start(t, Math.random() * 0.3); } catch (e) { return; }
-      src.stop(t + 0.07);
-      countVoice(src);
-    }
-    // Low pulse from level 1 (barely there — just a heartbeat).
-    if (lvl === 1 && s === 0) {
-      tone(70, 55, 0.32, 0.20, 'sine', 0, rhythmBus);
-    }
-    // Final zone: driving bass stab + an offbeat metal hit.
-    if (lvl >= 4) {
-      if (s === 4 || s === 12) {
-        tone(147, 147, 0.16, 0.24, 'sawtooth', 0, rhythmBus);
-        tone(73.5, 73.5, 0.20, 0.20, 'square', 0, rhythmBus);
-      }
-      if (s === 14) clank(320, 0.16, 0.14);
     }
   }
 
@@ -596,12 +424,6 @@ SM.sound = (function () {
    * ================================================================== */
   function update(dt) {
     clock += dt;
-
-    if (overdriveLeft > 0) {
-      overdriveLeft -= dt;
-      if (overdriveLeft <= 0) overdriveTarget = 0;
-    }
-    overdrive += (overdriveTarget - overdrive) * Math.min(1, dt * 3.5);
 
     if (!unlocked || !actx) {
       nDestroy = nCollect = nHit = 0;
@@ -649,7 +471,7 @@ SM.sound = (function () {
     if (grindLevel < 0.0015) grindLevel = 0;
 
     if (grindGain) {
-      grindGain.gain.value = muted ? 0 : GRIND_GAIN * grindLevel * (1 + overdrive * 0.5);
+      grindGain.gain.value = muted ? 0 : GRIND_GAIN * grindLevel;
       // Wobble the band so it sounds like a rotating cutter, not a noise gate.
       grindFilt.frequency.value = 620 + grindLevel * 900 + Math.sin(clock * 7.3) * 140;
       grindHi.frequency.value = 3000 + Math.sin(clock * 11.7) * 900 + grindLevel * 1400;
@@ -663,31 +485,13 @@ SM.sound = (function () {
     }
     if (engGain) {
       var target = muted ? 0
-        : ENGINE_GAIN * (0.5 + speed * 0.4 + load * 0.8 + overdrive * 0.5);
+        : ENGINE_GAIN * (0.5 + speed * 0.4 + load * 0.8);
       engGain.gain.value += (target - engGain.gain.value) * Math.min(1, dt * 4);
-      var hz = ENGINE_BASE_HZ * (0.84 + speed * 0.34 + load * 0.22 + overdrive * 0.26);
+      var hz = ENGINE_BASE_HZ * (0.84 + speed * 0.34 + load * 0.22);
       engOsc.frequency.value = hz;
       engOsc2.frequency.value = hz * 1.505;
       engSub.frequency.value = hz * 0.5;
-      engFilter.frequency.value = 210 + load * 900 + speed * 240 + overdrive * 500;
-    }
-
-    /* --- overdrive intensity layer -------------------------------------- */
-    if (odGain) {
-      odGain.gain.value = muted ? 0 : 0.055 * overdrive * (0.7 + 0.3 * Math.sin(clock * 12));
-      odFilt.frequency.value = 380 + 420 * (0.5 + 0.5 * Math.sin(clock * 5.1)) + overdrive * 500;
-      odOsc.frequency.value = 82 * (1 + overdrive * 0.12);
-    }
-
-    /* --- rhythm grid ----------------------------------------------------- */
-    if (zoneLevel > 0) {
-      var bpm = RHYTHM_BPM * (1 + (zoneLevel >= 4 ? 0.14 : 0) + overdrive * 0.06);
-      beatPos += dt * (bpm / 60) * 4;          // 16th notes
-      var b = beatPos | 0;
-      if (b !== lastBeat) {
-        lastBeat = b;
-        rhythmStep(b);
-      }
+      engFilter.frequency.value = 210 + load * 900 + speed * 240;
     }
 
     /* --- clear per-step counters ------------------------------------------ */
@@ -723,18 +527,17 @@ SM.sound = (function () {
   /**
    * PAUSE — duck the SUSTAINED layers, leave the one-shots alone.
    *
-   * The engine drone, the grinder and the overdrive layer are permanently
-   * running nodes whose gain is only ever moved by update() — and update()
-   * stops being called the instant main.js holds the step. Left alone they
-   * would hang on one frozen note under the pause menu, which is the loudest
-   * possible way to tell a player that nothing is really paused.
+   * The engine drone and the grinder are permanently running nodes whose gain
+   * is only ever moved by update() — and update() stops being called the
+   * instant main.js holds the step. That happens on every pause, on every meta
+   * screen and at the title. Left alone they would hang on one frozen note
+   * under the menu, which is the loudest possible way to tell a player that
+   * nothing is really paused.
    *
    * Ducking the two BUSES instead of master is what keeps the menu audible:
-   * its own 'ui' blips still go out through sfxBus. odGain feeds engineBus, so
-   * the overdrive layer ducks along with the engine for free, and the rhythm
-   * grid needs nothing at all — it is one-shots fired from update(), so it
-   * simply stops arriving. Ramped rather than jumped for the same reason
-   * setMuted() ramps: a step change on a running graph clicks.
+   * its own 'ui' blips still go out through sfxBus. Ramped rather than jumped
+   * for the same reason setMuted() ramps: a step change on a running graph
+   * clicks.
    *
    * The gains are not restored from update() on resume, so the ramp back has
    * to happen here — which also means a resume works while muted (the beds
@@ -755,11 +558,7 @@ SM.sound = (function () {
     topDestroyValue = collectValue = hitIntensity = nSparkle = 0;
     grindTarget = grindLevel = 0;
     arpIndex = 0; arpLast = -999; arpGate = 0;
-    zoneLevel = 0;
-    overdrive = overdriveTarget = overdriveLeft = 0;
-    beatPos = 0; lastBeat = -1;
     if (grindGain) grindGain.gain.value = 0;
-    if (odGain) odGain.gain.value = 0;
   }
 
   function unlock() {
@@ -795,44 +594,13 @@ SM.sound = (function () {
       if (p && p.strength > 0.55) play('impact');
       else play('clank');
     });
-    SM.events.on('gate:passed', function () { play('gate'); });
-    SM.events.on('gate:missed', function () { tone(300, 150, 0.22, 0.14, 'square'); });
-    SM.events.on('upgrade:applied', function () { play('upgrade'); });
-    SM.events.on('vehicle:transform', function () { play('clank'); });
-    SM.events.on('pulse:fired', function () { play('boom'); });
-    SM.events.on('overdrive:start', function (p) {
-      overdriveTarget = 1;
-      overdriveLeft = (p && p.duration) || 6;
-      play('riser', { duration: 1.0 });
-    });
-    SM.events.on('overdrive:end', function () { overdriveTarget = 0; overdriveLeft = 0; });
-    // A boost block gets a voice but NOT the sustained overdrive layer: the
-    // effect is speed only, so the soundtrack should not thicken for it.
-    SM.events.on('boost:start', function () { play('boost'); });
-    SM.events.on('zone:entered', function (p) {
-      var kind = p && p.kind;
-      zoneLevel = kind === 'final' ? 4 : kind === 'narrow' ? 3
-                : kind === 'barrier' ? 2 : kind === 'rich' ? 1 : 0;
-      if (zoneLevel >= 2) play('gate');
-      if (zoneLevel >= 4) play('riser', { duration: 1.6 });
-    });
-    SM.events.on('level:complete', function () { zoneLevel = 0; play('complete'); });
-
-    // The countdown. ui.js owns the per-second 'tick' because it is the module
-    // that already derives the danger window from the value.
-    SM.events.on('time:granted', function () { play('timeplus'); });
-    SM.events.on('time:low', function () { play('timelow'); });
-    SM.events.on('run:over', function (p) {
-      // Everything stops: kill the rhythm bed, then the stinger. The clock is
-      // the only exit now, so the stinger effectively always plays — and it
-      // no longer collides with the 'complete' fanfare, because reaching 100%
-      // is a milestone that happens minutes earlier, mid-run, and is announced
-      // on its own beat. The reason check stays as the guard it always was.
-      zoneLevel = 0;
-      overdriveTarget = 0; overdriveLeft = 0;
-      grindTarget = 0;
-      if (!p || p.reason !== 'depth') play('timeout');
-    });
+    /* THIRTEEN SUBSCRIPTIONS USED TO FOLLOW: the gates, the upgrade fanfare,
+     * the pulse, overdrive, the boost, the zone escalation, the completion
+     * chord and the whole countdown (+10s, the low-time alarm, the run-over
+     * stinger). Every one of them answered an event that only the time-attack
+     * director emitted. What remains above is the engine's own — the rock
+     * breaking, the cutter skittering, the loot ladder, the heavy impact.
+     * The campaign speaks through play('ui') from advhud.js and advui.js. */
 
     SM.events.on('input:mutetoggle', function () { toggleMute(); });
     SM.events.on('game:paused', function (p) { setPaused(p && p.paused); });

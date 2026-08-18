@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/config.js
+ * SUPERMINE ADVENTURE — js/config.js
  * -----------------------------------------------------------------------------
  * ALL global tuning constants live here, grouped and commented.
  *
@@ -179,7 +179,7 @@ SM.config = {
  * >>> FROZEN. Read these; do not add to them. <<<
  * Only values that MORE THAN ONE adventure module must agree on live here.
  * Everything else belongs in the "tunables" block at the top of the file that
- * owns it (see ADVENTURE.md "File ownership").
+ * owns it (each module owns its own).
  *
  * ORIENTATION IS UNCHANGED from classic SUPERMINE:
  *   -y is UP (towards the surface / the mine mouth), +y is DOWN (deeper).

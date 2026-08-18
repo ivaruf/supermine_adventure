@@ -1,29 +1,11 @@
 /* =============================================================================
- * SUPERMINE — js/vehicle.js                        [OWNER: Agent 2 — gameplay]
+ * SUPERMINE ADVENTURE — js/vehicle.js
  * -----------------------------------------------------------------------------
  * THE MACHINE. Drawn entirely procedurally from modular parts so that every
  * upgrade visibly ADDS or ENLARGES machinery. Nothing here is a sprite; the
  * whole rig is rebuilt from `parts` levels every frame.
  *
- *                   [ drill heads ]        <- front (-y)
- *              ======[ cutting blade ]======
- *               \\                      //
- *      (grinder)[tr][    chassis    ][tr](grinder)
- *                   [    cabin      ]
- *               \__ [    hopper     ] __/  <- magnet arms
- *                   [   conveyor    ]      <- rear (+y)
- *
- * Everything animates every frame: drums spin, drill heads rotate, grinder
- * discs counter-rotate, treads scroll, the conveyor belt runs, pistons pump,
- * exhausts puff, warning lights strobe. When a part is installed it UNFOLDS
- * (deploy timer 0..1 with an overshooting ease).
- *
- * ADVENTURE MODE DRAWS A DIFFERENT MACHINE FROM THE SAME PARTS. The diagram
- * above is the TIME ATTACK rig, built by UPGRADE_EFFECTS. Adventure's geometry
- * comes from SM.rig.getPartFlags(), and its two big subassemblies are their own
- * thing because they have to communicate a SHOP LADDER rather than a pickup:
- *
- *              [ point ]                    <- front (-y)
+ *              [ point ]                    <- front (the heading)
  *             [[ auger ]]                   drawDrillRig()  — the DRILL tiers:
  *          ===[ reamer bar ]===             one bit that gets longer, thicker,
  *      [tr][      chassis      ][tr]        deeper-fluted, then hot, then lit
@@ -31,39 +13,39 @@
  *          [ bay 0: the load   ]            drawOreBed()    — the CARGO tiers:
  *          [ bay 1 ] [ bay 2 ]              a tub that grows into an ore train
  *
- * The seam is `advMode()` and it is taken in exactly two places, both inside
- * drawMachine(). Everything else — tracks, chassis, cabin, exhaust, lamps,
- * radiators, armour, dish — is shared and identical in both modes.
+ * Everything animates every frame: the auger turns, treads scroll, pistons
+ * pump, exhausts puff, warning lights strobe, the fins glow with heat. When a
+ * part is installed it UNFOLDS (deploy timer 0..1 with an overshooting ease).
  *
- * Public API (main.js / particles.js / camera.js / effects.js depend on these —
+ * THERE USED TO BE A SECOND MACHINE IN HERE. The time-attack rig was a
+ * different silhouette built from the same chassis — a wide cutting blade,
+ * spinning drill heads, outrigger grinder discs, a hopper, a rear conveyor and
+ * a pair of magnet collector arms — assembled by an UPGRADE_EFFECTS table as
+ * the player drove through gates. It came with its own drive model (auto-
+ * advance, one steering axis, a rectangular cut across the lane) and its own
+ * periodic systems (overdrive, explosive pulses, speed boosts, the end-of-run
+ * halt). All of it is gone. What is left is ONE machine and ONE drive model:
+ * you point it and it crawls, and its geometry comes from SM.rig.getPartFlags()
+ * — the shop ladder — rather than from anything found in the ground.
+ *
+ * WHAT SURVIVED THE CUT, and why, because it looks like upgrade machinery:
+ * the MORPH and the DEPLOY animation. `bladeWidthTarget`/`bodyWidthTarget` and
+ * the per-part `deploy[]` unfold are how a workshop purchase lands on the
+ * machine — syncRig() writes the new targets, animateMorph() eases them, and
+ * the parts unfold with the same overshoot they always did. They were never
+ * the gate system; they were the thing the gate system drove.
+ *
+ * Public API (main.js / camera.js / effects.js / adv.js depend on these —
  * do NOT change the signatures):
  *   SM.vehicle.init() / reset() / update(dt) / render(ctx)
  *   SM.vehicle.getX() getY() getWidth() getSpeed() getMiningPower() getCollectRadius()
- *   SM.vehicle.applyUpgrade(id) / getUpgradeEffect(id)
- *   SM.vehicle.getBladeWidth() getBladeFrontY() getBank() getLateralSpeed()
- *   SM.vehicle.getResistance() isTransforming() getUpgradeCount() getStat(name)
- * Phase-2 additions (safe to call, not required by main.js):
- *   SM.vehicle.getValueMultiplier() getPartLevel(name) getOverdrive()
- *   SM.vehicle.startOverdrive(seconds)
- * Time-attack additions (the HUD is built against exactly these):
- *   SM.vehicle.getOwnedUpgrades()   LIVE, READ-ONLY [{id,title,level}, ...] in
- *                                   acquisition order; rebuilt only when an
- *                                   upgrade is applied, never per frame
- *   SM.vehicle.getUpgradeVersion()  bumps on every applyUpgrade() — cheap
- *                                   change detection for the HUD
- *   SM.vehicle.halt() / isHalted()  the "time is up" stop
+ *   SM.vehicle.getBladeWidth() getBladeFrontY() getLateralSpeed() getResistance()
+ * The campaign's own surface:
+ *   SM.vehicle.getHeading() getVelX() getVelY() isCutting() getDriveBurnRate()
+ *   SM.vehicle.parkAtDoor()          set the machine down at this level's doors
  *
  * Events emitted
- *   vehicle:transform  {part, width}    a part was added / enlarged
- *   pulse:fired        {x, y, radius}   explosive pulse detonated
- *   overdrive:start    {duration}
- *   overdrive:end      {}
- *   boost:start        {duration}      one per BOOST BLOCK, not per fragment:
- *                                      `duration` is the whole block's worth,
- *                                      and the HUD prints it, so it is emitted
- *                                      only after the cloud has stopped
- *                                      arriving (see BOOST_ANNOUNCE)
- *   boost:end          null
+ *   drill:blocked  {matIndex, hardness}   the bit met rock it cannot cut
  * ========================================================================== */
 
 var SM = SM || {};
@@ -75,7 +57,7 @@ SM.vehicle = (function () {
   var TAU = Math.PI * 2;
 
   /* =====================================================================
-   * AGENT-2 TUNABLES
+   * CHASSIS TUNABLES  (shared by every part of the machine)
    * ================================================================== */
   var TRACK_WIDTH = 24;          // one track at treads level 0, world units
   var TRACK_PER_LEVEL = 9;       // extra track width per `treads` level
@@ -83,95 +65,28 @@ SM.vehicle = (function () {
   var BLADE_ARM = 20;            // gap between chassis nose and blade
   var BLADE_THICK = 24;          // blade bar thickness at tier 0 (along y)
   var BLADE_THICK_PER_TIER = 4;
-  var HOPPER_LEN = 34;           // hopper length at level 0
-  var HOPPER_PER_LEVEL = 17;
-  var CONVEYOR_LEN = 56;         // belt length at level 1
-  var CONVEYOR_PER_LEVEL = 22;
-  var GRINDER_R = 30;            // side grinder disc radius
-  var DRILL_R = 26;              // drill head radius (grows with blade tier)
-  var ARM_REACH = 50;            // magnet arm base reach past the hull
-  var ARM_REACH_STEP = 68;       // ...plus this per arm pair
+  // Side grinder disc radius. The discs themselves are gone with the classic
+  // rig, but `grinders` is still a real SM.rig part flag and spanOf() still
+  // widens the machine's collision span by this formula when one is fitted —
+  // see the note there.
+  var GRINDER_R = 30;
 
-  // Hard ceilings. Max span must stay <= ~70% of the lane (1280) or the rig
-  // grinds the bedrock walls and the camera has nothing left to frame.
-  var MAX_BLADE = 840;           // + easeOutBack overshoot stays under 70% lane
+  // Hard ceilings on the morph targets. Nothing in the shop ladder gets near
+  // them any more; they are the guard rail that stops a bad tier table from
+  // producing a machine wider than the level it is standing in.
+  var MAX_BLADE = 840;
   var MAX_BODY = 240;
   var MAX_COLLECT = 580;         // a bigger magnet just eats the whole screen
-  var MAX_SPEED_MUL = 1.55;      // keeps the run in the 3-5 minute window
 
-  // Repeat-purchase falloff. Buying the same upgrade again gives
-  //   1 + (mul - 1) * FALLOFF^tier
-  // so a 4th WIDER BLADE still helps but never runs away.
-  var DEFAULT_FALLOFF = 0.74;
-
-  // --- explosive pulse -------------------------------------------------
-  var PULSE_PERIOD = 7.5;        // seconds between detonations at tier 1
-  var PULSE_PERIOD_STEP = 1.6;   // faster per extra tier
-  var PULSE_PERIOD_MIN = 3.6;
-  var PULSE_RADIUS = 150;
-  var PULSE_RADIUS_STEP = 38;
-  var PULSE_RADIUS_MAX = 240;
-  var PULSE_FORCE = 520;
-
-  // --- overdrive -------------------------------------------------------
-  var OD_PERIOD = 26;            // seconds between automatic frenzies
-  var OD_PERIOD_STEP = 6;        // shorter per extra tier
-  var OD_DURATION = 6.0;
-  var OD_DURATION_STEP = 2.2;
-  var OD_POWER = 2.0;            // stat multipliers at full ramp
-  var OD_SPEED = 1.30;
-  var OD_COLLECT = 1.45;
-  var OD_RAMP = 6.0;             // how fast the ramp eases in / out
-
-  // --- speed boost (scattered 'boostcell' blocks) ----------------------
-  // Deliberately a LESSER effect than overdrive, in scope rather than in
-  // length: overdrive is the machine's own periodic frenzy and buffs
-  // everything (2.0x power, 1.3x speed, 1.45x collect), a boost block is a
-  // found object that only makes you FAST. Keeping them distinct means the
-  // orange glow always means the same thing even when both are running, and
-  // means catching a block mid-frenzy is a genuine bonus rather than a
-  // rounding error.
-  var BOOST_SPEED = 1.55;        // top speed multiplier at full ramp
-  // Paid per collected fragment. A whole block is ~15 deposits of 5 fragments
-  // (see terrain.js PICKUP_RADIUS), so taking one cleanly is ~6 seconds — the
-  // same order as an overdrive, because a speed-only buff that lasted half as
-  // long as the frenzy would not be worth the detour it costs to reach.
-  var BOOST_PER_PIECE = 0.08;
-  // Cap, so a lucky pair of blocks is not a free run. One clean block is ~6s,
-  // so this is "a block and a bit": a second block caught mid-boost tops you
-  // up rather than doubling you.
-  var BOOST_MAX = 8.0;
-  var BOOST_RAMP = 9.0;          // snappier than overdrive's 6.0 — it's a kick
-  // How long addBoost() waits for the rest of the cloud before announcing.
-  // Same job as level.js TIME_FLUSH and the same reasoning: the splash prints
-  // the duration off this event, so it must not fire while fragments of the
-  // same block are still arriving or it announces a number that is already
-  // wrong by the time it is on screen.
-  var BOOST_ANNOUNCE = 0.22;
-
-  // --- rear conveyor ---------------------------------------------------
-  var TRAIL_RADIUS = 96;         // auto-collect bubble at conveyor level 1
+  // --- rear collection bubble ------------------------------------------
+  var TRAIL_RADIUS = 96;
   var TRAIL_RADIUS_STEP = 54;
 
-  // --- halt ("time is up") ---------------------------------------------
-  // The camera is glued to the machine with CAM_FOLLOW stiffness, so snapping
-  // the speed to zero would whip the whole world. An exponential decay at 4.5
-  // leaves ~1% of the entry speed after one second: it reads as brakes, not
-  // as a freeze, and the camera settles on its own with no lurch.
-  var HALT_DECAY = 4.5;          // e-folds per second of forward speed
-  var HALT_SNAP = 1.5;           // below this, call it stopped (units/sec)
-
-  // Extra bite on top of config's VEHICLE_RESISTANCE_SCALE. Measured over a
-  // full run, the raw scale left a granite barrier only ~9% slower than open
-  // dirt, so the "hard route / risk of slowing down" lever never registered.
-  // At 2.3 a slab drops you to ~0.6x and an obsidian corridor to the 0.34x
-  // floor, while ordinary rock still only costs ~15%.
-  var RESISTANCE_BOOST = 2.3;
-
+  // How long a part takes to unfold when the workshop installs it.
   var TRANSFORM_TIME = C.VEHICLE_TRANSFORM_TIME;
 
   /* =====================================================================
-   * AGENT-1 TUNABLES — ADVENTURE MODE (free 2D driving)
+   * TUNABLES — ADVENTURE MODE (free 2D driving)
    * ---------------------------------------------------------------------
    * THE FEEL WE ARE AFTER, because every number below only makes sense against
    * it: a TRACKED DIGGER chewing through material that closes around it. Not a
@@ -223,7 +138,7 @@ SM.vehicle = (function () {
   var ADV_ALIGN_MIN = 0.32;      // thrust available while facing the wrong way
   var ADV_BANK_GAIN = 0.22;      // visual roll per rad/sec of swing
   /* --- WHERE THE LIFT SETS YOU DOWN ------------------------------------
-   * A LEVEL IS ITS OWN MAP (ADVENTURE.md §2b) and its lift is BIG DOORS at the
+   * A LEVEL IS ITS OWN MAP (ARCHITECTURE.md §7) and its lift is BIG DOORS at the
    * top centre of it. The machine comes OUT of those doors, so it is set down
    * directly below them, ON the centre line, FACING DOWN — pointing at the level,
    * which is the only direction there is anything in.
@@ -239,7 +154,7 @@ SM.vehicle = (function () {
    * where the old west-edge park had 35 — the lateral offset that ate the rest of
    * it existed only because the landings opened one way, and a central lift has no
    * use for it. It is also what test assertions of the form
-   * |getDepthM() - level.depthM| < 12 are written against (ADVENTURE.md §2b quotes
+   * |getDepthM() - level.depthM| < 12 are written against (ARCHITECTURE.md §7 quotes
    * the old 120 units = 12 m); 70 units = 7 m keeps every one of them true. */
   var ADV_SPAWN_Y = 70;          // below the doors, on the centre line
   var ADV_CEIL_MARGIN = 40;      // closest the hull centre may get to the roof
@@ -513,97 +428,20 @@ SM.vehicle = (function () {
   var ADV_BAY3 = 5;              // ...and a third, with load straps: the train
 
   /* =====================================================================
-   * UPGRADE TABLE
+   * THE UPGRADE TABLE IS GONE
    * ---------------------------------------------------------------------
-   * Supported keys:
-   *   xBlade addBlade xBody xPower addPower xCollect xSpeed xValue
-   *   parts   {partName: +levels}   -> switches on / grows geometry
-   *   falloff  repeat-purchase decay (default 0.74)
-   * Anything that moves a *Target* value animates through easeOutBack for free.
+   * A ~170-line UPGRADE_EFFECTS map used to sit here: thirteen named gate
+   * rewards (WIDER CUTTING BLADE, ROTARY DRILL HEADS, SIDE GRINDERS, ORE
+   * REFINERY, EXPLOSIVE PULSE, OVERDRIVE CORE...), each a bundle of stat
+   * multipliers plus the `parts` levels it switched on, with a repeat-purchase
+   * falloff so a fourth blade still helped but never ran away.
+   *
+   * The shop replaced it. SM.rig owns eight part categories with priced tiers,
+   * the workshop is where they are bought, and syncRig() reads the resulting
+   * flags. What used to be a found reward is now a decision made with money,
+   * which is the whole point of the mode — so the table, applyUpgrade(),
+   * getUpgradeEffect() and the owned-upgrade manifest all went with it.
    * ================================================================== */
-  var UPGRADE_EFFECTS = {
-    wider_blade: {
-      title: 'WIDER CUTTING BLADE',
-      description: 'Blade span +90%. Mining power +28%.',
-      xBlade: 1.90, xPower: 1.28, xCollect: 1.14, xBody: 1.05,
-      parts: { bladeTier: 1 }
-    },
-    drill_heads: {
-      title: 'ROTARY DRILL HEADS',
-      description: 'Two more drill heads. Mining power +45%.',
-      xPower: 1.45, xBlade: 1.10, xCollect: 1.05,
-      parts: { drills: 1 }
-    },
-    side_grinders: {
-      title: 'SIDE GRINDERS',
-      description: 'Lateral grinder discs. Wider hull, +14% power.',
-      xPower: 1.14, xBlade: 1.18, xBody: 1.16, xCollect: 1.10,
-      parts: { grinders: 1 }
-    },
-    mining_power: {
-      title: 'REINFORCED CUTTERS',
-      description: 'Mining power +55%.',
-      xPower: 1.55, xBlade: 1.06,
-      parts: { teeth: 1 }
-    },
-    speed_up: {
-      title: 'TURBO DRIVE',
-      description: 'Forward speed +16%. Extra exhaust stack.',
-      xSpeed: 1.16, xPower: 1.06,
-      parts: { stacks: 1 }
-    },
-    magnet: {
-      title: 'MAGNETIC COLLECTORS',
-      description: 'Collector arms unfold. Magnet radius +65%.',
-      xCollect: 1.65, xBlade: 1.04,
-      parts: { magnetArms: 1 }
-    },
-    multiplier: {
-      title: 'ORE REFINERY',
-      description: 'All resources are worth 1.7x more.',
-      xValue: 1.70, xCollect: 1.08,
-      parts: { refinery: 1 }
-    },
-    rear_conveyor: {
-      title: 'REAR CONVEYOR',
-      description: 'A collection belt sweeps up everything behind you.',
-      xCollect: 1.18, xBody: 1.06,
-      parts: { conveyor: 1 }
-    },
-    explosive_pulse: {
-      title: 'EXPLOSIVE PULSE',
-      description: 'Periodic shockwave shatters terrain around the rig.',
-      xPower: 1.08, xBlade: 1.05,
-      parts: { pulse: 1 }
-    },
-    overdrive: {
-      title: 'OVERDRIVE CORE',
-      description: 'Periodic frenzy: speed, power and magnet all surge.',
-      xPower: 1.06, xBlade: 1.05, xSpeed: 1.05,
-      parts: { overdrive: 1, stacks: 1 }
-    },
-    /* --- automatic threshold transformations --------------------------- */
-    auto_hopper: {
-      title: 'HOPPER EXPANSION',
-      description: 'Storage doubled. Magnet radius +22%.',
-      xCollect: 1.22, xBody: 1.10,
-      parts: { hopper: 1 }
-    },
-    mega_treads: {
-      title: 'HEAVY TREADS',
-      description: 'Wider tracks. +12% power, +10% speed.',
-      xBody: 1.18, xPower: 1.12, xSpeed: 1.10,
-      parts: { treads: 1 }
-    },
-    /* --- the final station, just before the core ----------------------- */
-    final_overhaul: {
-      title: 'CORE BREAKER OVERHAUL',
-      description: 'Everything, everywhere, all at once.',
-      xBlade: 1.55, xPower: 1.75, xCollect: 1.45, xSpeed: 1.12, xBody: 1.12,
-      parts: { drills: 1, grinders: 1, stacks: 1, overdrive: 1, bladeTier: 1 },
-      falloff: 1.0
-    }
-  };
 
   /* =====================================================================
    * STATE
@@ -618,8 +456,6 @@ SM.vehicle = (function () {
   var bodyWidth = 0, bodyWidthTarget = 0, bodyWidthFrom = 0;
   var miningPower = 0;
   var collectRadius = 0;
-  var speedMul = 1;
-  var valueMul = 1;
 
   // Morph animation (chassis + blade widths)
   var morphT = 1;
@@ -642,9 +478,12 @@ SM.vehicle = (function () {
    * Every key is declared up front so the object keeps one hidden class.
    * PART_KEYS drives the deploy-animation sweep with no allocation.
    * ------------------------------------------------------------------ */
-  // The last four are ADVENTURE-ONLY (js/rig.js flags `lamps`, `radiators`,
-  // `armor`, `dish`). No classic upgrade in UPGRADE_EFFECTS touches them, so they
-  // stay at 0 for the whole of a time attack and classic geometry is unchanged.
+  // A few of these are vestigial: `drills`, `magnetArms`, `conveyor`, `hopper`,
+  // `pulse`, `overdrive` and `refinery` were switched on by gate rewards and
+  // nothing in SM.rig sets them, so they sit at 0 for the whole game. They stay
+  // in the table rather than being pruned because PART_KEYS, `parts` and
+  // `deploy` must agree key-for-key, and because the workshop ladder is still
+  // growing — a rig that one day sells a conveyor finds the slot already here.
   var PART_KEYS = ['bladeTier', 'drills', 'grinders', 'magnetArms', 'conveyor',
                    'hopper', 'stacks', 'treads', 'pulse', 'overdrive',
                    'refinery', 'teeth', 'lamps', 'radiators', 'armor', 'dish'];
@@ -661,58 +500,21 @@ SM.vehicle = (function () {
   };
   var deployActive = false;
 
-  var tierCount = Object.create(null);   // upgradeId -> times purchased
-  var upgradeCount = 0;
   var bank = 0;
 
-  /* --- owned-upgrade manifest -------------------------------------------
-   * {id, title, level} in ACQUISITION order, rebuilt only inside
-   * applyUpgrade(). The HUD reads this array every step, so it must never
-   * be rebuilt or re-sorted per frame — repeat purchases bump `level` in
-   * place instead of appending. Treat the array as READ-ONLY from outside.
-   * `upgradeVersion` is the cheap change-detector: compare it against the
-   * value you saw last frame instead of diffing the array.
+  /* --- MORPH VERSION ----------------------------------------------------
+   * Bumped by syncRig() whenever the machine's geometry changes. It is the
+   * cheap change-detector for anything that wants to know "is this a different
+   * machine from the one I drew last frame" without diffing part levels — the
+   * gradient cache signature is the current user.
    * ------------------------------------------------------------------- */
-  var owned = [];
   var upgradeVersion = 0;
 
-  /* --- halt state ------------------------------------------------------ */
-  var halted = false;
-
-  /* --- explosive pulse / overdrive runtime ---------------------------- */
-  var pulseTimer = 0;
-  var odCooldown = 0;
-  var odRemaining = 0;
-  var odLevel = 0;               // 0..1 smoothed ramp
-  var odActive = false;
-
-  /* --- speed boost runtime -------------------------------------------- */
-  var boostRemaining = 0;
-  var boostLevel = 0;            // 0..1 smoothed ramp
-  var boostActive = false;
-  // Fragments of a shattered block arrive over several steps, so the "you got
-  // a boost" event is emitted once per pickup rather than once per fragment.
-  var boostAnnounce = 0;
-  // Run totals for the end card, in BLOCKS and SECONDS. Deliberately not the
-  // fragment count: a boost block is one object you aimed at, and reporting
-  // the ~350 chips it shattered into told the player nothing they did.
-  // boostGap is a second, independent gap detector — boostAnnounce only runs
-  // while the boost is IDLE, so a block caught mid-boost would never be
-  // counted by it, and topping up is exactly when you most want the credit.
-  var boostBlocks = 0;
-  var boostSeconds = 0;
-  var boostGap = 0;
-
-  // Resolved once in init(): comparing an integer on the collection hot path
-  // beats a material-table lookup and a string compare ~30x per step.
-  var MI_BOOST = -1;
-
-  /* --- ADVENTURE runtime -----------------------------------------------
-   * `heading` is the hull's facing in radians, 0 = local -y = the classic
-   * forward direction, so heading 0 renders EXACTLY as classic does. The facing
-   * unit vector is (sin h, -cos h). (dvx, dvy) is the real 2D velocity;
-   * `speed` is kept as its magnitude so every existing getter, the camera, the
-   * engine note and the dust all keep working with no adventure special case.
+  /* --- DRIVE runtime ----------------------------------------------------
+   * `heading` is the hull's facing in radians, 0 = local -y = straight up the
+   * screen. The facing unit vector is (sin h, -cos h). (dvx, dvy) is the real
+   * 2D velocity; `speed` is kept as its magnitude so every getter, the camera,
+   * the engine note and the dust all read one number.
    * ------------------------------------------------------------------ */
   var heading = 0;
   var dvx = 0, dvy = 0;
@@ -748,21 +550,14 @@ SM.vehicle = (function () {
 
   /* --- reused event payloads (never stashed) --------------------------- */
   var evBlocked = { x: 0, y: 0, matIndex: -1, hardness: 0, cap: 0 };
-  var evTransform = { part: '', width: 0 };
-  var evPulse = { x: 0, y: 0, radius: 0 };
-  var evOdStart = { duration: 0 };
-  var evOdEnd = {};
-  var evBoost = { duration: 0 };
-  var appliedOut = { id: '', title: '', description: '', tier: 0, effect: null };
 
   /* =====================================================================
    * SETUP
    * ================================================================== */
   function init() {
     SM.events.on('resource:collected', onCollected);
-    MI_BOOST = SM.materials ? SM.materials.indexOf('boostcell') : -1;
 
-    /* ADVENTURE geometry is pulled from SM.rig.getPartFlags() on the two
+    /* GEOMETRY is pulled from SM.rig.getPartFlags() on the two
      * occasions it can actually have changed — a workshop purchase and a screen
      * transition — rather than every step. getPartFlags() is Agent 2's function
      * and may well build its object on the fly; polling it 60 times a second
@@ -775,38 +570,10 @@ SM.vehicle = (function () {
   }
 
   function onCollected(p) {
-    // Hopper "gulp" — decays in update(). O(1), no allocation: this fires
+    // Intake "gulp" — decays in update(). O(1), no allocation: this fires
     // up to ~30x per step.
     hopperPulse += 0.05;
     if (hopperPulse > 1) hopperPulse = 1;
-
-    // A boost block shatters into several fragments and pays per fragment, so
-    // driving cleanly through the whole cloud is worth more than clipping it.
-    if (p && p.matIndex === MI_BOOST) addBoost(BOOST_PER_PIECE);
-  }
-
-  /**
-   * Extend the speed boost. Called once per collected boost fragment.
-   * The announcement is deferred to update() so a block that lands over ~70
-   * fragments and a second of flight still produces exactly one 'boost:start',
-   * carrying the total it actually came to.
-   */
-  function addBoost(seconds) {
-    if (halted) return false;
-    // Count the block on the first fragment after a gap, and bank only the
-    // seconds that actually fit under the cap — the end card should not
-    // promise time the clamp threw away.
-    if (boostGap <= 0) boostBlocks++;
-    boostGap = BOOST_ANNOUNCE;
-    var room = BOOST_MAX - boostRemaining;
-    if (seconds > room) seconds = room > 0 ? room : 0;
-    boostRemaining += seconds;
-    boostSeconds += seconds;
-    // Restart the window on EVERY fragment, not just the first: it is a
-    // gap-in-the-stream detector, so a cloud that trickles in over a second
-    // still announces once, at the end, with the whole amount.
-    if (!boostActive) boostAnnounce = BOOST_ANNOUNCE;
-    return true;
   }
 
   function reset() {
@@ -820,8 +587,6 @@ SM.vehicle = (function () {
     bodyWidth = bodyWidthTarget = bodyWidthFrom = C.VEHICLE_BODY_WIDTH;
     miningPower = C.VEHICLE_MINING_POWER;
     collectRadius = C.VEHICLE_COLLECT_RADIUS;
-    speedMul = 1;
-    valueMul = 1;
 
     morphT = 1;
     morphActive = false;
@@ -829,32 +594,14 @@ SM.vehicle = (function () {
     lightPhase = pistonPhase = armPhase = smokePhase = 0;
     hopperPulse = 0;
     loadSmoothed = 0;
-    upgradeCount = 0;
     bank = 0;
-    owned.length = 0;            // same array object — the HUD may hold it
     upgradeVersion = 0;
-    halted = false;
 
     for (var i = 0; i < PART_KEYS.length; i++) {
       parts[PART_KEYS[i]] = 0;
       deploy[PART_KEYS[i]] = 1;
     }
     deployActive = false;
-    tierCount = Object.create(null);
-
-    pulseTimer = 0;
-    odCooldown = 0;
-    odRemaining = 0;
-    odLevel = 0;
-    odActive = false;
-
-    boostRemaining = 0;
-    boostLevel = 0;
-    boostActive = false;
-    boostAnnounce = 0;
-    boostBlocks = 0;
-    boostSeconds = 0;
-    boostGap = 0;
 
     gradSig = -1;                // force gradient rebuild
 
@@ -862,17 +609,19 @@ SM.vehicle = (function () {
   }
 
   /* =====================================================================
-   * ADVENTURE — SETUP
+   * SETUP — the run
    * ================================================================== */
 
-  function advMode() {
-    return !!(SM.adv && SM.adv.isActive && SM.adv.isActive());
-  }
+  /**
+   * True only during a descent. NOT the same question as "is a company
+   * loaded": the workshop renders the machine on a meta screen, where it must
+   * draw but must not drive, burn fuel or cut rock.
+   */
   function advDriving() {
     return !!(SM.adv && SM.adv.isDriving && SM.adv.isDriving());
   }
 
-  /** Guarded read of a positive SM.rig stat, with a classic-config fallback. */
+  /** Guarded read of a positive SM.rig stat, with a config fallback. */
   function rigStat(fn, dflt) {
     if (!SM.rig || typeof SM.rig[fn] !== 'function') return dflt;
     var v = SM.rig[fn]();
@@ -881,15 +630,10 @@ SM.vehicle = (function () {
 
   /**
    * Park the machine at the doors the descent starts from, stopped, and clear
-   * every mid-cut / mid-stall flag. Called from the tail of reset(); everything it
-   * touches is invisible to classic mode except the parkAtDoor() call, which
-   * returns immediately outside adventure.
+   * every mid-cut / mid-stall flag. Called from the tail of reset().
    *
-   * The heading set here is the SAME one parkAtDoor() wants (facing +y, deeper),
-   * so the two no longer disagree — and it stays exactly as it was, which is what
-   * keeps this block byte-identical for classic, where `heading` is inert anyway
-   * because every classic path reads the fixed -y forward direction rather than
-   * this variable.
+   * The heading set here is the SAME one parkAtDoor() wants (facing +y,
+   * deeper), so the two never disagree.
    */
   function advReset() {
     heading = Math.PI;           // facing +y == deeper
@@ -911,7 +655,6 @@ SM.vehicle = (function () {
     advTurning = 0;
     advTravel = 1;
 
-    if (!advMode()) return;
     parkAtDoor();
     syncRig();
   }
@@ -936,7 +679,6 @@ SM.vehicle = (function () {
    * the lift anyway.
    */
   function parkAtDoor() {
-    if (!advMode()) return false;
     x = advDoorX();
     y = advDoorY() + ADV_SPAWN_Y;
     speed = 0;
@@ -1006,7 +748,6 @@ SM.vehicle = (function () {
    * correctly whichever half of the seam has landed.
    */
   function advInLift() {
-    if (!advMode()) return false;
     var v;
     if (SM.adv && typeof SM.adv.isInLift === 'function') {
       v = SM.adv.isInLift();
@@ -1021,7 +762,6 @@ SM.vehicle = (function () {
 
   /** 1 out in the rock, 0 at the cage. See advterrain's DOOR_FADE_H. */
   function advLiftFade() {
-    if (!advMode()) return 1;
     if (SM.advterrain && SM.advterrain.getDoorFade) {
       var v = SM.advterrain.getDoorFade(x, y);
       if (typeof v === 'number' && isFinite(v) && v >= 0 && v <= 1) return v;
@@ -1047,12 +787,9 @@ SM.vehicle = (function () {
    * would, so a purchase UNFOLDS in the garage instead of popping.
    */
   function syncRig() {
-    if (!advMode()) return;
-
     miningPower = rigStat('getDrillPower', C.VEHICLE_MINING_POWER);
     collectRadius = rigStat('getCollectRadius', C.VEHICLE_COLLECT_RADIUS);
     if (collectRadius > MAX_COLLECT) collectRadius = MAX_COLLECT;
-    valueMul = 1;                // adventure sells at the surface, not in flight
 
     var flags = (SM.rig && SM.rig.getPartFlags) ? SM.rig.getPartFlags() : null;
     var i, k, v, changed = false;
@@ -1103,94 +840,6 @@ SM.vehicle = (function () {
     }
   }
 
-  /* =====================================================================
-   * UPGRADES
-   * ================================================================== */
-
-  /**
-   * Apply an upgrade by id. Starts the morph + per-part unfold animations and
-   * emits one `vehicle:transform` per part that grew.
-   * @return reused descriptor {id, title, description, tier, effect} or null.
-   */
-  function applyUpgrade(id) {
-    var e = UPGRADE_EFFECTS[id];
-    if (!e) return null;
-
-    var tier = tierCount[id] || 0;
-    tierCount[id] = tier + 1;
-
-    // Diminishing returns on repeat purchases.
-    var f = e.falloff === undefined ? DEFAULT_FALLOFF : e.falloff;
-    var k = Math.pow(f, tier);
-
-    bladeWidthFrom = bladeWidth;
-    bodyWidthFrom = bodyWidth;
-
-    if (e.xBlade) bladeWidthTarget *= 1 + (e.xBlade - 1) * k;
-    if (e.addBlade) bladeWidthTarget += e.addBlade * k;
-    if (e.xBody) bodyWidthTarget *= 1 + (e.xBody - 1) * k;
-    if (e.xPower) miningPower *= 1 + (e.xPower - 1) * k;
-    if (e.addPower) miningPower += e.addPower * k;
-    if (e.xCollect) collectRadius *= 1 + (e.xCollect - 1) * k;
-    if (e.xSpeed) speedMul *= 1 + (e.xSpeed - 1) * k;
-    if (e.xValue) valueMul *= 1 + (e.xValue - 1) * k;
-
-    if (bladeWidthTarget > MAX_BLADE) bladeWidthTarget = MAX_BLADE;
-    if (bodyWidthTarget > MAX_BODY) bodyWidthTarget = MAX_BODY;
-    if (collectRadius > MAX_COLLECT) collectRadius = MAX_COLLECT;
-    if (speedMul > MAX_SPEED_MUL) speedMul = MAX_SPEED_MUL;
-
-    // --- parts ---------------------------------------------------------
-    if (e.parts) {
-      for (var pk in e.parts) {
-        if (parts[pk] === undefined) continue;      // unknown part name
-        parts[pk] += e.parts[pk];
-        deploy[pk] = 0;                             // unfold it
-        deployActive = true;
-        evTransform.part = pk;
-        evTransform.width = getTargetWidth();
-        SM.events.emit('vehicle:transform', evTransform);
-      }
-    }
-    // Upgrades with no new geometry still widen something; announce the blade
-    // so presentation always gets a transform beat.
-    if (!e.parts) {
-      evTransform.part = 'blade';
-      evTransform.width = getTargetWidth();
-      SM.events.emit('vehicle:transform', evTransform);
-    }
-
-    // Arm the systems that need a first tick.
-    if (parts.pulse > 0 && pulseTimer <= 0) pulseTimer = 2.0;
-    if (parts.overdrive > 0 && odCooldown <= 0) odCooldown = 8.0;
-
-    morphT = 0;
-    morphActive = true;
-    upgradeCount++;
-
-    /* --- owned manifest ------------------------------------------------
-     * The only place `owned` is ever touched. Repeat purchases raise the
-     * level of the existing entry so the machine's history stays in the
-     * order it was actually built, not in purchase-count order.
-     * ---------------------------------------------------------------- */
-    var slot = null;
-    for (var oi = 0; oi < owned.length; oi++) {
-      if (owned[oi].id === id) { slot = owned[oi]; break; }
-    }
-    if (slot) slot.level = tier + 1;
-    else owned.push({ id: id, title: e.title || id, level: 1 });
-    upgradeVersion++;
-
-    appliedOut.id = id;
-    appliedOut.tier = tier;
-    appliedOut.effect = e;
-    appliedOut.title = tier > 0 ? (e.title + ' MK' + (tier + 1)) : e.title;
-    appliedOut.description = e.description || '';
-    return appliedOut;
-  }
-
-  function getUpgradeEffect(id) { return UPGRADE_EFFECTS[id] || null; }
-
   /** Overshooting ease — parts snap out past their target then settle. */
   function easeOutBack(t) {
     var c1 = 1.9, c3 = c1 + 1;
@@ -1199,237 +848,30 @@ SM.vehicle = (function () {
   }
 
   /* =====================================================================
-   * OVERDRIVE
-   * ================================================================== */
-  function startOverdrive(duration) {
-    if (halted || parts.overdrive <= 0) return false;
-    var d = duration || (OD_DURATION + (parts.overdrive - 1) * OD_DURATION_STEP);
-    odRemaining = d;
-    if (!odActive) {
-      odActive = true;
-      evOdStart.duration = d;
-      SM.events.emit('overdrive:start', evOdStart);
-      if (SM.camera) SM.camera.shake(16);
-    }
-    return true;
-  }
-
-  function updateOverdrive(dt) {
-    // Halted: end any running frenzy and stop the cooldown from arming a new
-    // one. odLevel still ramps below, so the glow and the engine note fade
-    // out over the same second the machine takes to stop.
-    if (halted) {
-      if (odActive) {
-        odActive = false;
-        odRemaining = 0;
-        SM.events.emit('overdrive:end', evOdEnd);
-      }
-    } else if (parts.overdrive > 0) {
-      if (odActive) {
-        odRemaining -= dt;
-        if (odRemaining <= 0) {
-          odActive = false;
-          odRemaining = 0;
-          odCooldown = Math.max(8, OD_PERIOD - (parts.overdrive - 1) * OD_PERIOD_STEP);
-          SM.events.emit('overdrive:end', evOdEnd);
-        }
-      } else {
-        odCooldown -= dt;
-        if (odCooldown <= 0) startOverdrive(0);
-      }
-    }
-    var target = odActive ? 1 : 0;
-    odLevel += (target - odLevel) * (1 - Math.exp(-OD_RAMP * dt));
-    if (odLevel < 0.001) odLevel = 0;
-  }
-
-  /* =====================================================================
-   * SPEED BOOST
-   * ================================================================== */
-  function updateBoost(dt) {
-    if (boostGap > 0) boostGap -= dt;
-    if (halted && boostRemaining > 0) {
-      boostRemaining = 0;
-      boostAnnounce = 0;
-    }
-
-    // One 'boost:start' per block, not per fragment: the announce timer waits
-    // out the rest of the cloud so the reported duration is the real total.
-    if (boostAnnounce > 0) {
-      boostAnnounce -= dt;
-      if (boostAnnounce <= 0 && boostRemaining > 0) {
-        boostActive = true;
-        evBoost.duration = boostRemaining;
-        SM.events.emit('boost:start', evBoost);
-        if (SM.camera) SM.camera.shake(10);
-      }
-    }
-
-    // Only ACTIVE boost burns down. This used to tick unconditionally, which
-    // meant the clock started on the first fragment while the buff itself
-    // waits for the announce (boostLevel only ramps when boostActive) — so
-    // roughly 0.8s of a six-second surge was spent before the machine ever
-    // went faster, and 'boost:start' then reported the smaller leftover as if
-    // it were the whole prize. Measured: 6.0s collected, 5.19s announced.
-    if (boostActive && boostRemaining > 0) {
-      boostRemaining -= dt;
-      if (boostRemaining <= 0) {
-        boostRemaining = 0;
-        boostActive = false;
-        SM.events.emit('boost:end', null);
-      }
-    }
-
-    // Ramp only once the block has been announced, so the surge and its sound
-    // land on the same step.
-    var target = (boostActive && boostRemaining > 0) ? 1 : 0;
-    boostLevel += (target - boostLevel) * (1 - Math.exp(-BOOST_RAMP * dt));
-    if (boostLevel < 0.001) boostLevel = 0;
-  }
-
-  /* =====================================================================
-   * EXPLOSIVE PULSE
-   * ================================================================== */
-  function updatePulse(dt) {
-    if (halted || parts.pulse <= 0) return;   // the world goes quiet
-    pulseTimer -= dt * (odActive ? 2.0 : 1);
-    if (pulseTimer > 0) return;
-
-    var period = PULSE_PERIOD - (parts.pulse - 1) * PULSE_PERIOD_STEP;
-    if (period < PULSE_PERIOD_MIN) period = PULSE_PERIOD_MIN;
-    pulseTimer = period;
-
-    var radius = PULSE_RADIUS + (parts.pulse - 1) * PULSE_RADIUS_STEP;
-    if (radius > PULSE_RADIUS_MAX) radius = PULSE_RADIUS_MAX;
-
-    // Detonate just past the blade so the crater opens the road ahead.
-    var px = x;
-    var py = getBladeFrontY() - radius * 0.45;
-    // Damage scales with the rig so the pulse never becomes a dud late on.
-    var dmg = 8 + getMiningPower() * 0.30;
-
-    SM.particles.explode(px, py, radius, dmg, PULSE_FORCE);
-
-    evPulse.x = px; evPulse.y = py; evPulse.radius = radius;
-    SM.events.emit('pulse:fired', evPulse);
-    if (SM.camera) SM.camera.shake(18);
-  }
-
-  /* =====================================================================
    * UPDATE
+   * ---------------------------------------------------------------------
+   * ONE DRIVE MODEL. There used to be two behind an `if (advDriving())`: the
+   * expedition drive below, and above it a ~100-line time-attack path that
+   * advanced the machine automatically at C.VEHICLE_SPEED, read one steering
+   * axis, cut a fixed rectangle across the lane, clamped x to the lane edges,
+   * ran the periodic overdrive/pulse/boost systems and bled to a halt when the
+   * clock expired. It is gone, and with it the last caller of
+   * SM.input.getSteer().
+   *
+   * The guard stays, though nothing should reach it otherwise: main.js holds
+   * the fixed step on every screen that is not a descent, so update() is only
+   * called inside a mine. Cheap insurance against a stepped frame slipping
+   * through and driving the machine across a workshop screen.
    * ================================================================== */
   function update(dt) {
-    /* ADVENTURE MODE takes a completely different path: no auto-advance, no
-     * gates, no overdrive, and a 2D stick instead of a steer axis. Everything
-     * below this line is the time attack, untouched. */
-    if (advDriving()) { updateAdv(dt); return; }
-
-    /* --- 1. steering ------------------------------------------------- *
-     * Once halted the stick is dead: the run is scored, so a player still
-     * holding a key must not be able to nudge the wreck into one more ore
-     * pocket while it coasts.
-     * ------------------------------------------------------------------ */
-    var steer = halted ? 0 : SM.input.getSteer();
-    vx += steer * C.VEHICLE_STEER_ACCEL * dt;
-    if (steer > -0.02 && steer < 0.02) {
-      vx *= Math.exp(-C.VEHICLE_STEER_DRAG * dt);
-    }
-    var maxLat = C.VEHICLE_STEER_MAX;
-    if (vx > maxLat) vx = maxLat; else if (vx < -maxLat) vx = -maxLat;
-    x += vx * dt;
-
-    // Keep the (now possibly enormous) machine roughly inside the lane.
-    var halfSpan = getWidth() * 0.5;
-    var bound = C.LANE_HALF_WIDTH - halfSpan * 0.92;
-    if (bound < 60) bound = 60;
-    if (x < -bound) { x = -bound; if (vx < 0) vx *= -0.25; }
-    else if (x > bound) { x = bound; if (vx > 0) vx *= -0.25; }
-
-    var bankTarget = -(vx / maxLat) * C.VEHICLE_BANK_MAX;
-    bank += (bankTarget - bank) * (1 - Math.exp(-9 * dt));
-
-    /* --- 2. morph + part unfold animations ---------------------------- */
-    animateMorph(dt);
-
-    /* --- 3. periodic systems ------------------------------------------ */
-    updateOverdrive(dt);
-    updateBoost(dt);
-    updatePulse(dt);
-
-    /* --- 4. CUT ------------------------------------------------------- *
-     * The cut region is the rectangle immediately in front of the blade.
-     * The debris origin sits AHEAD of it so fragments are thrown backwards,
-     * spraying around the sides of the machine and into the collector.
-     * ------------------------------------------------------------------ */
-    var frontY = getBladeFrontY();
-    var halfBlade = bladeWidth * 0.5;
-    var damaged = 0;
-    // Halted: the blade stops removing hardness entirely. Without this the
-    // rig would keep chewing the same rock it stopped against, spraying
-    // debris and firing material:destroyed long after the buzzer.
-    if (!halted) {
-      var power = getMiningPower();
-      var res = SM.particles.damageSolidInRect(
-        x - halfBlade, frontY - C.VEHICLE_BLADE_DEPTH,
-        x + halfBlade, frontY + 8,
-        power * dt,
-        x, frontY - C.VEHICLE_BLADE_DEPTH - 26
-      );
-      damaged = res.damaged;
-      resistance += (res.resistance - resistance) * (1 - Math.exp(-12 * dt));
-    } else {
-      resistance -= resistance * (1 - Math.exp(-12 * dt));
-    }
-
-    /* --- 5. forward motion -------------------------------------------- *
-     * Resistance is the summed hardness of everything the blade FAILED to
-     * break. A wide blade meets more rock, so growth alone does not make you
-     * faster — you have to keep the power curve up with it. That is the
-     * self-balancing "risk of slowing down" lever from the spec.
-     * ------------------------------------------------------------------ */
-    if (halted) {
-      speed *= Math.exp(-HALT_DECAY * dt);
-      if (speed < HALT_SNAP) speed = 0;
-    } else {
-      var factor = 1 / (1 + resistance * C.VEHICLE_RESISTANCE_SCALE * RESISTANCE_BOOST);
-      if (factor < C.VEHICLE_MIN_SPEED_FACTOR) factor = C.VEHICLE_MIN_SPEED_FACTOR;
-      var odSpeed = 1 + (OD_SPEED - 1) * odLevel;
-      // Boost stacks MULTIPLICATIVELY with overdrive. Both at once is rare and
-      // brief, and the point of catching a boost block mid-frenzy should be
-      // that it feels ridiculous.
-      var boostSpeed = 1 + (BOOST_SPEED - 1) * boostLevel;
-      var targetSpeed = C.VEHICLE_SPEED * speedMul * odSpeed * boostSpeed * factor;
-      speed += (targetSpeed - speed) * (1 - Math.exp(-8 * dt));
-    }
-    y -= speed * dt;
-
-    /* --- 6. hand our state to the particle system --------------------- */
-    var colRadius = getCollectRadius();
-    SM.particles.setCollectorTarget(x, y + C.VEHICLE_BODY_LENGTH * 0.22, colRadius);
-    SM.particles.setVehicleBody(
-      x, y,
-      bodyWidth * 0.5 + trackWidth() - TRACK_INSET,
-      C.VEHICLE_BODY_LENGTH * 0.5,
-      vx, -speed
-    );
-
-    // Rear conveyor: a second, smaller collection bubble dragged behind the
-    // machine that sweeps up the settled trail we just ploughed through.
-    // Stops with everything else on halt — but the MAIN collector above is
-    // deliberately left running, so ore already in flight when the buzzer
-    // went still lands in the hopper instead of being orphaned mid-air.
-    if (!halted && parts.conveyor > 0) {
-      var tr = TRAIL_RADIUS + (parts.conveyor - 1) * TRAIL_RADIUS_STEP;
-      SM.particles.collectInRadius(x, y + rearEdge() + tr * 0.35, tr);
-    }
-
-    /* --- 7. machinery animation --------------------------------------- */
-    animateMachinery(dt, damaged);
+    if (!advDriving()) return;
+    updateAdv(dt);
   }
 
   /**
-   * The chassis/blade width morph and the per-part unfold. Lifted out of
-   * update() verbatim; both modes install machinery and both must animate it.
+   * The chassis/blade width morph and the per-part unfold. THIS IS WHAT A
+   * WORKSHOP PURCHASE LOOKS LIKE: syncRig() writes the new width targets and
+   * zeroes the deploy timers, and this eases them home with an overshoot.
    */
   function animateMorph(dt) {
     if (morphActive) {
@@ -1453,33 +895,31 @@ SM.vehicle = (function () {
   }
 
   /**
-   * Drums, drills, treads, belts, pistons, lights and smoke. Lifted out of
-   * update() verbatim so the adventure path can drive the same machinery with
-   * the same numbers — a second copy would have drifted within a day.
+   * Drums, treads, belts, pistons, lights and smoke — everything that turns
+   * whether or not the player is doing anything. Driven from updateAdv().
    */
   function animateMachinery(dt, damaged) {
     var load = damaged / 30;
     if (load > 1) load = 1;
     loadSmoothed += (load - loadSmoothed) * (1 - Math.exp(-8 * dt));
-    var rev = 1 + odLevel * 1.4;
 
-    drumPhase += (14 + loadSmoothed * 26) * rev * dt;
+    drumPhase += (14 + loadSmoothed * 26) * dt;
     if (drumPhase > 1e6) drumPhase = 0;
-    drillPhase += (18 + loadSmoothed * 34) * rev * dt;
+    drillPhase += (18 + loadSmoothed * 34) * dt;
     if (drillPhase > 1e6) drillPhase = 0;
-    grindPhase += (11 + loadSmoothed * 22) * rev * dt;
+    grindPhase += (11 + loadSmoothed * 22) * dt;
     if (grindPhase > 1e6) grindPhase = 0;
     treadPhase += speed * dt * 0.06;
     if (treadPhase > 1e6) treadPhase = 0;
     beltPhase += (60 + speed * 0.35) * dt * 0.08;
     if (beltPhase > 1e6) beltPhase = 0;
-    lightPhase += dt * (1 + odLevel);
+    lightPhase += dt;
     if (lightPhase > 1e6) lightPhase = 0;
-    pistonPhase += (6 + speed * 0.02) * rev * dt;
+    pistonPhase += (6 + speed * 0.02) * dt;
     if (pistonPhase > 1e6) pistonPhase = 0;
     armPhase += (1.6 + loadSmoothed * 2.4) * dt;
     if (armPhase > 1e6) armPhase = 0;
-    smokePhase += (0.8 + speed * 0.004 + odLevel) * dt;
+    smokePhase += (0.8 + speed * 0.004) * dt;
     if (smokePhase > 1e6) smokePhase = 0;
     hopperPulse -= hopperPulse * 3.2 * dt;
   }
@@ -1517,7 +957,7 @@ SM.vehicle = (function () {
     // A dry tank is a dead engine: no thrust, no drill, and the machine coasts
     // to a stop on its own drag while adv.js counts out the strand.
     advDry = !!(SM.adv.isDry && SM.adv.isDry());
-    var powered = !halted && !advDry;
+    var powered = !advDry;
     if (!powered) { mx = 0; my = 0; mag = 0; }
 
     /* --- 2. heading ---------------------------------------------------
@@ -1585,7 +1025,7 @@ SM.vehicle = (function () {
       /* --- THE EDGE OF THE LEVEL IS ALWAYS A WALL ---------------------
        * Whatever the hardness gate just decided. A tier-5 bit's cap is 34 and
        * bedrock is 26, so the seal around a level is CUTTABLE ROCK and the gate
-       * would wave the machine straight at it (ADVENTURE.md §2b: "tier-5 drills
+       * would wave the machine straight at it (ARCHITECTURE.md §7: "tier-5 drills
        * CUT bedrock — the seal GUARANTEE is the vehicle position clamps, not
        * rock"). Two things follow, and both are here rather than in the world
        * module because this is the file that owns the cut:
@@ -1748,7 +1188,7 @@ SM.vehicle = (function () {
 
     /* --- 5. THE FOUR WALLS OF THE LEVEL -------------------------------
      * THIS IS THE SEAL. Not the bedrock — the bedrock is the picture of it
-     * (ADVENTURE.md §2b). A level is a bounded map and the ONE way off it is the
+     * (ARCHITECTURE.md §7). A level is a bounded map and the ONE way off it is the
      * lift, so the position is clamped on all four sides against the box
      * js/advterrain.js publishes, and it is clamped regardless of drill tier, of
      * what the carve mask says, and of what a v1.8 save dug through here before
@@ -1989,66 +1429,54 @@ SM.vehicle = (function () {
   function trackWidth() { return TRACK_WIDTH + parts.treads * TRACK_PER_LEVEL; }
   function hullHalf() { return bodyWidth * 0.5 + trackWidth() - TRACK_INSET; }
   /**
-   * How far the rear cargo assembly reaches behind the chassis rear edge.
-   * ADVENTURE returns the ore bed (bays + couplings, measured from ADV_BED_Y0);
-   * classic returns exactly the hopper it always did. Everything downstream —
-   * the ground shadow, rearEdge(), advRadius() and the trailing collector — is
-   * therefore correct in both modes with no branch of its own.
+   * How far the rear cargo assembly reaches behind the chassis rear edge: the
+   * ore bed, bays and couplings, measured from ADV_BED_Y0. Everything
+   * downstream — the ground shadow, rearEdge(), advRadius() and the trailing
+   * collector — reads this one number.
    */
   function hopperLen() {
-    if (advMode()) {
-      var l = advBedTotal() - wallT();
-      return l > 10 ? l : 10;
-    }
-    return HOPPER_LEN + parts.hopper * HOPPER_PER_LEVEL;
+    var l = advBedTotal() - wallT();
+    return l > 10 ? l : 10;
   }
-  function conveyorLen() {
-    // ADVENTURE: the belt is not a tail, it is the intake feeder on the deck
-    // (drawIntake), so it adds no length. The `conveyor` flag still drives the
-    // trailing pickup bubble in advPushToParticles() — that is gameplay.
-    if (advMode()) return 0;
-    return parts.conveyor > 0
-      ? CONVEYOR_LEN + (parts.conveyor - 1) * CONVEYOR_PER_LEVEL : 0;
-  }
+  /**
+   * ZERO, ALWAYS. The belt is not a tail on this machine, it is the intake
+   * feeder on the deck (drawIntake), so it adds no length behind the chassis.
+   * Kept as a function because rearEdge() reads it and because the `conveyor`
+   * flag still drives the trailing pickup bubble in advPushToParticles() —
+   * that part is gameplay, not geometry.
+   */
+  function conveyorLen() { return 0; }
   /** y of the very back of the machine (+y is behind). */
   function rearEdge() {
     return C.VEHICLE_BODY_LENGTH * 0.5 + hopperLen() + conveyorLen();
   }
   function bladeThick() { return BLADE_THICK + parts.bladeTier * BLADE_THICK_PER_TIER; }
 
-  /** Half-span reached by the outermost grinder disc (0 if none). */
-  function grinderHalf() {
-    if (parts.grinders <= 0) return 0;
-    return hullHalf() + GRINDER_R * 1.15 + (parts.grinders - 1) * GRINDER_R * 1.55;
-  }
-  /** Half-span reached by the magnet collector arms (0 if none, 0 in adventure). */
-  function magnetHalf() {
-    if (advMode() || parts.magnetArms <= 0) return 0;
-    return hullHalf() + ARM_REACH + parts.magnetArms * ARM_REACH_STEP;
-  }
-
   function spanOf(blade, body) {
     var s = blade;
     var hull = body * 0.5 + trackWidth() - TRACK_INSET;
     var h2 = hull * 2;
     if (h2 > s) s = h2;
+    /* THE GRINDER WIDENING IS DELIBERATELY STILL HERE, and it is the one place
+     * this function reports something the renderer does not draw. `grinders` is
+     * a live SM.rig flag, but the machine draws shoulder cutters tucked INSIDE
+     * the reamer rather than the old outrigger discs — so a fitted grinder
+     * inflates the reported width by the outrigger formula while the silhouette
+     * stays put. Left as it was rather than quietly re-tuned: getWidth() feeds
+     * the camera framing, the dust spread and the collision span, and changing
+     * it is a balance decision, not a cleanup. Flagged for the balance pass. */
     if (parts.grinders > 0) {
       var g = (hull + GRINDER_R * 1.15 + (parts.grinders - 1) * GRINDER_R * 1.55) * 2;
       if (g > s) s = g;
     }
-    // ADVENTURE has no collector arms — the widest thing at the back is the ore
-    // bed, which may overhang the tracks by a few units and nothing more. That
-    // keeps getWidth() an honest hull width for the dust and the camera instead
-    // of the 840-unit arm span the old geometry reported at full cargo.
-    if (advMode()) {
-      var b = hull * bedHalfFrac() * 2;
-      if (b > s) s = b;
-    } else if (parts.magnetArms > 0) {
-      var m = (hull + ARM_REACH + parts.magnetArms * ARM_REACH_STEP) * 2;
-      if (m > s) s = m;
-    }
-    // Safety net: nothing may reach past the blade cap, or the rig starts
-    // grinding bedrock and the camera has no lane left to frame.
+    // THERE ARE NO COLLECTOR ARMS on this machine — the widest thing at the
+    // back is the ore bed, which may overhang the tracks by a few units and
+    // nothing more. That keeps getWidth() an honest hull width for the dust and
+    // the camera instead of the 840-unit arm span the old geometry reported at
+    // full cargo.
+    var b = hull * bedHalfFrac() * 2;
+    if (b > s) s = b;
+    // Safety net: nothing may reach past the blade cap.
     if (s > MAX_BLADE) s = MAX_BLADE;
     return s;
   }
@@ -2104,17 +1532,11 @@ SM.vehicle = (function () {
    * main.js zeroes the fixed step while the workshop is up, so update() — and
    * with it animateMorph() — does not run there. Reading deploy[] directly
    * would draw the machine you just paid for permanently half-built on the one
-   * screen whose whole job is showing it to you. The four adventure-only
-   * subassemblies below (lamps, radiators, armour, dish) were reading deploy[]
-   * directly and had exactly that bug; they go through here now too. Classic is
-   * unaffected either way — its flags never leave zero and advDriving() is false,
-   * so this returns the settled 1 it always effectively had.
+   * screen whose whole job is showing it to you. EVERY subassembly goes through
+   * here for that reason; lamps, radiators, armour and dish once read deploy[]
+   * directly and had exactly that bug.
    */
   function depOf(k) {
-    // Classic keeps its unfold exactly as it was — its clock never stops, so
-    // there is no frozen screen to protect against and popping a part in
-    // fully-formed would lose the transform beat.
-    if (!advMode()) return easeOutBack(deploy[k]);
     return advDriving() ? easeOutBack(deploy[k]) : 1;
   }
 
@@ -2150,7 +1572,7 @@ SM.vehicle = (function () {
 
   function ensureGradients(ctx, bw, bl) {
     var sig = ((bw * 2) | 0) * 100003 + ((bladeWidth * 2) | 0) * 31 + parts.hopper
-            + parts.treads * 7919 + (advMode() ? 524287 : 0);
+            + parts.treads * 7919;
     if (sig === gradSig && gradCtx === ctx) return;
     gradSig = sig;
     gradCtx = ctx;
@@ -2203,8 +1625,6 @@ SM.vehicle = (function () {
      * as the far end of a cone. Two of them are radial/graded heat for the
      * THERMAL LANCE; building those per frame would be an allocation in the
      * render path, which is the whole reason this function exists. */
-    if (!advMode()) return;
-
     var ayb = augerBaseY(), ayt = augerTipY();
     gAuger = ctx.createLinearGradient(0, ayb, 0, ayt);
     gAuger.addColorStop(0, '#98a3af');
@@ -2258,10 +1678,9 @@ SM.vehicle = (function () {
     ctx.save();
     if (lift < 1) ctx.globalAlpha = lift;
     ctx.translate(x, y);
-    // ADVENTURE: the hull faces its heading. heading 0 is local -y, which is
-    // the classic forward direction, so classic renders through the identical
-    // path with the identical transform.
-    ctx.rotate(advMode() ? heading + bank : bank);
+    // The hull faces its heading. heading 0 is local -y, i.e. straight up the
+    // screen; `bank` is the visual roll into a turn on top of it.
+    ctx.rotate(heading + bank);
     drawMachine(ctx);
     ctx.restore();
   }
@@ -2292,67 +1711,45 @@ SM.vehicle = (function () {
 
     drawShadow(ctx, bw, bl);
     drawCollectorField(ctx, bl);
-    /* THE SEAM. Adventure's cargo geometry is the ore bed; classic's is the
-     * hopper, the tail conveyor and the collector arms its own upgrade path
-     * installs. Neither knows about the other. */
-    var adv = advMode();
-    if (adv) {
-      drawOreBed(ctx, bw, bl);
-    } else {
-      if (parts.conveyor > 0) drawConveyor(ctx, bw, bl);
-      drawHopper(ctx, bw, bl);
-      // Arms draw AFTER the hopper: behind it they were completely hidden.
-      if (parts.magnetArms > 0) drawMagnetArms(ctx, bw, bl);
-    }
+    drawOreBed(ctx, bw, bl);
     drawTracks(ctx, bw, bl);
     if (parts.radiators > 0) drawRadiators(ctx, bw, bl);
     drawChassis(ctx, bw, bl, morphFlash);
     // The intake sits ON the deck, so it draws over the chassis it is bolted to.
-    if (adv) drawIntake(ctx, bw, bl);
+    drawIntake(ctx, bw, bl);
     if (parts.armor > 0) drawArmor(ctx, bw, bl);
-    /* THE SAME SEAM AT THE FRONT END. Adventure's drill is one auger that grows
-     * (drawDrillRig, which folds the `drills` and `grinders` flags into the head
-     * as collars and shoulder cutters); classic's is the wide blade plus the
-     * separate rotary heads and outrigger grinders its own upgrades install. */
-    if (adv) {
-      drawDrillRig(ctx, bw, bl, morphFlash);
-    } else {
-      if (parts.grinders > 0) drawGrinders(ctx, bw, bl);
-      drawBlade(ctx, bw, bl, morphFlash);
-      if (parts.drills > 0) drawDrills(ctx, bw, bl);
-    }
+    /* THE FRONT END IS ONE OBJECT. drawDrillRig folds the `drills` and
+     * `grinders` flags into the head itself, as collars and shoulder cutters —
+     * where the old rig had a wide blade with separate rotary heads and
+     * outrigger discs bolted around it. */
+    drawDrillRig(ctx, bw, bl, morphFlash);
     if (parts.lamps > 0) drawLamps(ctx, bw, bl);
     if (parts.dish > 0) drawDish(ctx, bw, bl);
     drawExhaust(ctx, bw, bl);
     drawLights(ctx, bw, bl);
-    if (odLevel > 0.01) drawOverdriveGlow(ctx, bw, bl);
   }
 
   /* --- ground shadow ---------------------------------------------------- */
   function drawShadow(ctx, bw, bl) {
     var hh = hullHalf();
     ctx.fillStyle = 'rgba(0,0,0,0.42)';
-    /* ADVENTURE: the bed is its own object, narrower than the tracks at the low
-     * tiers and split by couplings at the high ones. One slab down the whole
-     * machine drew a black skirt around the tub and filled the gaps between the
-     * bays in solid, which is exactly what killed the "separate wagons" read. */
-    if (advMode()) {
-      roundRect(ctx, -hh + 5, -bl * 0.5 + 7, hh * 2, bl, 12);
-      ctx.fill();
-      var n = bayCount(), y = bedY0(), hw = bedHalf(), grow = bedGrow();
-      ctx.save();
-      ctx.translate(5, 7);
-      for (var i = 0; i < n; i++) {
-        var len = bayLen(i) * grow, sc = hw * bayScale(i);
-        bedPath(ctx, y, y + len, sc * 0.96, sc, 7);
-        ctx.fill();
-        y += len + ADV_BAY_GAP;
-      }
-      ctx.restore();
-      return;
-    }
-    roundRect(ctx, -hh + 5, -bl * 0.5 + 7, hh * 2, bl + hopperLen() + conveyorLen(), 12);
+    /* PER BAY, NOT ONE SLAB. The bed is its own object, narrower than the
+     * tracks at the low tiers and split by couplings at the high ones. One slab
+     * down the whole machine drew a black skirt around the tub and filled the
+     * gaps between the bays in solid, which is exactly what killed the
+     * "separate wagons" read. */
+    roundRect(ctx, -hh + 5, -bl * 0.5 + 7, hh * 2, bl, 12);
     ctx.fill();
+    var n = bayCount(), y = bedY0(), hw = bedHalf(), grow = bedGrow();
+    ctx.save();
+    ctx.translate(5, 7);
+    for (var i = 0; i < n; i++) {
+      var len = bayLen(i) * grow, sc = hw * bayScale(i);
+      bedPath(ctx, y, y + len, sc * 0.96, sc, 7);
+      ctx.fill();
+      y += len + ADV_BAY_GAP;
+    }
+    ctx.restore();
   }
 
   /* --- collector field --------------------------------------------------
@@ -2365,11 +1762,11 @@ SM.vehicle = (function () {
     var cy = bl * 0.22;
     var pulse = 0.5 + 0.5 * Math.sin(armPhase * 2.2);
     ctx.lineWidth = 2.5;
-    ctx.strokeStyle = 'rgba(120,220,255,' + (0.16 + odLevel * 0.2).toFixed(3) + ')';
+    ctx.strokeStyle = 'rgba(120,220,255,0.160)';
     ctx.beginPath();
     ctx.arc(0, cy, r * (0.62 + pulse * 0.34), 0, TAU);
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(120,220,255,' + (0.09 + odLevel * 0.14).toFixed(3) + ')';
+    ctx.strokeStyle = 'rgba(120,220,255,0.090)';
     ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.arc(0, cy, r, 0, TAU);
@@ -2428,189 +1825,6 @@ SM.vehicle = (function () {
         }
       }
     }
-  }
-
-  /* --- rear hopper -------------------------------------------------------- */
-  function drawHopper(ctx, bw, bl) {
-    var dep = easeOutBack(deploy.hopper);
-    var hl = hopperLen() * (0.5 + 0.5 * dep);
-    var y0 = bl * 0.32;
-    var y1 = bl * 0.5 + hl;
-    var w0 = bw * 0.86, w1 = bw * (1.02 + parts.hopper * 0.10);
-    var pulse = hopperPulse;
-
-    ctx.beginPath();
-    ctx.moveTo(-w0 * 0.5, y0);
-    ctx.lineTo(w0 * 0.5, y0);
-    ctx.lineTo(w1 * 0.5, y1);
-    ctx.lineTo(-w1 * 0.5, y1);
-    ctx.closePath();
-    ctx.fillStyle = gHopper;
-    ctx.fill();
-    ctx.strokeStyle = '#15181c';
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-
-    // Ore glow inside the hopper, brightening with every gulp.
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(-w0 * 0.5, y0);
-    ctx.lineTo(w0 * 0.5, y0);
-    ctx.lineTo(w1 * 0.5, y1);
-    ctx.lineTo(-w1 * 0.5, y1);
-    ctx.closePath();
-    ctx.clip();
-    ctx.fillStyle = 'rgba(255,190,70,' + (0.16 + pulse * 0.55).toFixed(3) + ')';
-    ctx.fillRect(-w1 * 0.5, y1 - 20 - pulse * 16 - parts.hopper * 8, w1, 46 + parts.hopper * 10);
-    ctx.restore();
-
-    // ribs — one more per hopper level
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-    ctx.lineWidth = 2;
-    var ribs = 3 + parts.hopper;
-    for (var i = 1; i < ribs; i++) {
-      var t = i / ribs;
-      var yy = y0 + (y1 - y0) * t;
-      var ww = (w0 + (w1 - w0) * t) * 0.5;
-      ctx.beginPath();
-      ctx.moveTo(-ww, yy); ctx.lineTo(ww, yy);
-      ctx.stroke();
-    }
-
-    // Overflow funnels on the hopper shoulders once it has been expanded.
-    if (parts.hopper > 0) {
-      ctx.fillStyle = '#3b424a';
-      for (var s = -1; s <= 1; s += 2) {
-        ctx.beginPath();
-        ctx.moveTo(s * w0 * 0.5, y0 + 6);
-        ctx.lineTo(s * (w1 * 0.5 + 16 * dep), y0 + 20);
-        ctx.lineTo(s * (w1 * 0.5 + 16 * dep), y0 + 40);
-        ctx.lineTo(s * w0 * 0.52, y0 + 30);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = '#15181c';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
-    }
-  }
-
-  /* --- rear collection conveyor -------------------------------------------
-   * A belt that runs FORWARD (toward the hopper) carrying scooped material.
-   * Chevrons scroll along it; side scoops sweep the trail into the mouth.
-   * ---------------------------------------------------------------------- */
-  function drawConveyor(ctx, bw, bl) {
-    var dep = easeOutBack(deploy.conveyor);
-    var len = conveyorLen() * dep;
-    if (len < 1) return;
-    var y0 = bl * 0.5 + hopperLen() - 4;
-    var w = bw * (1.06 + (parts.conveyor - 1) * 0.14);
-    var halfW = w * 0.5;
-
-    // belt bed
-    ctx.fillStyle = gBelt;
-    roundRect(ctx, -halfW, y0, w, len, 8);
-    ctx.fill();
-    ctx.strokeStyle = '#111418';
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-
-    // scrolling chevrons (moving toward -y == into the hopper)
-    ctx.save();
-    roundRect(ctx, -halfW, y0, w, len, 8);
-    ctx.clip();
-    var pitch = 20;
-    var off = (beltPhase * pitch) % pitch;
-    ctx.strokeStyle = 'rgba(255,196,64,0.55)';
-    ctx.lineWidth = 4;
-    for (var cy = y0 + len + pitch; cy > y0 - pitch; cy -= pitch) {
-      var yy = cy - off;
-      ctx.beginPath();
-      ctx.moveTo(-halfW + 4, yy + 8);
-      ctx.lineTo(0, yy);
-      ctx.lineTo(halfW - 4, yy + 8);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // rollers
-    ctx.fillStyle = '#565f6a';
-    ctx.beginPath();
-    ctx.arc(0, y0 + 6, 5, 0, TAU);
-    ctx.arc(0, y0 + len - 6, 5, 0, TAU);
-    ctx.fill();
-
-    // side scoops that funnel the trail in
-    ctx.fillStyle = '#2f353d';
-    for (var s = -1; s <= 1; s += 2) {
-      var reach = (36 + (parts.conveyor - 1) * 22) * dep;
-      ctx.beginPath();
-      ctx.moveTo(s * halfW, y0 + len * 0.15);
-      ctx.lineTo(s * (halfW + reach), y0 + len * 0.75);
-      ctx.lineTo(s * (halfW + reach), y0 + len);
-      ctx.lineTo(s * halfW, y0 + len * 0.7);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = '#14171b';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-  }
-
-  /* --- magnetic collector arms --------------------------------------------
-   * Two (or four) jointed arms that sweep open and closed behind the rig,
-   * with glowing coil rings at the tips.
-   * ---------------------------------------------------------------------- */
-  function drawMagnetArms(ctx, bw, bl) {
-    var dep = easeOutBack(deploy.magnetArms);
-    var hh = hullHalf();
-    var sweep = Math.sin(armPhase) * 0.16;
-
-    ctx.lineCap = 'round';
-    for (var a = 0; a < parts.magnetArms; a++) {
-      var reach = (ARM_REACH + (a + 1) * ARM_REACH_STEP) * dep;
-      var baseY = bl * 0.12 + a * 26;
-      var tipY = baseY + 54 + a * 18 + Math.sin(armPhase + a) * 6;
-      for (var s = -1; s <= 1; s += 2) {
-        var elbowX = s * (hh + reach * 0.45);
-        var elbowY = baseY + 20;
-        var tipX = s * (hh + reach) * (1 + sweep);
-
-        ctx.strokeStyle = '#39414b';
-        ctx.lineWidth = 13 - a * 2;
-        ctx.beginPath();
-        ctx.moveTo(s * hh * 0.8, baseY);
-        ctx.lineTo(elbowX, elbowY);
-        ctx.lineTo(tipX, tipY);
-        ctx.stroke();
-        ctx.strokeStyle = '#5f6875';
-        ctx.lineWidth = 5 - a;
-        ctx.beginPath();
-        ctx.moveTo(s * hh * 0.8, baseY);
-        ctx.lineTo(elbowX, elbowY);
-        ctx.lineTo(tipX, tipY);
-        ctx.stroke();
-
-        // joint
-        ctx.fillStyle = '#5a636e';
-        ctx.beginPath();
-        ctx.arc(elbowX, elbowY, 7, 0, TAU);
-        ctx.fill();
-
-        // coil ring at the tip
-        var glow = 0.55 + 0.35 * Math.sin(armPhase * 3 + a + s);
-        ctx.strokeStyle = 'rgba(120,220,255,' + glow.toFixed(3) + ')';
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        ctx.arc(tipX, tipY, 20 - a * 2, 0, TAU);
-        ctx.stroke();
-        ctx.fillStyle = 'rgba(120,220,255,0.20)';
-        ctx.beginPath();
-        ctx.arc(tipX, tipY, 30 - a * 2, 0, TAU);
-        ctx.fill();
-      }
-    }
-    ctx.lineCap = 'butt';
   }
 
   /* --- chassis + cabin ------------------------------------------------------ */
@@ -2676,9 +1890,7 @@ SM.vehicle = (function () {
     ctx.strokeStyle = '#14171b';
     ctx.lineWidth = 2;
     ctx.stroke();
-    ctx.fillStyle = odLevel > 0.02
-      ? 'rgba(255,' + (200 - odLevel * 90).toFixed(0) + ',120,0.95)'
-      : 'rgba(150,235,255,0.92)';
+    ctx.fillStyle = 'rgba(150,235,255,0.92)';
     roundRect(ctx, -cw * 0.5 + 5, -1, cw - 10, ch - 12, 4);
     ctx.fill();
 
@@ -2689,250 +1901,11 @@ SM.vehicle = (function () {
     }
   }
 
-  /* --- side grinders --------------------------------------------------------
-   * Toothed discs on outriggers. They counter-rotate and are the widest thing
-   * on the machine until the blade overtakes them.
-   * ---------------------------------------------------------------------- */
-  function drawGrinders(ctx, bw, bl) {
-    var dep = easeOutBack(deploy.grinders);
-    var hh = hullHalf();
-
-    for (var g = 0; g < parts.grinders; g++) {
-      var out = (GRINDER_R * 1.15 + g * GRINDER_R * 1.55) * (g === parts.grinders - 1 ? dep : 1);
-      var gy = -bl * 0.16 + g * 46;
-      var rr = GRINDER_R - g * 3;
-      for (var s = -1; s <= 1; s += 2) {
-        var gx = s * (hh + out);
-
-        // outrigger arm
-        ctx.strokeStyle = '#39414b';
-        ctx.lineWidth = 11;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(s * hh * 0.7, gy - 8);
-        ctx.lineTo(gx, gy);
-        ctx.stroke();
-        ctx.lineCap = 'butt';
-
-        // disc
-        ctx.fillStyle = '#464e58';
-        ctx.beginPath();
-        ctx.arc(gx, gy, rr, 0, TAU);
-        ctx.fill();
-        ctx.strokeStyle = '#14171b';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-
-        // teeth — drawn as short radial spokes at the rim
-        var dir = s * (g & 1 ? -1 : 1);
-        var ph = grindPhase * dir;
-        var teeth = 8 + g;
-        ctx.strokeStyle = '#c3ccd6';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        for (var t = 0; t < teeth; t++) {
-          var a = ph + (t / teeth) * TAU;
-          var ca = Math.cos(a), sa = Math.sin(a);
-          ctx.moveTo(gx + ca * (rr - 7), gy + sa * (rr - 7));
-          ctx.lineTo(gx + ca * (rr + 5), gy + sa * (rr + 5));
-        }
-        ctx.stroke();
-
-        // hub
-        ctx.fillStyle = '#8b95a1';
-        ctx.beginPath();
-        ctx.arc(gx, gy, rr * 0.32, 0, TAU);
-        ctx.fill();
-
-        // sparks under load
-        if (loadSmoothed > 0.15) {
-          ctx.fillStyle = 'rgba(255,170,60,' + (loadSmoothed * 0.5).toFixed(3) + ')';
-          ctx.beginPath();
-          ctx.arc(gx, gy - rr * 0.8, 5 + loadSmoothed * 5, 0, TAU);
-          ctx.fill();
-        }
-      }
-    }
-  }
-
-  /* --- front cutting blade --------------------------------------------------- */
-  function drawBlade(ctx, bw, bl, flash) {
-    var thick = bladeThick();
-    var frontY = -bl * 0.5 - BLADE_ARM;      // blade bar centre line
-    var halfW = bladeWidth * 0.5;
-    var top = frontY - thick * 0.5;
-
-    // Support arms MUST splay out to the blade tips or a wide upgraded blade
-    // looks like it is floating unattached in front of the rig.
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = '#2b3138';
-    ctx.lineWidth = 12;
-    var s;
-    for (s = -1; s <= 1; s += 2) {
-      ctx.beginPath();
-      ctx.moveTo(s * bw * 0.30, -bl * 0.5 + 10);
-      ctx.lineTo(s * Math.min(halfW - 10, bw * 0.30 + 30), frontY + 2);
-      ctx.stroke();
-    }
-    ctx.strokeStyle = '#454d57';
-    ctx.lineWidth = 8;
-    for (s = -1; s <= 1; s += 2) {
-      ctx.beginPath();
-      ctx.moveTo(s * bw * 0.46, -bl * 0.24);
-      ctx.lineTo(s * (halfW - 8), frontY + 3);
-      ctx.stroke();
-      // One extra brace unfolds per blade tier — visible new machinery.
-      for (var b = 0; b < parts.bladeTier; b++) {
-        var t = (b + 1) / (parts.bladeTier + 1);
-        var dp = (b === parts.bladeTier - 1) ? easeOutBack(deploy.bladeTier) : 1;
-        ctx.lineWidth = 6 - b;
-        ctx.beginPath();
-        ctx.moveTo(s * bw * 0.5, bl * (0.06 - b * 0.06));
-        ctx.lineTo(s * (halfW * (0.30 + t * 0.55)) * dp, frontY + 6);
-        ctx.stroke();
-      }
-      ctx.lineWidth = 8;
-    }
-    ctx.lineCap = 'butt';
-
-    // --- rotating drum -------------------------------------------------
-    ctx.save();
-    roundRect(ctx, -halfW, top, bladeWidth, thick, 7);
-    ctx.clip();
-    ctx.fillStyle = gDrum;
-    ctx.fillRect(-halfW, top, bladeWidth, thick);
-
-    // Diagonal stripes scrolling sideways read as a spinning cylinder.
-    var pitch = 20;
-    var off = (drumPhase * 3.2) % pitch;
-    ctx.fillStyle = 'rgba(255,205,70,0.75)';
-    for (var sx = -halfW - pitch * 2; sx < halfW + pitch; sx += pitch) {
-      ctx.beginPath();
-      ctx.moveTo(sx + off, top);
-      ctx.lineTo(sx + off + 8, top);
-      ctx.lineTo(sx + off + 8 + thick, top + thick);
-      ctx.lineTo(sx + off + thick, top + thick);
-      ctx.closePath();
-      ctx.fill();
-    }
-    ctx.fillStyle = 'rgba(255,255,255,0.10)';
-    ctx.fillRect(-halfW, top + 2, bladeWidth, 5);
-    ctx.restore();
-
-    ctx.strokeStyle = '#14171b';
-    ctx.lineWidth = 3;
-    roundRect(ctx, -halfW, top, bladeWidth, thick, 7);
-    ctx.stroke();
-
-    // --- cutting teeth ---------------------------------------------------
-    var toothPitch = 15 - parts.teeth * 2;
-    if (toothPitch < 9) toothPitch = 9;
-    var n = Math.max(3, Math.round(bladeWidth / toothPitch));
-    if (n > 90) n = 90;                        // draw-call ceiling
-    var step = bladeWidth / n;
-    var toothLen = 11 + parts.teeth * 3;
-    for (var i = 0; i < n; i++) {
-      var cx = -halfW + step * (i + 0.5);
-      // Teeth chatter in a travelling wave — reads as violent grinding.
-      var wob = Math.sin(drumPhase * 2.4 + i * 0.9) * 2.4;
-      var len = toothLen + wob;
-      ctx.beginPath();
-      ctx.moveTo(cx - step * 0.38, top);
-      ctx.lineTo(cx, top - len);
-      ctx.lineTo(cx + step * 0.38, top);
-      ctx.closePath();
-      ctx.fillStyle = (i & 1) ? '#c8d2dc' : '#98a4b0';
-      ctx.fill();
-    }
-
-    // hot cutting edge glow, brighter under load and in overdrive
-    var glow = 0.20 + Math.min(0.5, resistance * 0.004) + odLevel * 0.3;
-    ctx.fillStyle = 'rgba(255,150,40,' + glow.toFixed(3) + ')';
-    ctx.fillRect(-halfW, top - 3, bladeWidth, 4);
-
-    // --- morph flourish ---------------------------------------------------
-    if (flash > 0) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = 'rgba(255,255,255,' + (flash * 0.8).toFixed(3) + ')';
-      roundRect(ctx, -halfW, top - 4, bladeWidth, thick + 8, 8);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(120,220,255,' + (flash * 0.85).toFixed(3) + ')';
-      ctx.lineWidth = 3;
-      var rr = (1 - flash) * 70 + 10;
-      for (var t2 = -1; t2 <= 1; t2 += 2) {
-        ctx.beginPath();
-        ctx.arc(t2 * halfW, frontY, rr, 0, TAU);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-  }
-
-  /* --- rotating drill heads ----------------------------------------------
-   * Mounted in front of the blade bar, spread across its span. Each is a
-   * conical bit: a spinning spoke star inside a ring, plus a bright core.
-   * ---------------------------------------------------------------------- */
-  function drawDrills(ctx, bw, bl) {
-    var dep = easeOutBack(deploy.drills);
-    var thick = bladeThick();
-    var frontY = -bl * 0.5 - BLADE_ARM;
-    var baseR = DRILL_R + parts.bladeTier * 3;
-    var dy = frontY - thick * 0.5 - baseR * 0.62;
-    var halfW = bladeWidth * 0.5;
-
-    var pairs = parts.drills;                 // one pair per level
-    for (var p = 0; p < pairs; p++) {
-      var frac = (p + 1) / (pairs + 1);       // spread across the blade half
-      var isNew = (p === pairs - 1);
-      var scale = isNew ? dep : 1;
-      var rr = (baseR - p * 3) * scale;
-      if (rr < 2) continue;
-      for (var s = -1; s <= 1; s += 2) {
-        var dx = s * halfW * frac;
-
-        // mount
-        ctx.fillStyle = '#2f353d';
-        roundRect(ctx, dx - 7, dy, 14, baseR * 1.1, 3);
-        ctx.fill();
-
-        // housing ring
-        ctx.fillStyle = '#4d5661';
-        ctx.beginPath();
-        ctx.arc(dx, dy, rr, 0, TAU);
-        ctx.fill();
-        ctx.strokeStyle = '#14171b';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-
-        // spinning spokes
-        var ph = drillPhase * (s > 0 ? 1 : -1) + p;
-        ctx.strokeStyle = '#d3dae2';
-        ctx.lineWidth = 5;
-        ctx.beginPath();
-        for (var k = 0; k < 5; k++) {
-          var a = ph + (k / 5) * TAU;
-          var ca = Math.cos(a), sa = Math.sin(a);
-          ctx.moveTo(dx - ca * rr * 0.85, dy - sa * rr * 0.85);
-          ctx.lineTo(dx + ca * rr * 0.85, dy + sa * rr * 0.85);
-        }
-        ctx.stroke();
-
-        // hot core
-        ctx.fillStyle = 'rgba(255,' + (150 + odLevel * 80).toFixed(0) + ',60,' +
-                        (0.55 + loadSmoothed * 0.4).toFixed(3) + ')';
-        ctx.beginPath();
-        ctx.arc(dx, dy, rr * 0.34, 0, TAU);
-        ctx.fill();
-      }
-    }
-  }
-
   /* =====================================================================
-   * ADVENTURE SUBASSEMBLIES
+   * WORKSHOP SUBASSEMBLIES
    * ---------------------------------------------------------------------
-   * Three parts that only exist underground, switched on by the `lamps`,
-   * `radiators` and `armor` flags out of SM.rig.getPartFlags(). Deliberately
+   * Three parts switched on by the `lamps`, `radiators` and `armor` flags out
+   * of SM.rig.getPartFlags(). Deliberately
    * modest: js/effects.js owns the darkness composite and the actual light, so
    * a lamp here is a FIXTURE plus a hint of spill — a second, brighter light
    * model drawn on the machine would fight the real one.
@@ -3019,8 +1992,8 @@ SM.vehicle = (function () {
   function augerYAt(t) { return augY[0] + (augY[AUG_N - 1] - augY[0]) * t; }
 
   /**
-   * The whole front end. Replaces drawBlade + drawDrills + drawGrinders in
-   * adventure mode; classic still calls all three, untouched.
+   * The whole front end: the reamer bar, the auger, the point, and the collars
+   * and shoulder cutters the `drills` and `grinders` flags add to it.
    */
   function drawDrillRig(ctx, bw, bl, flash) {
     var T = drillTier();
@@ -4048,16 +3021,16 @@ SM.vehicle = (function () {
         ctx.fill();
 
         // exhaust flame
-        var flick = 0.25 + 0.2 * Math.sin(pistonPhase * 2 + s + i) + odLevel * 0.4;
+        var flick = 0.25 + 0.2 * Math.sin(pistonPhase * 2 + s + i);
         ctx.fillStyle = 'rgba(255,140,60,' + flick.toFixed(3) + ')';
         ctx.beginPath();
-        ctx.arc(sx, y0 - h + 1, 3.2 + odLevel * 2, 0, TAU);
+        ctx.arc(sx, y0 - h + 1, 3.2, 0, TAU);
         ctx.fill();
 
         // three drifting smoke puffs per stack
         for (var q = 0; q < 3; q++) {
           var t = (smokePhase * 0.6 + q * 0.333 + i * 0.17) % 1;
-          var a = (1 - t) * (0.18 + odLevel * 0.15);
+          var a = (1 - t) * 0.18;
           if (a <= 0.01) continue;
           ctx.fillStyle = 'rgba(90,90,100,' + a.toFixed(3) + ')';
           ctx.beginPath();
@@ -4068,11 +3041,17 @@ SM.vehicle = (function () {
     }
   }
 
-  /* --- warning lights --------------------------------------------------------- */
+  /* --- warning lights ---------------------------------------------------------
+   * ONE PAIR, ALWAYS. The count used to climb with the number of gate upgrades
+   * collected (one more pair every five), and a rotating roof beacon appeared
+   * at four — a "look how far you have come" tell for a run that escalated
+   * inside three minutes. A company's machine escalates over hours instead,
+   * and the workshop already says so in geometry, so the strobe is back to
+   * being what it is: a hazard light on a working vehicle.
+   * ---------------------------------------------------------------------- */
   function drawLights(ctx, bw, bl) {
-    var on = (lightPhase * 3) % 2 < 1;
     var hh = hullHalf();
-    var n = 1 + Math.min(2, (upgradeCount / 5) | 0);
+    var n = 1;
     for (var s = -1; s <= 1; s += 2) {
       for (var i = 0; i < n; i++) {
         var lit = ((lightPhase * 3 + i * 0.5) % 2) < 1;
@@ -4090,94 +3069,30 @@ SM.vehicle = (function () {
         }
       }
     }
-    // A rotating beacon on the cabin roof once the rig is seriously upgraded.
-    if (upgradeCount >= 4) {
-      var a = (lightPhase * 4) % TAU;
-      ctx.fillStyle = 'rgba(255,80,60,' + (on ? 0.9 : 0.45) + ')';
-      ctx.beginPath();
-      ctx.arc(0, 8, 5, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,80,60,0.16)';
-      ctx.beginPath();
-      ctx.moveTo(0, 8);
-      ctx.arc(0, 8, 46, a, a + 0.7);
-      ctx.closePath();
-      ctx.fill();
-    }
-  }
-
-  /* --- overdrive overlay ------------------------------------------------------ */
-  function drawOverdriveGlow(ctx, bw, bl) {
-    var a = odLevel * (0.22 + 0.10 * Math.sin(lightPhase * 18));
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = 'rgba(255,120,40,' + a.toFixed(3) + ')';
-    roundRect(ctx, -hullHalf(), -bl * 0.5, hullHalf() * 2, bl + hopperLen(), 12);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,200,80,' + (odLevel * 0.7).toFixed(3) + ')';
-    ctx.lineWidth = 3;
-    var halfW = bladeWidth * 0.5;
-    var frontY = -bl * 0.5 - BLADE_ARM;
-    ctx.beginPath();
-    ctx.moveTo(-halfW, frontY - bladeThick());
-    ctx.lineTo(halfW, frontY - bladeThick());
-    ctx.stroke();
-    ctx.restore();
   }
 
   /* =====================================================================
-   * GETTERS  (stable contract — camera, effects, sound and ui rely on these)
+   * GETTERS  (stable contract — camera, effects, sound, adv and advui rely
+   * on these)
    * ================================================================== */
   function getWidth() { return spanOf(bladeWidth, bodyWidth); }
-  function getTargetWidth() { return spanOf(bladeWidthTarget, bodyWidthTarget); }
 
   /**
-   * y of the cutting edge. In adventure mode the cutter is wherever the machine
-   * happens to be pointing, so this returns the BIT's world y — which is the
-   * honest analogue and keeps terrain streaming, dust and camera code that has
-   * always asked "where is the front" answering correctly in both modes.
+   * y of the cutting edge. The cutter is wherever the machine happens to be
+   * pointing, so this returns the BIT's world y — which is what every caller
+   * that has ever asked "where is the front" actually wants.
    */
   function getBladeFrontY() {
-    if (advMode()) return y - Math.cos(heading) * drillReach();
-    return y - C.VEHICLE_BODY_LENGTH * 0.5 - BLADE_ARM - bladeThick() * 0.5;
+    return y - Math.cos(heading) * drillReach();
   }
   function getDrillX() {
-    if (!advMode()) return x;
     return x + Math.sin(heading) * drillReach();
   }
   function getDrillY() { return getBladeFrontY(); }
 
-  function getMiningPower() { return miningPower * (1 + (OD_POWER - 1) * odLevel); }
+  function getMiningPower() { return miningPower; }
   function getCollectRadius() {
-    var r = collectRadius * (1 + (OD_COLLECT - 1) * odLevel);
-    return r > MAX_COLLECT * 1.6 ? MAX_COLLECT * 1.6 : r;
-  }
-
-  /* =====================================================================
-   * HALT — "time is up"
-   * ---------------------------------------------------------------------
-   * Begins the stop; it does NOT teleport anything. From here update() bleeds
-   * the forward speed away over about a second, ignores steering, and shuts
-   * down mining, the explosive pulse and overdrive so the world goes quiet.
-   * Only reset() clears it, so a halt cannot be undone mid-run.
-   * ================================================================== */
-  function halt() {
-    if (halted) return false;
-    halted = true;
-    return true;
-  }
-
-  function getStat(name) {
-    switch (name) {
-      case 'power': return getMiningPower();
-      case 'blade': return bladeWidth;
-      case 'collect': return getCollectRadius();
-      case 'speed': return speed;
-      case 'upgrades': return upgradeCount;
-      case 'multiplier': return valueMul;
-      case 'overdrive': return odLevel;
-      default: return 0;
-    }
+    return collectRadius > MAX_COLLECT ? MAX_COLLECT : collectRadius;
   }
 
   return {
@@ -4185,8 +3100,6 @@ SM.vehicle = (function () {
     reset: reset,
     update: update,
     render: render,
-    applyUpgrade: applyUpgrade,
-    getUpgradeEffect: getUpgradeEffect,
 
     getX: function () { return x; },
     getY: function () { return y; },
@@ -4197,46 +3110,23 @@ SM.vehicle = (function () {
 
     getBladeWidth: function () { return bladeWidth; },
     getBladeFrontY: getBladeFrontY,
-    getBank: function () { return bank; },
     getLateralSpeed: function () { return vx; },
     getResistance: function () { return resistance; },
-    isTransforming: function () { return morphActive || deployActive; },
-    getUpgradeCount: function () { return upgradeCount; },
-    getStat: getStat,
-
-    /* --- Phase 2 additions ------------------------------------------- */
-    getValueMultiplier: function () { return valueMul; },
     getPartLevel: function (name) { return parts[name] || 0; },
-    getOverdrive: function () { return odLevel; },
-    isOverdriveActive: function () { return odActive; },
-    startOverdrive: startOverdrive,
 
-    /* --- TIME ATTACK (the HUD contract) ------------------------------- */
-    // LIVE array, rebuilt only inside applyUpgrade(). Read-only: sorting or
-    // splicing it from outside corrupts the machine's build history.
-    getOwnedUpgrades: function () { return owned; },
-    getUpgradeVersion: function () { return upgradeVersion; },
-    halt: halt,
-    isHalted: function () { return halted; },
-
-    /* --- ADVENTURE (Agent 1) ------------------------------------------
-     * getHeading()      hull facing in radians; 0 = -y, the classic forward
+    /* --- THE RUN --------------------------------------------------------
+     * getHeading()      hull facing in radians; 0 = -y, straight up the screen
      * getDrillX/Y()     world position of the bit — the light and the dust
      *                   both want it, and it is not derivable from x/y alone
      * getVelX/getVelY() the real 2D velocity, for a camera that has to lead in
      *                   a direction the player chose
-     * isStalled()       the drill is against rock above its hardness cap
      * isCutting()       the bit removed hardness this step (adv.js's heat model
      *                   asks, because heatGainRate() takes a `drilling` flag)
-     * getBlockedMat()   ...and this is what it is, or -1
      * getDriveBurnRate()fuel/sec the drive and drill are currently costing;
      *                   adv.js's reserve estimate needs it
-     * getLoad()         seconds of work between the bit and open ground — the
-     *                   readable version of "how hard is this rock for ME"
      * parkAtDoor()      set the machine down just below THIS LEVEL'S doors,
-     *                   stopped and facing down into the level. Adventure only;
-     *                   a no-op (false) in classic. SM.adv.rideTo() and
-     *                   SM.adv.enterMine() are the callers.
+     *                   stopped and facing down into the level. SM.adv.rideTo()
+     *                   and SM.adv.enterMine() are the callers.
      * renderPreview()   draw the current build into a garage transform
      * ---------------------------------------------------------------- */
     getHeading: function () { return heading; },
@@ -4254,18 +3144,8 @@ SM.vehicle = (function () {
      *  unchanged either way — see the ADV_TRAVEL_* note. */
     getTravelGear: function () { return advTravel; },
     parkAtDoor: parkAtDoor,
-    /* TRANSITIONAL ALIAS: js/adv.js prefers parkAtDoor and falls back to this, so
-     * either half of the wave can land first. Drop it once both have. */
+    /* TRANSITIONAL ALIAS: js/adv.js prefers parkAtDoor and falls back to this. */
     parkAtStation: parkAtDoor,
-    renderPreview: renderPreview,
-
-    /* --- speed boost (scattered 'boostcell' blocks) -------------------- */
-    addBoost: addBoost,
-    getBoost: function () { return boostLevel; },
-    getBoostLeft: function () { return boostRemaining; },
-    isBoostActive: function () { return boostActive; },
-    // Run totals for the end card, in the units the player experiences.
-    getBoostBlocks: function () { return boostBlocks; },
-    getBoostSeconds: function () { return boostSeconds; }
+    renderPreview: renderPreview
   };
 })();

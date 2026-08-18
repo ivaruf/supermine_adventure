@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/advhud.js                         [OWNER: Agent 4 — INTERFACE]
+ * SUPERMINE ADVENTURE — js/advhud.js
  * -----------------------------------------------------------------------------
  * THE IN-MINE INSTRUMENT PANEL. Everything the player needs to answer one
  * question without ever opening a menu: CAN I GET HOME FROM HERE?
@@ -77,10 +77,9 @@
  *      exists to support, and making it from the HUD is the whole point.
  *
  * PAUSE
- *   Adventure needs its own pause card: the classic one in ui.js is refused
- *   while adventure is active, because its RESTART and MAIN MENU buttons both
- *   rebuild the time-attack world. This one offers RESUME, ABORT RUN
- *   (SM.adv.abort() — costs the hold, like a strand) and a way back out.
+ *   This module owns the pause card. It offers RESUME, ABORT RUN
+ *   (SM.adv.abort() — costs the hold, like a strand) and LEAVE EXPEDITION,
+ *   which aborts and then closes the campaign back to the title screen.
  *   The simulation is gated with SM.main.setPaused(true/false) as usual.
  * ========================================================================== */
 
@@ -89,7 +88,7 @@ var SM = SM || {};
 SM.advhud = (function () {
   'use strict';
 
-  /* ----- Agent-4 tunables live here ----------------------------------- */
+  /* ----- Tunables live here ----------------------------------- */
 
   var SLOW_HZ        = 8;      // manifest + scanner refreshes per second
   var ALERT_TIME     = 2.4;    // default banner seconds
@@ -471,8 +470,8 @@ SM.advhud = (function () {
     els.alertSub = el('div', 'sm-ah-alert-sub', els.alert, '');
 
     /* --- THE DOOR MENU --------------------------------------------------
-     * The lift is BIG CLOSED DOORS at the top-centre of the level (ADVENTURE.md
-     * §2b). Drive into them and this opens: SELL the haul, REFUEL, the level
+     * The lift is BIG CLOSED DOORS at the top-centre of the level (ARCHITECTURE.md
+     * §7). Drive into them and this opens: SELL the haul, REFUEL, the level
      * list, back to MAP. It is the whole surface, reached without leaving the
      * mine, and it is what replaced BOTH the old in-mine station panel and the
      * surface round trip — there is no auto-extraction to be surprised by any
@@ -595,7 +594,7 @@ SM.advhud = (function () {
       closePause();
       if (SM.adv && SM.adv.abort) SM.adv.abort();
     });
-    armConfirm(els.btnLeave, 'LEAVE EXPEDITION', 'CONFIRM — BACK TO MENU', function () {
+    armConfirm(els.btnLeave, 'LEAVE EXPEDITION', 'CONFIRM — BACK TO TITLE', function () {
       closePause();
       if (SM.adv && SM.adv.abort) SM.adv.abort();
       if (SM.adv && SM.adv.close) SM.adv.close();

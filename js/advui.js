@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/advui.js                          [OWNER: Agent 4 — INTERFACE]
+ * SUPERMINE ADVENTURE — js/advui.js
  * -----------------------------------------------------------------------------
  * EVERYTHING THAT IS NOT THE MINE. Five screens, all DOM, all built at runtime
  * into #ui-root exactly the way js/ui.js builds the classic HUD.
@@ -64,7 +64,7 @@ var SM = SM || {};
 SM.advui = (function () {
   'use strict';
 
-  /* ----- Agent-4 tunables live here ----------------------------------- */
+  /* ----- Tunables live here ----------------------------------- */
 
   var TOAST_TIME     = 2.6;    // seconds a toast lingers
   var SYNC_MS        = 250;    // watchdog period (see "HOW IT IS DRIVEN")
@@ -295,7 +295,7 @@ SM.advui = (function () {
   /* =====================================================================
    * THE LIFT — READING THE LEVEL LIST ACROSS THE SEAM
    * ---------------------------------------------------------------------
-   * LEVELS ARE SEPARATE MAPS (ADVENTURE.md §2b). SM.adv.getLevels() answers with
+   * LEVELS ARE SEPARATE MAPS (ARCHITECTURE.md §7). SM.adv.getLevels() answers with
    * the LIVE BAND table for the mine it has IN CONTEXT:
    *
    *     [{i, name, depthTopM, depthBotM, price, widthU, owned}, ...]
@@ -452,7 +452,7 @@ SM.advui = (function () {
     var s = makeScreen('slots', 'THREE COMPANIES · ONE LEDGER EACH', 'MINING COMPANIES');
     var n = (SM.config && SM.config.ADV) ? SM.config.ADV.SAVE_SLOTS : 3;
     for (var i = 0; i < n; i++) slotRows.push(makeSlotRow(s.body, i));
-    onTap(button(s.foot, '', 'BACK TO MAIN MENU'), function () {
+    onTap(button(s.foot, '', 'TITLE SCREEN'), function () {
       if (SM.adv && SM.adv.close) SM.adv.close();
     });
   }
@@ -637,7 +637,7 @@ SM.advui = (function () {
     onTap(button(s.foot, '', 'WORKSHOP'), function () {
       if (SM.adv && SM.adv.openGarage) SM.adv.openGarage();
     });
-    onTap(button(s.foot, 'sm-av-quiet', 'MAIN MENU'), function () {
+    onTap(button(s.foot, 'sm-av-quiet', 'TITLE SCREEN'), function () {
       if (SM.adv && SM.adv.close) SM.adv.close();
     });
   }
@@ -1881,7 +1881,7 @@ SM.advui = (function () {
   /* ---------------------------------------------------------------------
    * THE LEVEL PICKER
    * ---------------------------------------------------------------------
-   * EACH LEVEL IS ITS OWN MAP (ADVENTURE.md §2b) and the lift is the only way
+   * EACH LEVEL IS ITS OWN MAP (ARCHITECTURE.md §7) and the lift is the only way
    * between them, so this is not a shortcut menu — it is the list of PLACES this
    * company can work. Buying one is the campaign's real progression: a new
    * stratum, and a bigger map to work it in.

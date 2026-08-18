@@ -1,14 +1,16 @@
 /* =============================================================================
- * SUPERMINE — style-adventure.css                  [OWNER: Agent 4 — INTERFACE]
+ * SUPERMINE ADVENTURE — style-adventure.css
  * -----------------------------------------------------------------------------
- * All adventure-mode styling. style.css is FROZEN: nothing in this file
- * requires a change there.
+ * All in-game styling above the base layer. style.css owns that base layer —
+ * the palette, the metal-plate treatment, the type scale, .sm-panel, .sm-btn,
+ * .sm-cell, .sm-stripe, the title overlay and every --sm-* custom property —
+ * and nothing in this file requires a change there.
  *
  * TWO RULES THAT MATTER MORE THAN THE REST
  *
- * 1. #ui-root gets the class `sm-adv` for the whole campaign (js/ui.js adds it).
- *    EVERYTHING here is scoped to `.sm-adv`, which is also how the classic
- *    chrome — still in the DOM underneath — is taken down in one block below.
+ * 1. #ui-root carries the class `sm-adv` PERMANENTLY (js/ui.js adds it once,
+ *    in build(), and never removes it). EVERYTHING here is scoped to it, so
+ *    losing that class hides the entire interface.
  *
  * 2. MOBILE FIRST, and portrait is not an afterthought. The in-mine panel used
  *    to be a stack pinned to the TOP on every viewport, on the grounds that the
@@ -38,22 +40,23 @@
  * ========================================================================== */
 
 /* ===========================================================================
- * 1. CLASSIC CHROME, HIDDEN
+ * 1. THE SCOPE GUARD  (and one gravestone)
  * ---------------------------------------------------------------------------
- * ui.js builds the whole time-attack HUD at startup and leaves it in the DOM.
- * None of it means anything in a campaign — there is no clock, no score, no
- * upgrade rail, no auto-advance to steer — so it goes wholesale. The list is
- * read off style.css, not guessed.
+ * ui.js used to build a whole time-attack HUD at startup and leave it in the
+ * DOM underneath the campaign, so this section took it down wholesale. That
+ * HUD no longer exists — ui.js builds the title gate and the fps readout and
+ * nothing else — so the second block below now matches nothing at all.
  *
- * The two exceptions are deliberate: `.sm-start` is the main menu, which
- * ui.js fades with its own `.sm-start-off` and needs back when the player
- * leaves the campaign; and `.sm-debug` is the fps readout, which is as useful
- * underground as it is in a time attack.
+ * IT STAYS ANYWAY, and this is not sentiment: style.css still DEFINES every
+ * one of those classes, and the branding pass is about to build a splash
+ * screen out of that same base layer. If any of those names is reused for
+ * something that must not appear over a mine, the guard is already written.
+ * Delete it only together with the style.css rules it names.
+ *
+ * The first block is live and load-bearing: it hides this file's own layers
+ * whenever `sm-adv` is absent, which is the state a build has before ui.js
+ * has run.
  * ======================================================================== */
-/* ...and the mirror image of the same rule: the adventure chrome is built once
- * and left in the DOM too, so when `sm-adv` comes OFF (SM.ui.leaveAdventure)
- * every layer this file owns leaves the classic HUD completely alone. The
- * modules already hide themselves by class; this is the belt to that braces. */
 #ui-root:not(.sm-adv) .sm-av,
 #ui-root:not(.sm-adv) .sm-ah,
 #ui-root:not(.sm-adv) .sm-ah-btns,

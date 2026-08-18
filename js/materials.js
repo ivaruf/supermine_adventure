@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/materials.js                     [OWNER: Agent 2 — gameplay]
+ * SUPERMINE ADVENTURE — js/materials.js
  * -----------------------------------------------------------------------------
  * DATA-DRIVEN MATERIAL TABLE.
  *
@@ -383,7 +383,7 @@ SM.materials = (function () {
 
     /* =====================================================================
      * ADVENTURE-MODE GEOLOGY (appended — indices 13..22)
-     * [OWNER: Agent 3 — GEOLOGY]
+     * 
      *
      * APPENDED, NEVER INSERTED. Every index above is baked into save files,
      * the particle arrays and the sprite atlases; the only safe edit to this

@@ -1,40 +1,36 @@
 /* =============================================================================
- * SUPERMINE — style.css                        [OWNER: Agent 3 — presentation]
+ * SUPERMINE ADVENTURE — style.css                            THE BASE LAYER
  * -----------------------------------------------------------------------------
- * Fullscreen canvas + a DOM overlay for the HUD.
+ * Fullscreen canvas + a DOM overlay, and the shared vocabulary every screen in
+ * the game is built out of. `style-adventure.css` sits on top of this file and
+ * re-uses all of it: .sm-panel, .sm-stripe, .sm-btn, .sm-cell, .sm-toast, the
+ * .sm-start title overlay and every --sm-* custom property are defined HERE.
  *
  * DESIGN LANGUAGE — "heavy industrial"
  *   * brushed dark metal panels with a hard top bevel and a black bottom edge
  *   * hazard/warning stripes as the accent on anything that means "machinery"
- *   * amber-gold for money, cyan for progress/tech, orange for overdrive,
- *     red for the clock running out
+ *   * amber-gold for money, cyan for progress/tech, red for danger
  *   * chunky monospace numerals (tabular) so counters never reflow
- *   * THE CENTRE OF THE SCREEN STAYS EMPTY. Everything is pinned to an edge
- *     except the upgrade announcement (upper third) and the end-of-run card.
- *     This matters more in portrait than it ever did in landscape: the camera
- *     frames the whole 1280-unit lane, so the machine is small and the strip
- *     of rock you are aiming at is the middle of the screen.
+ *   * THE CENTRE OF THE SCREEN STAYS EMPTY. Everything is pinned to an edge.
+ *     That matters more in portrait than in landscape: the strip of rock you
+ *     are aiming at is the middle of the screen.
  *
- * THE TOP OF THE SCREEN, IN ORDER (portrait first — this is a phone game)
- *   row 1   THE SCORE, one line, FULL WIDTH. It is the point of the game and
- *           it reaches seven figures, so it gets the whole width instead of a
- *           corner, and it SHRINKS rather than wrapping — see --sm-cur-len.
- *   row 2   the COUNTDOWN, centred, with the zone name beneath it; and the
- *           two icon buttons (sound, pause) pinned to the right of that row.
- *   Both rows are placed off --sm-top-y / --sm-top-h, so re-tuning the strip
- *   height on a breakpoint moves everything below it in one edit.
+ * A LARGE PART OF THIS FILE IS A GRAVESTONE, and it is marked as one rather
+ * than deleted. The game shipped for a while with a second mode — a 60-second
+ * time attack — and the rules for its HUD are still here: the score strip
+ * (.sm-topbar), the countdown (.sm-center/.sm-clock), the upgrade rail
+ * (.sm-rail), the haul tally (.sm-tally), the steering pads (.sm-pads), the
+ * zone banner, the pause card, the end-of-run summary and the high-score
+ * table. NOTHING BUILDS THAT DOM ANY MORE — js/ui.js builds the title gate and
+ * the fps readout and nothing else — so every one of those rules is inert.
  *
- * SCREEN EDGES
- *   left    upgrade rail (x=10..48), then the haul tally, bottom-anchored and
- *           lifted clear of the steering pads' thumb zone
- *   right   zone banner, icon buttons
- *   bottom  the two meters (overdrive / speed boost), centred and narrow
- *   left+right, full height: THE STEERING PADS. Transparent, and the only
- *           thing besides the buttons and the overlays that takes a tap.
+ * They are kept because the panel/button/cell treatment they demonstrate IS
+ * the base layer, and because a splash screen is the obvious next thing to
+ * build out of it. Delete them together, or repurpose them, but do not pick
+ * at them one at a time: the shared pieces are threaded through the dead ones.
  *
  * #ui-root is pointer-events:none so drags pass through to the canvas; only
- * the buttons, the steering pads and the overlays opt back in. Anything that
- * takes a tap is created AFTER the pads so it paints — and hit-tests — above.
+ * the buttons and the overlays opt back in.
  *
  * Class prefix convention: every UI class starts with `sm-`.
  * Layout switches, all toggled from ui.js on resize, no JS pixel maths:

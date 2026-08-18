@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/joystick.js                       [OWNER: Agent 4 — INTERFACE]
+ * SUPERMINE ADVENTURE — js/joystick.js
  * -----------------------------------------------------------------------------
  * THE TRANSLUCENT THUMBSTICK. This is the headline control change of adventure
  * mode: the machine no longer drives itself, and left/right is no longer the
@@ -59,7 +59,7 @@ var SM = SM || {};
 SM.joystick = (function () {
   'use strict';
 
-  /* ----- Agent-4 tunables live here -----------------------------------
+  /* ----- Tunables live here -----------------------------------
    * RADIUS is the throw in CSS pixels: the distance from the base centre that
    * means "full speed". 74 px is about a comfortable thumb rotation on a phone
    * and is deliberately SMALLER than input.js's 170 px steering rail — that

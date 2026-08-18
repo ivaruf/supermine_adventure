@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/save.js                         [OWNER: Agent 2 — PROGRESSION]
+ * SUPERMINE ADVENTURE — js/save.js
  * -----------------------------------------------------------------------------
  * THREE MINING COMPANIES IN localStorage. Each slot is one company: its cash,
  * its day counter, its machine, the mining rights it holds, and the state of
@@ -111,7 +111,7 @@
  *      trusted — a save from a future build must not crash this one.
  *
  * =============================================================================
- * ================  AGENT-2 DESIGN NOTES — THE MASK CODEC  ====================
+ * ================  DESIGN NOTES — THE MASK CODEC  ====================
  * =============================================================================
  *
  * THE WIRE FORMAT
@@ -159,7 +159,7 @@ var SM = SM || {};
 SM.save = (function () {
   'use strict';
 
-  /* ----- Agent-2 tunables live here ----------------------------------- */
+  /* ----- Tunables live here ----------------------------------- */
 
   var DEBOUNCE_MS = 1200;      // markDirty() coalescing window
   var MAX_COMPANY = 22;        // characters; the slot card is a fixed width

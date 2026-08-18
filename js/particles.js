@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/particles.js          *** THE HEART OF THE GAME ***
+ * SUPERMINE ADVENTURE — js/particles.js      *** THE HEART OF THE GAME ***
  * -----------------------------------------------------------------------------
  * >>> THIS FILE IS FROZEN after Phase 1. <<<
  * It deliberately contains ZERO knowledge of specific materials — everything it

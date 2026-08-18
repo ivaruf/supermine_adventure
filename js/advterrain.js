@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/advterrain.js                       [OWNER: Agent 3 — GEOLOGY]
+ * SUPERMINE ADVENTURE — js/advterrain.js
  * -----------------------------------------------------------------------------
  * THE UNDERGROUND. Generates one mine from its seed and its layer table, streams
  * it around the machine, and remembers every hole the player has ever dug in it.
@@ -82,7 +82,7 @@
  * THE GEOLOGY, IN THE ORDER THE GENERATOR ASKS THE QUESTIONS
  *
  *   THE SEAL        the band's four bedrock borders. A LEVEL IS ITS OWN MAP
- *                   (ADVENTURE.md §2b): the active level is a bounded y-band of
+ *                   (ARCHITECTURE.md §7): the active level is a bounded y-band of
  *                   this coordinate space, and its top rows, bottom rows and
  *                   side columns are spawned as bedrock by a test that runs
  *                   BEFORE the carve mask is consulted. That order is the whole
@@ -147,7 +147,7 @@ SM.advterrain = (function () {
   'use strict';
 
   /* ======================================================================
-   * ----- Agent-3 tunables -----
+   * ----- tunables -----
    * =================================================================== */
 
   var A = SM.config.ADV;
@@ -239,7 +239,7 @@ SM.advterrain = (function () {
   var TRIM_UP = 0.004;         // per-step recovery once back under
 
   /* --- LEVELS AS MAPS: THE BAND, THE SEAL, THE DOORS -------------------
-   * ADVENTURE.md §2b. Each level is ITS OWN MAP, and the map is realised as a
+   * ARCHITECTURE.md §7. Each level is ITS OWN MAP, and the map is realised as a
    * bounded y-band of this one coordinate space: level k is geological layer k's
    * depth range, the full field width for that level, and NOTHING ELSE IS
    * REACHABLE. Absolute (seed, cellX, cellY) determinism, depth-driven geology
@@ -269,7 +269,7 @@ SM.advterrain = (function () {
    * THREE CELLS (63 units) is what reads as a border rather than as a line at
    * every camera scale this mode uses, and the cut-box clip in js/vehicle.js
    * means it is never chewed, so it does not need to be thick enough to survive
-   * a tier-5 bit — see THE TWO SEAL TRUTHS in ADVENTURE.md §2b. */
+   * a tier-5 bit — see THE TWO SEAL TRUTHS in ARCHITECTURE.md §7. */
   var SEAL_ROWS = 3;
   var SEAL_COLS = 3;
 
@@ -468,7 +468,7 @@ SM.advterrain = (function () {
    *   loaded  a mine's geology is RESOLVED and can still be drawn.
    *
    * endMine() clears `active` and keeps `loaded`, because adventure mode keeps
-   * rendering the world behind its meta screens (ADVENTURE.md §2: "the world
+   * rendering the world behind its meta screens (ARCHITECTURE.md §3: "the world
    * still renders behind the map; time does not pass"). With one flag, the
    * frame the player was extracted on, terrain.js fell back to its CLASSIC
    * background — bedrock lane walls, classic depth ruler and a "SURFACE CUT"
@@ -720,7 +720,7 @@ SM.advterrain = (function () {
   /* ======================================================================
    * THE ACTIVE LEVEL — the band, its seal, and its doors
    *
-   * THE SEAM (ADVENTURE.md §2b). js/mines.js states the ladder as BANDS —
+   * THE SEAM (ARCHITECTURE.md §7). js/mines.js states the ladder as BANDS —
    * {i, name, depthTopM, depthBotM, price, widthU} — and js/adv.js decides which
    * one the run is on and calls beginLevel(). This side of the seam does exactly
    * three things with that: resolves the table into world geometry once per mine,
@@ -2179,7 +2179,7 @@ SM.advterrain = (function () {
    *
    * AND THE SEAL BEATS THE MASK. The border rows and columns spawn bedrock BEFORE
    * the `mask[]` consult below, and that order is the one measured truth this
-   * whole feature hangs off (ADVENTURE.md §2b): the mask is a byte per cell of
+   * whole feature hangs off (ARCHITECTURE.md §7): the mask is a byte per cell of
    * everything the player has ever dug, saved with the company, and a v1.8 save
    * whose tunnel crossed what is now a band boundary would otherwise punch a
    * player-shaped hole straight through the border — a hole that persists in the
@@ -3809,7 +3809,7 @@ SM.advterrain = (function () {
 
     /* --- THE FLOOR AND THE ROOF OF THE LEVEL --------------------------
      * Bedrock is hardness 26, which is not a wall — and a tier-5 bit's cap is 34,
-     * so the ROCK has never been the guarantee here (ADVENTURE.md §2b): the cut
+     * so the ROCK has never been the guarantee here (ARCHITECTURE.md §7): the cut
      * box is clipped and the position clamped in js/vehicle.js, and this band of
      * hazard paint is what tells the player so BEFORE they spend a tank of fuel
      * finding out. A word and a stripe, not a subtle change of rock.
@@ -4045,7 +4045,7 @@ SM.advterrain = (function () {
       mlOut.depthM = depthOfY(gldY);
       return mlOut;
     },
-    /* --- LEVELS AS MAPS (ADVENTURE.md §2b) -----------------------------
+    /* --- LEVELS AS MAPS (ARCHITECTURE.md §7) -----------------------------
      * Four functions are the whole seam. beginLevel() activates a band;
      * getLevelBounds() is the ONE box js/vehicle.js and js/camera.js clamp
      * against; getDoorX/getDoorY are where the lift is. The door's open state is

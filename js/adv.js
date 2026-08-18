@@ -1,8 +1,7 @@
 /* =============================================================================
- * SUPERMINE — js/adv.js                            [OWNER: Agent 1 — RUN & FEEL]
+ * SUPERMINE ADVENTURE — js/adv.js
  * -----------------------------------------------------------------------------
- * THE EXPEDITION DIRECTOR. adv.js is to adventure mode what level.js is to the
- * time attack, and main.js runs exactly one of the two. It owns:
+ * THE EXPEDITION DIRECTOR — the game's state machine and its bank. It owns:
  *
  *   1. THE STATE MACHINE. Which screen the campaign is on, and therefore
  *      whether the simulation is running at all.
@@ -113,7 +112,7 @@
  *                                                the running total (getSecured())
  *
  * ---------------------------------------------------------------------------
- * THE LIFT — LEVELS ARE SEPARATE MAPS (ADVENTURE.md §2b)
+ * THE LIFT — LEVELS ARE SEPARATE MAPS (ARCHITECTURE.md §7)
  *
  * EACH LEVEL IS ITS OWN MAP, conceptually stacked under the one above, and the
  * lift is the ONLY way between them. Level k IS geological layer k, realized as
@@ -219,7 +218,7 @@ SM.adv = (function () {
   'use strict';
 
   /* =====================================================================
-   * AGENT-1 TUNABLES
+   * TUNABLES
    * ================================================================== */
 
   // --- the ledger a brand-new company starts with ----------------------
@@ -522,7 +521,7 @@ SM.adv = (function () {
    * when it has it and falls back to the identity it is defined by, so the
    * ladder works while that module is still being re-cut — and the fallbacks are
    * not arbitrary: door x 0 is the mine's centre line, door y is just inside the
-   * band's top, and yOfDepth is the depth equation from ADVENTURE.md §2, which
+   * band's top, and yOfDepth is the depth equation from ARCHITECTURE.md §3, which
    * advterrain implements verbatim.
    * ================================================================== */
 
@@ -1196,7 +1195,7 @@ SM.adv = (function () {
    * the band era is the band's CEILING — inside the seal, where no machine can
    * ever stand. Measured on the live build: a checkpoint at level 1's band top
    * sat at y 0 while the playable void starts at y 63 and the doors are at 593,
-   * so getServiceable() could never answer. ADVENTURE.md §2b already says rails
+   * so getServiceable() could never answer. ARCHITECTURE.md §7 already says rails
    * run east and west FROM THE CENTRAL DOOR within a band; this is that sentence,
    * in code, and it costs nothing while the system is switched off.
    */
@@ -2897,7 +2896,7 @@ SM.adv = (function () {
     ownsRights: ownsRights,
     getFirstMineId: firstMineId,
 
-    /* --- THE LIFT: LEVELS AS MAPS (ADVENTURE.md §2b) --------------------
+    /* --- THE LIFT: LEVELS AS MAPS (ARCHITECTURE.md §7) --------------------
      * getLevels()     LIVE band table for the mine in context, level 1 first:
      *                 [{i, name, depthTopM, depthBotM, price, widthU, owned}]
      *                 plus the extras depthM (= depthTopM) and y (band top, in

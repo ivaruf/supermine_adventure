@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/events.js
+ * SUPERMINE ADVENTURE — js/events.js
  * -----------------------------------------------------------------------------
  * Tiny synchronous publish/subscribe bus. Everything cross-module that isn't a
  * documented getter goes through here.

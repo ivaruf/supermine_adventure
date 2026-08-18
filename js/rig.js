@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/rig.js                          [OWNER: Agent 2 — PROGRESSION]
+ * SUPERMINE ADVENTURE — js/rig.js
  * -----------------------------------------------------------------------------
  * THE MACHINE, AS NUMBERS. rig.js owns the eight upgrade categories, their
  * tiers, their prices, and the derived stats every other module reads. It holds
@@ -30,7 +30,7 @@
  *       lamps, stacks, radiators, armor }
  *
  * =============================================================================
- * ================  AGENT-2 DESIGN NOTES — READ BEFORE TUNING  ================
+ * ================  DESIGN NOTES — READ BEFORE TUNING  ================
  * =============================================================================
  *
  * A. THE DRILL LADDER IS THE GAME'S SPINE
@@ -141,7 +141,7 @@ var SM = SM || {};
 SM.rig = (function () {
   'use strict';
 
-  /* ----- Agent-2 tunables live here -----------------------------------
+  /* ----- Tunables live here -----------------------------------
    *
    * THE PART TABLE. One entry per category, tiers shallow -> deep. `cost` is the
    * price of INSTALLING that tier (tier 0 is the battered starter and is free).

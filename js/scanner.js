@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/scanner.js                          [OWNER: Agent 3 — GEOLOGY]
+ * SUPERMINE ADVENTURE — js/scanner.js
  * -----------------------------------------------------------------------------
  * THE MINERAL SCANNER. An upgrade that turns rock into information: it reads ore
  * signatures through walls the machine has not touched yet, and hands the player
@@ -21,7 +21,7 @@
  *   only LIGHTS UP when the beam crosses its bearing, then fades over the rest
  *   of the revolution. That buys three things at once. It is the cheap
  *   implementation (one generator probe per revolution instead of one per step,
- *   which is the performance rule in ADVENTURE.md §5). It is legible without a
+ *   which is the performance rule in ARCHITECTURE.md §8). It is legible without a
  *   legend — you read a bearing from where the mark is, and a distance from how
  *   far out it sits. And it keeps the TENSION: the display is never a complete
  *   picture of the seam, only what the last pass caught, so the player is
@@ -43,7 +43,7 @@ SM.scanner = (function () {
   'use strict';
 
   /* ======================================================================
-   * ----- Agent-3 tunables -----
+   * ----- tunables -----
    * =================================================================== */
 
   var SWEEP_RATE = 2.3;        // rad/s. One revolution is ~2.7 s: slow enough

@@ -1,5 +1,5 @@
 /* =============================================================================
- * SUPERMINE — js/mines.js                        [OWNER: Agent 2 — PROGRESSION]
+ * SUPERMINE ADVENTURE — js/mines.js
  * -----------------------------------------------------------------------------
  * THE CATALOGUE AND THE ECONOMY. Pure data plus lookups: no canvas, no DOM, no
  * events, no state that survives a call. Every other adventure module asks this
@@ -43,7 +43,7 @@
  *   and burns fuel rather than being told no.
  *
  * =============================================================================
- * ================  AGENT-2 DESIGN NOTES — READ BEFORE TUNING  ================
+ * ================  DESIGN NOTES — READ BEFORE TUNING  ================
  * =============================================================================
  *
  * 1. THE ONE EQUATION THE WHOLE CURVE RESTS ON
@@ -192,7 +192,7 @@
  *    rides to them for free, so a purchased level is not a shortcut: it is the
  *    only way to spend a whole tank WORKING a stratum instead of driving to it.
  *
- *    RE-CUT AS BANDS (ADVENTURE.md §2b): level k IS layer k, each level is its
+ *    RE-CUT AS BANDS (ARCHITECTURE.md §7): level k IS layer k, each level is its
  *    own map, and LEVEL 1 IS FREE — it comes with the mining rights. The layer
  *    table is still the price list and every price is unchanged; only the index
  *    moved, because band i>=2 opens the stratum old level i-1 opened. Levels
@@ -322,7 +322,7 @@ var SM = SM || {};
 SM.mines = (function () {
   'use strict';
 
-  /* ----- Agent-2 tunables live here -----------------------------------
+  /* ----- Tunables live here -----------------------------------
    *
    * THE ECONOMY TABLE.  [ dollars per cargo unit, cargo units per deposit ]
    *
@@ -435,7 +435,7 @@ SM.mines = (function () {
   var LEVEL_GROWTH = 1.5;
   var LEVEL_MIN = 50;        // a station is infrastructure; none of them is free
 
-  /* LEVEL WIDTH — "all levels big; deeper = bigger" (ADVENTURE.md §2b).
+  /* LEVEL WIDTH — "all levels big; deeper = bigger" (ARCHITECTURE.md §7).
    *
    * A level is now its own MAP, realized as a bounded y-band, and its width is
    * part of what the purchase buys. `widthU` is the FULL field width in world
@@ -446,7 +446,7 @@ SM.mines = (function () {
    * WIDTH_MAX is 5200 because that is 2 x ADV.MINE_HALF_WIDTH, and that number
    * is not taste: js/particles.js's spatial hash wraps at 2944 units in x, so
    * the LIVE window is clamped to 2800 and the mine's own width only costs mask
-   * bytes (ADVENTURE.md, top). The deepest mine in the catalogue has FIVE
+   * bytes (ARCHITECTURE.md §6). The deepest mine in the catalogue has FIVE
    * layers, so WIDTH_STEP 400 lands band 5 exactly on the ceiling — no mine can
    * ask for a band the engine cannot hold.
    *
@@ -1124,7 +1124,7 @@ SM.mines = (function () {
   }
 
   /**
-   * THE LEVELS OF A MINE, RE-CUT AS BANDS (ADVENTURE.md §2b).
+   * THE LEVELS OF A MINE, RE-CUT AS BANDS (ARCHITECTURE.md §7).
    *
    * A level is ITS OWN MAP now, not a station on one long shaft, and level k IS
    * geological layer k — so this enumerates every layer, shallowest first, and

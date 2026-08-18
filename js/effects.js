@@ -783,6 +783,70 @@ SM.effects = (function () {
     }
   }
 
+  /**
+   * Walk the open combo buckets and pop each one whose stream has dried up.
+   * O(matCount) only while something is actually being collected.
+   */
+  function flushCombo(dt) {
+    if (cbOpen === 0) return;
+    for (var b = 0; b <= SPOIL_BUCKET; b++) {
+      if (cbCount[b] === 0) continue;
+      cbTimer[b] -= dt;
+      cbHold[b] += dt;
+      // Pop when this material stops arriving, or when it has been streaming
+      // for so long that holding the number back stops reading as one haul.
+      if (cbTimer[b] > 0 && cbHold[b] < COMBO_MAX_HOLD) continue;
+      emitComboPopup(b, Math.round(cbValue[b]));
+      cbValue[b] = 0; cbCount[b] = 0; cbTimer[b] = 0; cbHold[b] = 0;
+      cbOpen--;
+    }
+  }
+
+  function emitComboPopup(bucket, v) {
+    if (v <= 0) return;
+
+    /* Size: log-scaled against POPUP_VALUE_REF, so "the higher the score, the
+     * larger the number" holds smoothly across four orders of magnitude. */
+    var size = POPUP_FONT +
+               (Math.log(v / POPUP_VALUE_REF) / Math.LN10) * POPUP_FONT_PER_DECADE;
+    if (size < POPUP_FONT_MIN) size = POPUP_FONT_MIN;
+    if (size > POPUP_FONT_MAX) size = POPUP_FONT_MAX;
+
+    // Ore pops in its own colour; the merged spoil bucket keeps the neutral
+    // gold that used to be every popup's colour.
+    var r, g, bl;
+    var spoil = (bucket === SPOIL_BUCKET);
+    if (spoil) { r = 235; g = 214; bl = 150; }
+    else { r = popR[bucket]; g = popG[bucket]; bl = popB[bucket]; }
+
+    var vx = SM.vehicle && SM.vehicle.getX ? SM.vehicle.getX() : comboX;
+    var vy = SM.vehicle && SM.vehicle.getY ? SM.vehicle.getY() : comboY;
+    var half = (SM.vehicle && SM.vehicle.getWidth ? SM.vehicle.getWidth() : 140) * 0.5;
+    // Alternate flanks and stay clear of the rig, so a torrent of popups
+    // never sits on top of the machine you are trying to watch.
+    comboSide = -comboSide;
+    var px = vx + comboSide * (half + POPUP_CLEARANCE + size * 1.6);
+    /* KEEP IT ON SCREEN, and note what this clamp is measured against. It used
+     * to be the classic LANE (a fixed +/-640 strip of world), which was fine
+     * when the machine could never leave it and silently wrong the moment it
+     * could: down here the rig drives to x = -2470 at the west edge of a level,
+     * `px < -lim` was permanently true, and every popup in the game landed on
+     * the right flank however the alternation came out. The VIEW is the honest
+     * bound — it is what "off screen" actually means. */
+    var b = SM.camera.getViewBounds();
+    var lim = 70;
+    if (px > b.maxX - lim) px = vx - (half + POPUP_CLEARANCE);
+    else if (px < b.minX + lim) px = vx + (half + POPUP_CLEARANCE);
+
+    // Stagger the height by bucket so two materials flushing on the same step
+    // never render exactly on top of each other.
+    var dy = -10 + ((bucket * 37) % 60) - 30;
+    popup(px, vy + dy, '+' + v, size, r, g, bl);
+
+    // A really big seam gets a matching flare in its own colour.
+    if (!spoil && v >= 2000) glint(vx, vy, 46, 0.24, r, g, bl, true);
+  }
+
   /* =====================================================================
    * LIFECYCLE
    * ================================================================== */
@@ -1024,8 +1088,9 @@ SM.effects = (function () {
         ctx.fillText(fText[i], fx[i], fy[i]);
       }
       if (didText) {
-        // Leave the context the way we found it: terrain.js and upgrades.js
-        // also draw text and must not inherit our alignment.
+        // Leave the context the way we found it: advterrain.js also draws
+        // text (strata labels, the lift's level boards) and must not inherit
+        // our alignment.
         ctx.lineJoin = 'miter';
         ctx.textAlign = 'start';
         ctx.textBaseline = 'alphabetic';
@@ -1047,12 +1112,11 @@ SM.effects = (function () {
   }
 
   /* =====================================================================
-   * THE HEADLIGHT — adventure mode's darkness composite   [Agent 4]
+   * THE HEADLIGHT — the darkness composite
    * ---------------------------------------------------------------------
    * Called ONLY from SM.adv.renderWorld(), which main.js runs last inside the
    * world transform, so the darkness falls on the terrain, the machine AND
-   * every effect above — nothing in classic mode reaches this function and
-   * nothing above it is touched.
+   * every effect above it. Nothing above it in this file is touched.
    *
    * THE BUDGET IS ONE RADIAL GRADIENT AND ONE FILL. This is a full-screen
    * blend at DPR 2, which is already the most expensive thing on the frame;
@@ -1119,8 +1183,8 @@ SM.effects = (function () {
 
     /* The lamps are on the front of the hull, so the pool of light leans the
      * way the machine is pointing. Feature-detected: vehicle.js owns the
-     * heading and adventure mode may or may not have given it one yet — with
-     * no heading the light simply sits centred, which is the classic look. */
+     * heading and may not have given it one yet — with no heading the light
+     * simply sits centred on the machine, which is a perfectly good fallback. */
     var hx = 0, hy = -1;
     var v = SM.vehicle;
     if (v) {

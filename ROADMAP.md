@@ -1,9 +1,8 @@
-# SUPERMINE — Adventure Mode Roadmap
+# SUPERMINE ADVENTURE — Roadmap
 
 What is planned beyond the current build, in rough order. This is the design
-backlog that came out of the depth-levels discussion — kept here so the ideas
-survive between sessions and so each one can be checked against the two rules
-that have held up so far:
+backlog — kept here so the ideas survive between sessions and so each one can be
+checked against the two rules that have held up so far:
 
 1. **An upgrade changes what you can DO, not just a number** (the drill tiers
    cross real hardness thresholds; a lift level buys access to a stratum).
@@ -17,7 +16,12 @@ system, the event bus) was built to carry it.
 
 ---
 
-## SHIPPED — v1.7.0
+## SHIPPED
+
+### Standalone
+The campaign is the whole game. Split out of SUPERMINE: no time attack, no
+upgrade gates, no classic HUD; boot lands on a title gate that opens straight
+into the company screens. Saves carried over untouched. See `ARCHITECTURE.md`.
 
 ### Depth levels: the elevator
 The mine entrance is a lift. Levels snap to the geological strata, are
@@ -27,11 +31,15 @@ SURFACE is extraction; the HUD gauge is distance-to-exit while absolute depth
 lives on the lift's big red LED boards in the world. This is the VERTICAL
 expansion axis of the owner's two-axis sketch; rails (NEXT) are the horizontal.
 
-Why it leads the roadmap: the 3× deeper mines created a commute problem, and
-the lift converts the commute into a purchased checkpoint — the same shape
+Why it led the roadmap: the 3× deeper mines created a commute problem, and the
+lift converts the commute into a purchased checkpoint — the same shape
 SteamWorld Dig and Spelunky landed on. It also establishes the pattern
 everything in the NEXT section follows: **money → permanent, per-mine,
 physically visible infrastructure.**
+
+*(Superseded in part by LEVELS AS MAPS: each level is now its own sealed
+playfield and the lift is big doors at its top-centre. The economics above are
+unchanged; the geometry is documented in `ARCHITECTURE.md` §7.)*
 
 ---
 
@@ -188,7 +196,17 @@ pressure at once. None of it is small.
 - **Wider resident window.** The spatial hash wraps at 2944 × 5888 world
   units; the streaming window is clamped at 2800 × 5600. If a future feature
   needs a bigger live area, `GRID_COLS` must be raised — documented in
-  ADVENTURE.md, silent corruption if ignored.
+  `ARCHITECTURE.md` §6, silent corruption if ignored.
+
+- **`spanOf()` over-reports width with a grinder fitted.** The flag is live but
+  the outrigger discs it used to widen are not drawn any more, so `getWidth()`
+  inflates while the silhouette stays put. It feeds camera framing, dust spread
+  and collision span, so it is a balance decision rather than a cleanup —
+  `ARCHITECTURE.md` §9.1.
+
+- **Dead CSS and dead constants.** `style.css` still carries the time-attack HUD
+  rules and `config.js` a few unused numbers. Both inert; both left for the
+  branding pass to decide on.
 - **Pile keep-clear vs. slab height.** With a maxed magnet, a dumped heap has
   a narrow band to respawn in and can wait until you return. Correct but
   tunable if it reads oddly in play.
@@ -197,5 +215,5 @@ pressure at once. None of it is small.
 
 ---
 
-*Classic TIME ATTACK and FREESTYLE are frozen: every item above is adventure-
-side, and the seed-424242 terrain histogram remains the regression gate.*
+*The seed-424242 terrain histogram remains the regression gate for generation
+changes.*
