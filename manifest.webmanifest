@@ -1,0 +1,18 @@
+{
+  "name": "SUPERMINE ADVENTURE",
+  "short_name": "Supermine Adventure",
+  "description": "Run a mining company. Buy the rights, fuel up and drive a tracked excavation rig down through sealed levels of rock. Fill the hold, get back to the lift and sell before the tank runs dry.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#0b0a0d",
+  "theme_color": "#0b0a0d",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

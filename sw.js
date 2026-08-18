@@ -1,0 +1,127 @@
+/* =============================================================================
+ * SUPERMINE ADVENTURE service worker — offline play, installable, OPT-IN updates.
+ * -----------------------------------------------------------------------------
+ * UPDATE MODEL
+ *   Bump VERSION on every deploy. The page registers with
+ *   { updateViaCache: 'none' } and calls reg.update() on load, so a changed
+ *   sw.js is noticed at launch and the new build is precached in the
+ *   background. The new worker then WAITS — it does NOT take over. ui.js shows
+ *   an "UPDATE READY" button on the TITLE SCREEN, and only that tap sends
+ *   SKIP_WAITING. When the new worker takes control, ui.js reloads — and only
+ *   ever from the title screen, never mid-descent, so a loaded hold six
+ *   hundred metres down can't be destroyed by a deploy.
+ *
+ *   GET_VERSION lets the title screen display the build that is actually
+ *   serving this session, rather than whatever string happens to be compiled
+ *   into the page.
+ *
+ * WHY CACHE-FIRST, WHOLE-BUILD
+ *   This is 19 classic <script> tags sharing one global `SM`, with a documented
+ *   cross-module contract. Serving js/advhud.js from a new deploy alongside
+ *   js/adv.js from an old one would break that contract in ways that are almost
+ *   impossible to debug — a HUD reading a getter the older director does not
+ *   export yet is the exact failure, and it has happened. One versioned cache
+ *   per deploy means every file in a session comes from exactly ONE build.
+ *
+ * THE CACHE PREFIX IS NOT COSMETIC
+ *   This game was split out of SUPERMINE, which uses the `supermine-` prefix
+ *   and deletes every cache carrying it on activate. Both games can end up on
+ *   the same origin. The prefix here is `supermine-adventure-`, the cleanup
+ *   filter below matches that prefix and nothing else, and neither game may
+ *   ever widen its filter to the other's caches. Getting this wrong evicts a
+ *   perfectly good offline install of the other game every time this one
+ *   activates.
+ *
+ * ALL PATHS ARE RELATIVE ('./x') so the app works from a GitHub Pages
+ * subpath like /supermine-adventure/ as well as from a domain root.
+ * ========================================================================== */
+
+// Bump on EVERY deploy — this string is the whole update mechanism. Clients
+// that already have a cache only notice a new build when VERSION changes.
+// v2.0.0  ADVENTURE, STANDALONE. Split out of SUPERMINE v1.9.0: the campaign
+//         is the whole game now. The time-attack director, the upgrade-gate
+//         system, the classic terrain streamer and the entire classic HUD
+//         (menu, pause card, run summary, local high scores) are gone; boot
+//         lands on a title gate that opens straight into the slot picker.
+//         Save records are untouched — the localStorage key is unchanged, so
+//         an existing company loads exactly as it did.
+const VERSION = 'v2.0.0';
+const CACHE = `supermine-adventure-${VERSION}`;
+const CACHE_PREFIX = 'supermine-adventure-';
+
+const ASSETS = [
+  './',
+  './index.html',
+  './manifest.webmanifest',
+  './style.css',
+  './style-adventure.css',
+  './js/config.js',
+  './js/events.js',
+  './js/materials.js',
+  './js/input.js',
+  './js/camera.js',
+  './js/particles.js',
+  './js/vehicle.js',
+  './js/effects.js',
+  './js/sound.js',
+  './js/ui.js',
+  './js/mines.js',
+  './js/rig.js',
+  './js/save.js',
+  './js/advterrain.js',
+  './js/scanner.js',
+  './js/joystick.js',
+  './js/advhud.js',
+  './js/advui.js',
+  './js/adv.js',
+  './js/main.js',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
+];
+
+self.addEventListener('install', (event) => {
+  // Deliberately NO skipWaiting(): once precached the new worker parks in
+  // WAITING until the player accepts the update from the title screen.
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
+});
+
+self.addEventListener('message', (event) => {
+  const msg = event.data || {};
+  if (msg.type === 'SKIP_WAITING') self.skipWaiting();
+  if (msg.type === 'GET_VERSION' && event.ports[0]) {
+    event.ports[0].postMessage({ version: VERSION });
+  }
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(
+        // CACHE_PREFIX, never a looser match — see the header. A cache belonging
+        // to the original SUPERMINE must survive this untouched.
+        keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE)
+            .map((k) => caches.delete(k))
+      ))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (request.method !== 'GET') return;
+  if (new URL(request.url).origin !== self.location.origin) return;
+
+  event.respondWith(
+    caches.match(request, { ignoreSearch: true }).then((hit) => {
+      if (hit) return hit;
+      return fetch(request).then((res) => {
+        if (res.ok && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(request, copy));
+        }
+        return res;
+      }).catch(() => (request.mode === 'navigate' ? caches.match('./index.html') : undefined));
+    })
+  );
+});
