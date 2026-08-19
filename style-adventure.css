@@ -1280,6 +1280,33 @@
   height: 100%;
   display: block;
 }
+/* THE SURVEY LAMP. One soft light drifting across the plate — the only
+   ambient motion on this screen. Transform-only (compositor-bound, never a
+   repaint), and it sits UNDER the region labels and pins by DOM order. */
+.sm-av-maplight {
+  position: absolute;
+  left: -35%;
+  top: -35%;
+  width: 170%;
+  height: 170%;
+  pointer-events: none;
+  background: radial-gradient(42% 34% at 38% 40%,
+    rgba(255, 236, 190, 0.075),
+    rgba(255, 236, 190, 0.028) 55%,
+    rgba(0, 0, 0, 0) 72%);
+  animation: sm-av-lamp 26s ease-in-out infinite alternate;
+}
+@keyframes sm-av-lamp {
+  0%   { transform: translate3d(-6%, -4%, 0); }
+  100% { transform: translate3d(7%, 5%, 0); }
+}
+/* Screens hide with opacity/visibility, not display — pause the ambience
+   whenever the map is not the screen that is up, or the lamp and the pin
+   breathe tick through every mine run for the whole session. */
+.sm-av-screen:not(.sm-av-screen-on) .sm-av-maplight,
+.sm-av-screen:not(.sm-av-screen-on) .sm-av-pin-owned::after {
+  animation-play-state: paused;
+}
 /* A paper-chart vignette over the artwork, so the edges of the plate darken
    instead of the coastline running into the border. */
 .sm-av-mapart::after {
@@ -1396,6 +1423,7 @@
   cursor: pointer;
 }
 .sm-av-pin-dot {
+  position: relative;      /* the rivet core and headframe anchor to the DOT */
   width: 13px;
   height: 13px;
   border-radius: 50%;
@@ -1406,7 +1434,7 @@
 }
 .sm-av-pin-name {
   font-family: var(--sm-mono);
-  font-size: 7.5px;
+  font-size: 8.5px;
   font-weight: 800;
   letter-spacing: 1.2px;
   color: var(--sm-dim);
@@ -1420,6 +1448,32 @@
   letter-spacing: 0.6px;
   color: var(--sm-dimmer);
   font-variant-numeric: tabular-nums;
+}
+/* What the ground IS: known mines carry their depth under the price... */
+.sm-av-pin-sub {
+  font-family: var(--sm-mono);
+  font-size: 6.5px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  color: rgba(190, 205, 222, 0.55);
+  text-shadow: 0 1px 3px #000;
+  font-variant-numeric: tabular-nums;
+}
+/* ...and held mines carry the lift: how much of it the company has bought. */
+.sm-av-pin-levels {
+  width: 26px;
+  height: 3px;
+  margin-top: 1px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+.sm-av-pin-levels-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--sm-gold), var(--sm-gold-hot));
 }
 /* THREE STATES, THREE SHAPES — not three shades of the same dot, because the
    difference between "mine", "for sale" and "not yet" has to survive a glance
@@ -1438,8 +1492,42 @@
   border-radius: 50%;
   background: rgba(30, 20, 0, 0.65);
 }
+/* The headframe: the A-frame over the shaft, the universal "working mine"
+   silhouette, raised over the rivet. */
+.sm-av-pin-owned .sm-av-pin-dot::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -8px;
+  width: 0;
+  height: 0;
+  margin-left: -5px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 8px solid var(--sm-gold);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.8));
+}
 .sm-av-pin-owned .sm-av-pin-name { color: var(--sm-gold-hot); }
 .sm-av-pin-owned .sm-av-pin-tag { color: var(--sm-gold); letter-spacing: 1.6px; }
+/* A slow breathe on held ground — opacity only, so it never repaints. */
+.sm-av-pin-owned::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 14.5px;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(255, 194, 31, 0.5), rgba(255, 194, 31, 0) 70%);
+  opacity: 0.3;
+  animation: sm-av-breathe 3.6s ease-in-out infinite alternate;
+}
+@keyframes sm-av-breathe {
+  0%   { opacity: 0.12; }
+  100% { opacity: 0.5; }
+}
 
 .sm-av-pin-buy .sm-av-pin-dot {
   background: linear-gradient(180deg, var(--sm-cyan-hot), var(--sm-cyan) 55%, #2597c4);
@@ -1468,6 +1556,12 @@
 .sm-av-pin-fog .sm-av-pin-dot::after { display: none; }
 .sm-av-pin-fog .sm-av-pin-name { color: rgba(170, 186, 206, 0.6); letter-spacing: 1.8px; }
 .sm-av-pin-fog .sm-av-pin-tag { color: rgba(170, 186, 206, 0.5); }
+/* Fogged ground leaks NOTHING: no depth, no lift bar, no headframe, no glow —
+   JS blanks these too, but the fog class is the belt to that braces. */
+.sm-av-pin-fog .sm-av-pin-sub,
+.sm-av-pin-fog .sm-av-pin-levels,
+.sm-av-pin-fog .sm-av-pin-dot::before,
+.sm-av-pin-fog::after { display: none !important; }
 
 .sm-av-pin-sel .sm-av-pin-dot { transform: scale(1.5); }
 .sm-av-pin-buy.sm-av-pin-sel .sm-av-pin-dot { transform: rotate(45deg) scale(1.5); }
@@ -2125,7 +2219,7 @@
   .sm-adv .sm-av-slot-acts .sm-btn { flex: 0 1 260px; }
   .sm-adv .sm-av-slot-acts { justify-content: flex-start; }
   .sm-adv .sm-av-title { font-size: 26px; }
-  .sm-adv .sm-av-pin-name { font-size: 8.5px; }
+  .sm-adv .sm-av-pin-name { font-size: 9.5px; }
   .sm-adv .sm-av-hot-lbl { font-size: 8px; }
 }
 
@@ -2160,7 +2254,9 @@
 
 /* --- PORTRAIT (the default phone case) --------------------------------- */
 .sm-adv.sm-portrait .sm-ah { max-width: none; }
-.sm-adv.sm-portrait .sm-av-map { min-height: 34vh; }
+/* The plate itself needs the height floor: .sm-av-map is the absolutely
+   positioned SCREEN (inset 0), so a min-height there was a no-op. */
+.sm-adv.sm-portrait .sm-av-mapart { min-height: 34vh; }
 .sm-adv.sm-portrait .sm-av-rig { min-height: 30vh; }
 .sm-adv.sm-portrait .sm-av-slot-stats { grid-template-columns: repeat(2, 1fr); }
 .sm-adv.sm-portrait .sm-av-toast { bottom: 108px; }
@@ -2186,8 +2282,10 @@
 .sm-adv.sm-tiny .sm-av-hot-sel .sm-av-hot-lv { display: block; }
 .sm-adv.sm-tiny .sm-av-hot-lbl { font-size: 6.5px; letter-spacing: 0.8px; }
 /* Region washes stay; their LABELS collide with the pin names at this width,
-   and the mine card names the region anyway. */
+   and the mine card names the region anyway. The depth sub-line goes with
+   them — seven pins of three-line text is a wall on a narrow phone. */
 .sm-adv.sm-tiny .sm-av-region-label { display: none; }
+.sm-adv.sm-tiny .sm-av-pin-sub { display: none; }
 .sm-adv.sm-tiny .sm-av-stratum { grid-template-columns: 10px 1fr 62px; }
 .sm-adv.sm-tiny .sm-av-stratum-ore { display: none; }
 .sm-adv.sm-tiny .sm-av-res-val { min-width: 66px; font-size: 12px; }
@@ -2200,6 +2298,8 @@
   .sm-adv .sm-ah-bar-fill,
   .sm-adv .sm-ah-mini-fill { transition: none; animation: none; }
   .sm-adv .sm-av-pin-sel::before,
+  .sm-adv .sm-av-maplight,
+  .sm-adv .sm-av-pin-owned::after,
   .sm-adv .sm-ah-fuel.sm-ah-crit { animation: none; }
   .sm-adv .sm-av-res-row { opacity: 1; transform: none; }
 }

@@ -148,6 +148,14 @@ SM.advui = (function () {
   var mapSeen = false;       // suppresses the reveal fanfare on the first paint
   var pinCount = -1;
   var selMine = null;        // mine id shown on the map card
+  var lastRec = null;        // save record the surveyed set was read from —
+                             // a different record is a different company,
+                             // and its chart must not inherit this one's fog
+  var roadOrder = [];        // pins sorted by rights price — the haulage ladder
+  var plateCv = null;        // baked chart (sea, land, fog) — repainted rarely
+  var maskCv = null;         // continent silhouette scratch
+  var paintCv = null;        // land painting scratch
+  var plateKey = '';         // '' forces a re-bake on the next drawMapArt()
   var selPart = 'drill';     // hotspot shown in the workshop
   var partTags = {};
   /* WHICH LIFT STATION THE DESCENT STARTS AT. -1 means "no choice made yet",
@@ -630,6 +638,10 @@ SM.advui = (function () {
      * drawMapArt(). The pins stay DOM on top of it, because they are buttons
      * with labels and hit targets, which canvas is bad at. */
     els.mapCanvas = el('canvas', 'sm-av-map-canvas', els.map);
+    /* The survey lamp: one soft light drifting over the plate, CSS-animated
+     * (transform only). Created BEFORE the region and pin layers so it can
+     * never sit over a button — stacking here is pure DOM order. */
+    els.mapLight = el('div', 'sm-av-maplight', els.map);
     els.mapRegions = el('div', 'sm-av-regions', els.map);
     els.mapPins = el('div', 'sm-av-pins', els.map);
     els.mapEmpty = el('div', 'sm-av-map-empty', els.map, 'NO SURVEY DATA');
@@ -694,6 +706,11 @@ SM.advui = (function () {
      * loader ever drops it, the worst case is the fog coming back, never a
      * broken company. */
     var rec = (SM.save && SM.save.get) ? SM.save.get() : null;
+    /* A DIFFERENT COMPANY IS A DIFFERENT CHART. save.js hands out one live
+     * record object per slot, so a reference change means a slot change —
+     * drop the surveyed set and the fanfare latch before merging, or company
+     * B starts with company A's fog already lifted. */
+    if (rec !== lastRec) { lastRec = rec; revealed = {}; mapSeen = false; }
     if (rec && rec.seen) {
       for (var sk in rec.seen) if (rec.seen.hasOwnProperty(sk)) revealed[sk] = true;
     }
@@ -741,6 +758,23 @@ SM.advui = (function () {
       p.node.classList[(selMine === m.id) ? 'add' : 'remove']('sm-av-pin-sel');
       p.tag.textContent = owned ? 'HELD' : (num(m.price, 0) > 0 ? money(m.price) : 'FREE');
       p.name.textContent = known ? String(m.name || m.id).toUpperCase() : 'UNCHARTED SITE';
+      /* What the ground IS, not just what it costs: known mines show their
+       * depth, held mines show how much of the lift is bought. Both stay
+       * blank on fogged ground (CSS hides them too, belt and braces). */
+      p.sub.textContent = known ? (fmt(num(m.depth, 0)) + ' M') : '';
+      if (owned) {
+        /* levelsOf memoises its table and ownedLevels is a plain count, so
+         * this stays allocation-free across all seven pins — liftLevels()
+         * would rebuild an array per pin per paint for the same ratio. */
+        var ltab = (SM.mines && SM.mines.levelsOf) ? SM.mines.levelsOf(m.id) : null;
+        var lt = ltab ? ltab.length : 0;
+        var lo = (SM.adv && SM.adv.ownedLevels) ? num(SM.adv.ownedLevels(m.id), 1) : 1;
+        p.lvl.style.display = lt > 0 ? '' : 'none';
+        var pct = (lt > 0 ? Math.round((Math.min(lo, lt) / lt) * 100) : 0) + '%';
+        if (p.lvlFill.style.width !== pct) p.lvlFill.style.width = pct;
+      } else {
+        p.lvl.style.display = 'none';
+      }
     }
 
     if (!selMine && list.length) selMine = firstInteresting(list);
@@ -817,14 +851,52 @@ SM.advui = (function () {
       if (my > r.maxY) r.maxY = my;
     }
 
-    // Deepest region last, so the label of a big late region paints on top.
+    /* THE LOBES — solved ONCE, here, in normalised units, and stored. The
+     * canvas coastline, the DOM region box (label + reveal sweep) and the
+     * claim hatch are all traced from these same numbers, so they can never
+     * disagree — the old build derived the DOM box from the mine bounding
+     * box and the coastline from a clamped blob, and the survey sweep ended
+     * up a third of the size of the land it was celebrating.
+     *
+     * Size encodes the campaign: regions are ranked by their cheapest
+     * mining rights, and late, expensive ground is simply BIGGER on the
+     * chart than the starter claim. Geometry is seeded off the region name
+     * and the pin coordinates only — never off save state — so a fresh
+     * company and a loaded one always render the identical continent. */
     for (i = 0; i < regions.length; i++) {
       r = regions[i];
-      var pad = 0.055;
-      r.x0 = insetX(Math.max(0, r.minX - pad));
-      r.y0 = insetX(Math.max(0, r.minY - pad));
-      r.x1 = insetX(Math.min(1, r.maxX + pad));
-      r.y1 = insetX(Math.min(1, r.maxY + pad));
+      var cheap = Infinity, sx = 0, sy = 0;
+      for (var j = 0; j < r.mines.length; j++) {
+        var pr = num(r.mines[j].price, 0);
+        if (pr < cheap) cheap = pr;
+        sx += clamp01(num(r.mines[j].mapX, 0.5));
+        sy += clamp01(num(r.mines[j].mapY, 0.5));
+      }
+      r.cheapRights = cheap;
+      r.ax = sx / r.mines.length;      // anchor: centroid of the region's mines
+      r.ay = sy / r.mines.length;
+      r.lobe = buildLobe(r.seed);
+    }
+    var order = regions.slice().sort(function (a, b) { return a.cheapRights - b.cheapRights; });
+    for (i = 0; i < order.length; i++) {
+      r = order[i];
+      var t = order.length > 1 ? i / (order.length - 1) : 0.5;
+      r.rank = i;
+      r.rr = 0.085 + t * 0.065;        // lobe radius, as a fraction of the plate
+      /* A region holding several spread-out mines must cover all of them.
+       * min/max are raw 0..1 map space; the inset fold shrinks that to
+       * (1 - PIN_INSET*2) of the plate, so convert before comparing to rr. */
+      var spread = Math.max(r.maxX - r.minX, r.maxY - r.minY)
+                   * (1 - PIN_INSET * 2) * 0.62 + 0.045;
+      if (spread > r.rr) r.rr = spread;
+    }
+
+    for (i = 0; i < regions.length; i++) {
+      r = regions[i];
+      r.x0 = insetX(r.ax) - r.rr;
+      r.x1 = insetX(r.ax) + r.rr;
+      r.y0 = insetX(r.ay) - r.rr * LOBE_RY;
+      r.y1 = insetX(r.ay) + r.rr * LOBE_RY;
 
       var box = el('div', 'sm-av-region', els.mapRegions);
       box.style.left = (r.x0 * 100) + '%';
@@ -843,6 +915,13 @@ SM.advui = (function () {
       if (!m) continue;
       pins.push(makePin(m, byName[String(m.region || 'Uncharted')]));
     }
+
+    /* The haulage ladder: every road segment walks this order. */
+    roadOrder.length = 0;
+    for (i = 0; i < pins.length; i++) roadOrder.push(pins[i]);
+    roadOrder.sort(function (a, b) { return num(a.mine.price, 0) - num(b.mine.price, 0); });
+
+    plateKey = '';               // geometry changed: the baked plate is stale
   }
 
   function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
@@ -871,7 +950,12 @@ SM.advui = (function () {
     el('span', 'sm-av-pin-dot', node);
     var nameEl = el('span', 'sm-av-pin-name', node, String(m.name || m.id || '').toUpperCase());
     var tag = el('span', 'sm-av-pin-tag', node, '');
-    var p = { node: node, tag: tag, name: nameEl, mine: m, region: region || null };
+    var sub = el('span', 'sm-av-pin-sub', node, '');
+    var lvl = el('span', 'sm-av-pin-levels', node);
+    lvl.style.display = 'none';
+    var lvlFill = el('span', 'sm-av-pin-levels-fill', lvl);
+    var p = { node: node, tag: tag, name: nameEl, sub: sub, lvl: lvl,
+              lvlFill: lvlFill, mine: m, region: region || null };
     onTap(node, function () {
       selMine = m.id;
       paintMap();
@@ -880,33 +964,85 @@ SM.advui = (function () {
   }
 
   /* =====================================================================
-   * THE MAP ARTWORK
+   * THE MAP ARTWORK — the company survey plate
    * ---------------------------------------------------------------------
-   * The empire screen is the one the player sees most between runs, so the
-   * regions get real character rather than a wireframe: each one is a drawn
-   * landmass with its own palette and its own terrain marks — folded hills,
-   * a terraced quarry, a snow-capped range, an ice shelf, sunken hollows, a
-   * volcanic coast, and a rift that is not really land at all.
+   * ONE CONTINENT, not seven competing islands: every region contributes a
+   * lobe anchored at its mines, the lobes are unioned into a single
+   * landmass (nonzero winding does the union for free), and each region is
+   * a DISTRICT of that landmass with its own terrain hatch. The Rift alone
+   * stays out of the union — it is not land, it is a tear in open water at
+   * the far end of the chart, which is exactly what the campaign's last
+   * ground should look like from the first day.
    *
-   * Everything is procedural and deterministic (seeded off the region NAME),
-   * so there are no assets to load, nothing to keep in sync with mines.js,
-   * and a repaint always draws the same coastline.
+   * Everything is procedural and deterministic — lobes are seeded off the
+   * region NAME and anchored at the pin coordinates, never off save state —
+   * so there are no assets, nothing to keep in sync with mines.js, and a
+   * fresh company renders the identical coastline to a loaded one.
    *
-   * It repaints only when the map screen is painted — on open, on a purchase,
-   * on a resize — never per frame.
+   * TWO TIERS, because paintMap() runs on every pin tap and on every ledger
+   * event: the PLATE (sea, soundings, continent, districts, fog, furniture)
+   * is baked into an offscreen canvas keyed on size + the revealed set, and
+   * a tap costs one drawImage; the OVERLAY (claim hatch, haulage road,
+   * frontier ring, selection brackets) is a few dozen strokes redrawn on
+   * top every paint. Nothing here runs per frame.
    * ================================================================== */
   var REGION_ART = {
-    hills:     { kind: 'hills',     land: ['#48562f', '#5d6f37', '#7d9147'], edge: '#94a55a', ink: '#dcecb4' },
-    quarry:    { kind: 'quarry',    land: ['#5d3a22', '#7d4c2b', '#a2673a'], edge: '#c98a52', ink: '#ffd9a8' },
-    mountains: { kind: 'mountains', land: ['#333b46', '#4b5563', '#6d7987'], edge: '#a9b5c5', ink: '#e2ecf8' },
-    ice:       { kind: 'ice',       land: ['#28485a', '#3a7häa', '#66a9bf'], edge: '#c6ecf7', ink: '#eafdff' },
-    lowland:   { kind: 'lowland',   land: ['#22321f', '#33482b', '#4a633b'], edge: '#6d8a4f', ink: '#c8dca6' },
-    volcanic:  { kind: 'volcanic',  land: ['#2d1613', '#4d2016', '#712c18'], edge: '#ff7a2a', ink: '#ffc9a4' },
-    rift:      { kind: 'rift',      land: ['#191024', '#2d1739', '#48235c'], edge: '#c46bff', ink: '#f5daff' },
-    desert:    { kind: 'desert',    land: ['#6b5225', '#8f6d2f', '#b8903f'], edge: '#e0bb63', ink: '#ffeec0' }
+    hills:     { kind: 'hills',     land: ['#4a5a2c', '#647a38', '#8ba64c'], edge: '#a8bd60', ink: '#e2f2b8' },
+    quarry:    { kind: 'quarry',    land: ['#6b3f20', '#8f5527', '#b87738'], edge: '#dda05c', ink: '#ffdcb0' },
+    mountains: { kind: 'mountains', land: ['#3a4350', '#556274', '#7c8b9e'], edge: '#b7c5d6', ink: '#e8f1fb' },
+    ice:       { kind: 'ice',       land: ['#2b5064', '#3f89a4', '#74bcd2'], edge: '#d2f1fa', ink: '#effeff' },
+    lowland:   { kind: 'lowland',   land: ['#26391f', '#3d5730', '#587547'], edge: '#7fa15c', ink: '#d2e6ae' },
+    volcanic:  { kind: 'volcanic',  land: ['#32180f', '#5c2716', '#83341a'], edge: '#ff7a2a', ink: '#ffd0a8' },
+    rift:      { kind: 'rift',      land: ['#1d1229', '#341a41', '#522a68'], edge: '#c46bff', ink: '#f5daff' },
+    desert:    { kind: 'desert',    land: ['#6f5626', '#977433', '#c29a46'], edge: '#e8c46c', ink: '#fff0c4' }
   };
-  // typo guard: the ice mid-tone above must be a valid colour
-  REGION_ART.ice.land[1] = '#3a7d94';
+
+  /* Lobe height/width ratio: lobes stretch WITH the plate (both axes are
+   * plate fractions, like the pins), so pin and coastline can never drift
+   * apart on resize — a landmass is just a little wider than it is tall. */
+  var LOBE_RY = 0.92;
+
+  /** Map-fraction -> plate pixels, through the SAME fold the pins use.
+   *  These two are the only positional entry points for the artwork. */
+  function mapPX(v, w) { return insetX(num(v, 0.5)) * w; }
+  function mapPY(v, h) { return insetX(num(v, 0.5)) * h; }
+
+  /** A region's coastline shape, generated once and stored: unit-circle
+   *  points with a jitter factor each. Same angular direction for every
+   *  lobe, so the nonzero-winding union can never punch a hole. */
+  function buildLobe(seed) {
+    var rnd = rngFrom(seed);
+    var N = 16, pts = [];
+    for (var i = 0; i < N; i++) {
+      var a = (i / N) * Math.PI * 2;
+      pts.push({ c: Math.cos(a), s: Math.sin(a), j: 0.74 + rnd() * 0.42 });
+    }
+    return pts;
+  }
+
+  /** Trace a region's coast as a SUBPATH (no beginPath here: the continent
+   *  mask unions several of these under one fill). grow scales the lobe. */
+  function lobeSubpath(ctx, r, w, h, grow) {
+    var cx = mapPX(r.ax, w), cy = mapPY(r.ay, h);
+    var rx = r.rr * w * grow, ry = r.rr * LOBE_RY * h * grow;
+    var p = r.lobe, N = p.length;
+    for (var i = 0; i <= N; i++) {
+      var a = p[i % N], b = p[(i + 1) % N];
+      var ax = cx + a.c * rx * a.j, ay = cy + a.s * ry * a.j;
+      var bx = cx + b.c * rx * b.j, by = cy + b.s * ry * b.j;
+      var mx = (ax + bx) * 0.5, my = (ay + by) * 0.5;
+      if (i === 0) ctx.moveTo(mx, my);
+      else ctx.quadraticCurveTo(ax, ay, mx, my);
+    }
+    ctx.closePath();
+  }
+
+  /** The plate cache key's reveal component: fog is baked into the plate. */
+  function revealSignature() {
+    var s = '';
+    for (var i = 0; i < regions.length; i++) s += regions[i].revealed ? '1' : '0';
+    return s;
+  }
 
   /**
    * Terrain identity from the region's NAME, by keyword. Matching on the name
@@ -948,12 +1084,116 @@ SM.advui = (function () {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    drawSea(ctx, w, h);
-    var i;
-    for (i = 0; i < regions.length; i++) drawRegion(ctx, regions[i], w, h);
-    drawRoutes(ctx, w, h);
-    drawGraticule(ctx, w, h);
-    drawChartFurniture(ctx, w, h);
+    /* Size is in the key because onResize only repaints the VISIBLE screen:
+     * a resize while the map is hidden must be caught on the next show. */
+    var key = pw + '|' + ph + '|' + revealSignature();
+    if (key !== plateKey || !plateCv) {
+      bakePlate(w, h, pw, ph, dpr);
+      plateKey = key;
+    }
+    /* Source is DPR pixels, destination is CSS pixels (ctx is already
+     * DPR-transformed) — spell both out or retina renders at half size. */
+    ctx.drawImage(plateCv, 0, 0, pw, ph, 0, 0, w, h);
+    drawOverlay(ctx, w, h);
+  }
+
+  /** Tier 1: everything that survives a pin tap. Expensive is fine here. */
+  function bakePlate(w, h, pw, ph, dpr) {
+    if (!plateCv) {
+      plateCv = document.createElement('canvas');
+      maskCv = document.createElement('canvas');
+      paintCv = document.createElement('canvas');
+    }
+    if (plateCv.width !== pw || plateCv.height !== ph) {
+      plateCv.width = pw; plateCv.height = ph;
+      maskCv.width = pw; maskCv.height = ph;
+      paintCv.width = pw; paintCv.height = ph;
+    }
+    var i, r;
+    /* Districts paint cheap-to-expensive, so late ground wins the seams. */
+    var land = [];
+    for (i = 0; i < regions.length; i++) {
+      if (regions[i].art.kind !== 'rift') land.push(regions[i]);
+    }
+    land.sort(function (a, b) { return a.rank - b.rank; });
+
+    /* --- 1. the continent silhouette: one fill unions every lobe -------- */
+    var mc = maskCv.getContext('2d');
+    mc.setTransform(dpr, 0, 0, dpr, 0, 0);
+    mc.clearRect(0, 0, w, h);
+    mc.beginPath();
+    for (i = 0; i < land.length; i++) lobeSubpath(mc, land[i], w, h, 1);
+    mc.fillStyle = '#fff';
+    mc.fill();
+
+    /* --- 2. the land painting, cut to the silhouette --------------------
+     * Districts paint SLOPPILY (clipped to a slightly grown lobe, so the
+     * seams overlap instead of gapping); the destination-in cut against the
+     * mask trims everything back to the true coastline in one op. */
+    var pc = paintCv.getContext('2d');
+    pc.setTransform(dpr, 0, 0, dpr, 0, 0);
+    pc.clearRect(0, 0, w, h);
+    for (i = 0; i < land.length; i++) drawDistrict(pc, land[i], w, h);
+    pc.globalCompositeOperation = 'destination-in';
+    pc.setTransform(1, 0, 0, 1, 0, 0);
+    pc.drawImage(maskCv, 0, 0);
+    pc.setTransform(dpr, 0, 0, dpr, 0, 0);
+    pc.globalCompositeOperation = 'source-over';
+
+    /* --- 3. compose the plate ------------------------------------------- */
+    var bc = plateCv.getContext('2d');
+    bc.setTransform(dpr, 0, 0, dpr, 0, 0);
+    bc.clearRect(0, 0, w, h);
+    drawSea(bc, w, h);
+    drawGraticule(bc, w, h);              // UNDER the land, where a chart grid belongs
+
+    bc.save();
+    bc.setTransform(1, 0, 0, 1, 0, 0);    // device px, so the mask blits 1:1
+    /* Continental shelf: the silhouette echoed into the water. */
+    for (i = 0; i < 8; i++) {
+      var oa = (i / 8) * Math.PI * 2;
+      var ox = Math.cos(oa), oy = Math.sin(oa);
+      bc.globalAlpha = 0.028;
+      bc.drawImage(maskCv, ox * 6.5 * dpr, oy * 6.5 * dpr);
+      bc.globalAlpha = 0.042;
+      bc.drawImage(maskCv, ox * 3 * dpr, oy * 3 * dpr);
+    }
+    /* Rim light: a sliver of silhouette peeking out on the lit side... */
+    bc.globalAlpha = 0.15;
+    bc.drawImage(maskCv, -1.6 * dpr, -1.6 * dpr);
+    bc.globalAlpha = 1;
+    /* ...then the land itself covers all but that sliver, dropping a soft
+     * shadow into the water on the shaded side. One consistent sun. */
+    bc.shadowColor = 'rgba(0, 0, 0, 0.55)';
+    bc.shadowBlur = 9 * dpr;
+    bc.shadowOffsetX = 2 * dpr;
+    bc.shadowOffsetY = 3 * dpr;
+    bc.drawImage(paintCv, 0, 0);
+    bc.restore();
+
+    /* Coastlines and district boundaries. Stroking each lobe individually
+     * draws the interior segments too — those read as district borders. */
+    for (i = 0; i < land.length; i++) {
+      r = land[i];
+      bc.save();
+      bc.beginPath();
+      lobeSubpath(bc, r, w, h, 1);
+      if (r.revealed) {
+        bc.strokeStyle = 'rgba(214, 232, 248, 0.30)';
+        bc.lineWidth = 1.2;
+      } else {
+        if (bc.setLineDash) bc.setLineDash([3, 5]);
+        bc.strokeStyle = 'rgba(150, 170, 200, 0.40)';
+        bc.lineWidth = 1;
+      }
+      bc.stroke();
+      bc.restore();
+    }
+
+    for (i = 0; i < regions.length; i++) {
+      if (regions[i].art.kind === 'rift') drawRift(bc, regions[i], w, h);
+    }
+    drawChartFurniture(bc, w, h);
   }
 
   /**
@@ -1012,21 +1252,22 @@ SM.advui = (function () {
     ctx.restore();
   }
 
-  /** Deep water, a warm shelf near the coast, and a compass rose. */
+  /** Deep water: a lit gradient, long swells, and survey soundings. */
   function drawSea(ctx, w, h) {
     var g = ctx.createLinearGradient(0, 0, w * 0.6, h);
-    g.addColorStop(0, '#0a1420');
-    g.addColorStop(0.55, '#0b1a26');
-    g.addColorStop(1, '#07101a');
+    g.addColorStop(0, '#0c1826');
+    g.addColorStop(0.55, '#0d1f2e');
+    g.addColorStop(1, '#081320');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
-    // depth contours: a few long, lazy strokes so the water is not flat
-    ctx.strokeStyle = 'rgba(120, 190, 220, 0.055)';
+    // long, lazy swells so the water is not flat
+    ctx.strokeStyle = 'rgba(120, 190, 220, 0.05)';
     ctx.lineWidth = 1;
     var rnd = rngFrom(9001);
-    for (var i = 0; i < 7; i++) {
-      var y0 = h * (0.08 + i * 0.13) + rnd() * 12;
+    var i;
+    for (i = 0; i < 5; i++) {
+      var y0 = h * (0.10 + i * 0.19) + rnd() * 12;
       ctx.beginPath();
       ctx.moveTo(-10, y0);
       for (var x = 0; x <= w + 10; x += 42) {
@@ -1034,6 +1275,36 @@ SM.advui = (function () {
       }
       ctx.stroke();
     }
+
+    /* Soundings: the stipple-and-numeral marks of a working chart, kept out
+     * of the land by a cheap distance test against the lobes. This is what
+     * turns "empty dark space" into "surveyed water". */
+    ctx.font = '800 7px ui-monospace, monospace';
+    for (i = 0; i < 46; i++) {
+      var px = rnd() * w, py = rnd() * h;
+      var dp = 60 + ((rnd() * 840) | 0);         // consume rnd unconditionally:
+      if (nearLand(px, py, w, h)) continue;      // the stream must stay stable
+      if (i % 3 === 0) {
+        ctx.fillStyle = 'rgba(150, 195, 225, 0.13)';
+        ctx.fillText(String(dp), px, py);
+      } else {
+        ctx.fillStyle = 'rgba(150, 195, 225, 0.17)';
+        ctx.fillRect(px, py, 1.6, 1.6);
+      }
+    }
+  }
+
+  /** Is this plate point on or near a lobe? The rift counts too — it keeps
+   *  the sounding stipple out of the glow field. */
+  function nearLand(px, py, w, h) {
+    for (var i = 0; i < regions.length; i++) {
+      var r = regions[i];
+      if (!r.lobe) continue;
+      var dx = (px - mapPX(r.ax, w)) / (r.rr * w * 1.45);
+      var dy = (py - mapPY(r.ay, h)) / (r.rr * LOBE_RY * h * 1.45);
+      if (dx * dx + dy * dy < 1) return true;
+    }
+    return false;
   }
 
   function drawGraticule(ctx, w, h) {
@@ -1045,127 +1316,313 @@ SM.advui = (function () {
     ctx.stroke();
   }
 
-  /** Dashed haulage routes between neighbouring revealed regions. */
-  function drawRoutes(ctx, w, h) {
-    var pts = [];
-    for (var i = 0; i < regions.length; i++) {
-      var r = regions[i];
-      if (!r.revealed) continue;
-      pts.push([(r.x0 + r.x1) * 0.5 * w, (r.y0 + r.y1) * 0.5 * h]);
+  /* =====================================================================
+   * TIER 2 — THE OVERLAY: the company's working annotations
+   * ---------------------------------------------------------------------
+   * Redrawn on every paint (a few dozen strokes), on top of the blitted
+   * plate. No RNG, no gradients, no canvas allocation — geometry comes from
+   * the stored lobes and the pin coordinates.
+   * ================================================================== */
+  function drawOverlay(ctx, w, h) {
+    var i, r, m;
+
+    /* --- claimed ground: gold claim hatch + gold coast ------------------ */
+    for (i = 0; i < regions.length; i++) {
+      r = regions[i];
+      if (!(r.owned > 0)) continue;
+      var cx = mapPX(r.ax, w), cy = mapPY(r.ay, h);
+      var rx = r.rr * w, ry = r.rr * LOBE_RY * h;
+      if (r.art.kind === 'rift') {
+        // Owning the rift gets a gold survey ring, not a coastline.
+        ctx.save();
+        if (ctx.setLineDash) ctx.setLineDash([6, 5]);
+        ctx.strokeStyle = 'rgba(255, 194, 31, 0.60)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        if (ctx.ellipse) ctx.ellipse(cx, cy, rx * 0.72, ry * 0.72, 0, 0, Math.PI * 2);
+        else ctx.arc(cx, cy, Math.min(rx, ry) * 0.72, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        continue;
+      }
+      ctx.save();
+      ctx.beginPath();
+      lobeSubpath(ctx, r, w, h, 1);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(255, 194, 31, 0.10)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (var t = -ry * 2; t <= rx * 2; t += 9) {
+        ctx.moveTo(cx - rx + t, cy + ry);
+        ctx.lineTo(cx - rx + t + ry * 2, cy - ry);
+      }
+      ctx.stroke();
+      ctx.restore();
+      ctx.beginPath();
+      lobeSubpath(ctx, r, w, h, 1);
+      ctx.strokeStyle = 'rgba(255, 194, 31, 0.80)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
     }
-    if (pts.length < 2) return;
-    pts.sort(function (a, b) { return a[0] - b[0]; });
+
+    /* --- the haulage road: the price ladder made visible -----------------
+     * Solid, cased gold between claims the company owns, walked in rights-
+     * price order; one dashed amber segment from the last claim to the next
+     * REVEALED unowned ground (the frontier); nothing past the frontier —
+     * the road must answer "I'm here, the next rung is there" at a glance. */
     ctx.save();
-    ctx.strokeStyle = 'rgba(255, 194, 31, 0.20)';
-    ctx.lineWidth = 1.4;
-    if (ctx.setLineDash) ctx.setLineDash([5, 6]);
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (var k = 1; k < pts.length; k++) {
-      var a = pts[k - 1], b = pts[k];
-      var mx = (a[0] + b[0]) * 0.5, my = (a[1] + b[1]) * 0.5 - Math.abs(b[0] - a[0]) * 0.12;
-      ctx.quadraticCurveTo(mx, my, b[0], b[1]);
+    ctx.lineCap = 'round';
+    var px0 = -1, py0 = -1, frontier = null;
+    for (i = 0; i < roadOrder.length; i++) {
+      var pin = roadOrder[i];
+      m = pin.mine;
+      var mx = mapPX(num(m.mapX, 0.5), w), my = mapPY(num(m.mapY, 0.5), h);
+      if (ownsMine(m)) {
+        if (px0 >= 0) roadSeg(ctx, px0, py0, mx, my, true);
+        px0 = mx; py0 = my;
+      } else if (!frontier && (!pin.region || pin.region.revealed)) {
+        frontier = pin;
+      }
     }
-    ctx.stroke();
+    if (frontier && px0 >= 0) {
+      var fx = mapPX(num(frontier.mine.mapX, 0.5), w);
+      var fy = mapPY(num(frontier.mine.mapY, 0.5), h);
+      roadSeg(ctx, px0, py0, fx, fy, false);
+      // the surveyor's target on the next ground
+      ctx.strokeStyle = 'rgba(255, 178, 60, 0.55)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 15, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(fx - 21, fy); ctx.lineTo(fx - 11, fy);
+      ctx.moveTo(fx + 11, fy); ctx.lineTo(fx + 21, fy);
+      ctx.moveTo(fx, fy - 19); ctx.lineTo(fx, fy - 10);   // no south tick: the
+      ctx.stroke();                                       // name label lives there
+    }
     ctx.restore();
+
+    /* --- selection brackets: the survey instrument's reticle ------------- */
+    if (selMine) {
+      for (i = 0; i < pins.length; i++) {
+        if (pins[i].mine.id !== selMine) continue;
+        m = pins[i].mine;
+        var sx = mapPX(num(m.mapX, 0.5), w), sy = mapPY(num(m.mapY, 0.5), h);
+        var b = 21, l = 6;
+        ctx.strokeStyle = 'rgba(235, 244, 252, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(sx - b, sy - b + l); ctx.lineTo(sx - b, sy - b); ctx.lineTo(sx - b + l, sy - b);
+        ctx.moveTo(sx + b - l, sy - b); ctx.lineTo(sx + b, sy - b); ctx.lineTo(sx + b, sy - b + l);
+        ctx.moveTo(sx - b, sy); ctx.lineTo(sx - b + l, sy);
+        ctx.moveTo(sx + b - l, sy); ctx.lineTo(sx + b, sy);
+        ctx.stroke();
+        break;
+      }
+    }
   }
 
-  /** One landmass: a jittered blob, then terrain marks clipped inside it. */
-  function drawRegion(ctx, r, w, h) {
-    var x = r.x0 * w, y = r.y0 * h;
-    var bw = (r.x1 - r.x0) * w, bh = (r.y1 - r.y0) * h;
-    // Small regions still need to read as land, not as a dot.
-    var minW = Math.min(w * 0.22, 150), minH = Math.min(h * 0.24, 120);
-    if (bw < minW) { x -= (minW - bw) * 0.5; bw = minW; }
-    if (bh < minH) { y -= (minH - bh) * 0.5; bh = minH; }
-    var cx = x + bw * 0.5, cy = y + bh * 0.5;
-    var art = r.art;
-    var rnd = rngFrom(r.seed);
+  /** One road segment, bowed like a trail rather than ruled like a border. */
+  function roadSeg(ctx, x0, y0, x1, y1, owned) {
+    var mx = (x0 + x1) * 0.5, my = (y0 + y1) * 0.5 - Math.abs(x1 - x0) * 0.10 - 6;
+    if (owned) {
+      if (ctx.setLineDash) ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(10, 8, 2, 0.55)';       // casing first, road on top
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(mx, my, x1, y1); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255, 194, 31, 0.66)';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(mx, my, x1, y1); ctx.stroke();
+    } else {
+      if (ctx.setLineDash) ctx.setLineDash([6, 6]);
+      ctx.strokeStyle = 'rgba(255, 178, 60, 0.45)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(mx, my, x1, y1); ctx.stroke();
+      if (ctx.setLineDash) ctx.setLineDash([]);
+    }
+  }
+
+  /** One DISTRICT of the continent, painted into the (pre-cut) land layer:
+   *  its own lit ground, contour rings, hachured shade slope, and terrain
+   *  marks — or, unsurveyed, blank paper and a pencilled query. */
+  function drawDistrict(ctx, r, w, h) {
+    var cx = mapPX(r.ax, w), cy = mapPY(r.ay, h);
+    var rx = r.rr * w, ry = r.rr * LOBE_RY * h;
+    var x = cx - rx, y = cy - ry, bw = rx * 2, bh = ry * 2;
+    var art = r.art, i;
 
     ctx.save();
-    coastPath(ctx, cx, cy, bw * 0.62, bh * 0.62, rnd);
+    ctx.beginPath();
+    lobeSubpath(ctx, r, w, h, 1.06);
+    ctx.clip();
 
-    // A soft halo outside the coast so the land sits IN the water.
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.75)';
-    ctx.shadowBlur = 16;
-    ctx.fillStyle = art.land[0];
-    ctx.fill();
-    ctx.restore();
+    if (!r.revealed) {
+      /* UNSURVEYED: blank paper, a query and a few reported fixes. NO
+       * palette, NO terrain, NO depth — the fog must not leak what the
+       * ground is; the shape alone is the invitation. */
+      ctx.fillStyle = '#141a22';
+      ctx.fillRect(x - bw, y - bh, bw * 3, bh * 3);
+      var rq = rngFrom(r.seed ^ 0x5f5f);
+      ctx.strokeStyle = 'rgba(170, 190, 214, 0.16)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (i = 0; i < 3; i++) {
+        var tx = cx + (rq() - 0.5) * bw * 0.6, ty = cy + (rq() - 0.5) * bh * 0.6;
+        ctx.moveTo(tx - 3, ty); ctx.lineTo(tx + 3, ty);
+        ctx.moveTo(tx, ty - 3); ctx.lineTo(tx, ty + 3);
+      }
+      ctx.stroke();
+      ctx.font = '800 ' + Math.round(Math.min(bw, bh) * 0.34) + 'px ui-monospace, monospace';
+      ctx.fillStyle = 'rgba(190, 205, 224, 0.10)';
+      ctx.textAlign = 'center';
+      ctx.fillText('?', cx, cy + Math.min(bw, bh) * 0.12);
+      ctx.textAlign = 'start';
+      ctx.restore();
+      return;
+    }
 
-    var g = ctx.createLinearGradient(x, y, x + bw * 0.35, y + bh);
+    // the district's own ground, lit from the top-left like everything else
+    var g = ctx.createLinearGradient(x, y, x + bw * 0.45, y + bh);
     g.addColorStop(0, art.land[2]);
     g.addColorStop(0.5, art.land[1]);
     g.addColorStop(1, art.land[0]);
     ctx.fillStyle = g;
-    ctx.fill();
+    ctx.fillRect(x - bw * 0.5, y - bh * 0.5, bw * 2, bh * 2);
 
-    ctx.clip();
+    // relief: contour rings of the district's own coast, in its ink
+    ctx.strokeStyle = art.ink;
+    ctx.lineWidth = 1;
+    for (i = 0; i < 3; i++) {
+      ctx.globalAlpha = 0.10 + i * 0.02;
+      ctx.beginPath();
+      lobeSubpath(ctx, r, w, h, 0.74 - i * 0.20);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // hachures down the shaded (south-east) slope
+    var rnd = rngFrom(r.seed ^ 0xbeef);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (i = 0; i < 12; i++) {
+      var th = (i / 11) * (Math.PI * 0.75) - Math.PI * 0.05;
+      var jr = 0.90 + (rnd() - 0.5) * 0.10;
+      var ox = Math.cos(th), oy = Math.sin(th);
+      ctx.moveTo(cx + ox * rx * jr, cy + oy * ry * jr);
+      ctx.lineTo(cx + ox * rx * (jr - 0.14), cy + oy * ry * (jr - 0.14));
+    }
+    ctx.stroke();
+
     drawTerrain(ctx, art.kind, x, y, bw, bh, art, rnd);
     ctx.restore();
+  }
 
-    // Coastline, brighter when the ground is held.
+  /** THE RIFT — not land: a tear in open water with light coming out of it,
+   *  parked at the expensive end of the chart. Unsurveyed it is only a
+   *  dashed rumour, so the fog leaks nothing there either. */
+  function drawRift(ctx, r, w, h) {
+    var cx = mapPX(r.ax, w), cy = mapPY(r.ay, h);
+    var rx = r.rr * w * 0.85, ry = r.rr * LOBE_RY * h * 0.85;
+    var i;
     ctx.save();
-    coastPath(ctx, cx, cy, bw * 0.62, bh * 0.62, rngFrom(r.seed));
-    ctx.strokeStyle = r.owned > 0 ? 'rgba(255, 194, 31, 0.75)' : 'rgba(210, 232, 250, 0.28)';
-    ctx.lineWidth = r.owned > 0 ? 2 : 1.2;
-    ctx.stroke();
-    ctx.restore();
-
-    /* UNSURVEYED GROUND. The land is still drawn underneath — a shape in the
-     * fog is an invitation, a blank rectangle is not — but it is veiled, and
-     * the pins on it read as UNCHARTED SITE until the company can reach them. */
     if (!r.revealed) {
-      ctx.save();
-      coastPath(ctx, cx, cy, bw * 0.66, bh * 0.66, rngFrom(r.seed));
-      ctx.fillStyle = 'rgba(7, 10, 16, 0.74)';
-      ctx.fill();
-      if (ctx.setLineDash) ctx.setLineDash([3, 5]);
+      if (ctx.setLineDash) ctx.setLineDash([3, 6]);
       ctx.strokeStyle = 'rgba(150, 170, 200, 0.35)';
       ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (ctx.ellipse) ctx.ellipse(cx, cy, rx * 0.7, ry * 0.7, 0, 0, Math.PI * 2);
+      else ctx.arc(cx, cy, Math.min(rx, ry) * 0.7, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.font = '800 ' + Math.round(Math.min(rx, ry) * 0.6) + 'px ui-monospace, monospace';
+      ctx.fillStyle = 'rgba(190, 205, 224, 0.10)';
+      ctx.textAlign = 'center';
+      ctx.fillText('?', cx, cy + Math.min(rx, ry) * 0.2);
+      ctx.textAlign = 'start';
       ctx.restore();
+      return;
     }
-  }
-
-  /** A closed, jittered coastline through 14 points around an ellipse. */
-  function coastPath(ctx, cx, cy, rx, ry, rnd) {
-    var N = 14, i, a, jr, px, py;
-    var first = true;
-    var pxs = [], pys = [];
-    for (i = 0; i < N; i++) {
-      a = (i / N) * Math.PI * 2;
-      jr = 0.78 + rnd() * 0.34;
-      pxs.push(cx + Math.cos(a) * rx * jr);
-      pys.push(cy + Math.sin(a) * ry * jr);
+    // the glow field in the water
+    var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(rx, ry));
+    g.addColorStop(0, 'rgba(196, 107, 255, 0.28)');
+    g.addColorStop(0.6, 'rgba(196, 107, 255, 0.10)');
+    g.addColorStop(1, 'rgba(196, 107, 255, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - rx * 1.3, cy - ry * 1.3, rx * 2.6, ry * 2.6);
+    // dark water pulled toward the tear
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.30)';
+    ctx.lineWidth = 1.2;
+    for (i = 1; i <= 2; i++) {
+      ctx.beginPath();
+      if (ctx.ellipse) ctx.ellipse(cx, cy, rx * 0.34 * i, ry * 0.30 * i, 0.3, 0, Math.PI * 2);
+      else ctx.arc(cx, cy, Math.min(rx, ry) * 0.32 * i, 0, Math.PI * 2);
+      ctx.stroke();
     }
+    // the tear itself, with a wide soft echo under a hot line
+    var rnd = rngFrom(r.seed);
+    var n = 7, k;
+    for (var pass = 0; pass < 2; pass++) {
+      var rr2 = rngFrom(r.seed);              // same jitter both passes
+      ctx.strokeStyle = pass === 0 ? 'rgba(196, 107, 255, 0.25)' : 'rgba(245, 218, 255, 0.90)';
+      ctx.lineWidth = pass === 0 ? 5 : 1.8;
+      ctx.beginPath();
+      ctx.moveTo(cx - rx * 0.55, cy - ry * 0.5);
+      for (k = 1; k <= n; k++) {
+        ctx.lineTo(cx - rx * 0.55 + (k / n) * rx * 1.1 + (rr2() - 0.5) * rx * 0.16,
+                   cy - ry * 0.5 + (k / n) * ry * 1.0 + (rr2() - 0.5) * ry * 0.16);
+      }
+      ctx.stroke();
+    }
+    // stray shards of light around the tear
+    ctx.strokeStyle = 'rgba(196, 107, 255, 0.45)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    for (i = 0; i <= N; i++) {
-      var i0 = i % N, i1 = (i + 1) % N;
-      px = (pxs[i0] + pxs[i1]) * 0.5;
-      py = (pys[i0] + pys[i1]) * 0.5;
-      if (first) { ctx.moveTo(px, py); first = false; }
-      else ctx.quadraticCurveTo(pxs[i0], pys[i0], px, py);
+    for (i = 0; i < 5; i++) {
+      var sx = cx + (rnd() - 0.5) * rx * 1.5, sy = cy + (rnd() - 0.5) * ry * 1.5;
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + (rnd() - 0.5) * 10, sy + (rnd() - 0.5) * 10);
     }
-    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
   }
 
+  /** Kind-specific terrain marks, drawn inside the district clip. Alphas sit
+   *  around 0.2-0.5 — a mark that needs squinting for is not a mark — and
+   *  every raised thing casts its shadow the same way: down and to the
+   *  right, matching the plate's one sun. (The rift never comes through
+   *  here; it is drawn offshore by drawRift.) */
   function drawTerrain(ctx, kind, x, y, w, h, art, rnd) {
     var i, n, px, py, s;
     if (kind === 'mountains' || kind === 'ice') {
-      // Ridges: back row hazy, front row sharp, snow on the caps.
+      // Ridges: back row hazy, front row sharp, snow caps, cast shadows.
       for (var row = 0; row < 2; row++) {
         n = 4 + (row === 0 ? 2 : 0);
         for (i = 0; i < n; i++) {
           var bx = x + w * (0.12 + (i / n) * 0.78) + rnd() * 10;
           var by = y + h * (row === 0 ? 0.46 : 0.68);
           s = h * (row === 0 ? 0.20 : 0.30) * (0.7 + rnd() * 0.6);
+          // the shadow the peak throws down-right
+          ctx.beginPath();
+          ctx.moveTo(bx, by - s);
+          ctx.lineTo(bx + s * 0.9, by);
+          ctx.lineTo(bx + s * 1.5, by + s * 0.16);
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.20)';
+          ctx.fill();
           ctx.beginPath();
           ctx.moveTo(bx - s * 0.9, by);
           ctx.lineTo(bx, by - s);
           ctx.lineTo(bx + s * 0.9, by);
           ctx.closePath();
-          ctx.fillStyle = row === 0 ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.13)';
+          ctx.fillStyle = row === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.24)';
+          ctx.fill();
+          // the lit face
+          ctx.beginPath();
+          ctx.moveTo(bx - s * 0.9, by);
+          ctx.lineTo(bx, by - s);
+          ctx.lineTo(bx, by);
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(255,255,255,0.10)';
           ctx.fill();
           // cap
           ctx.beginPath();
@@ -1173,106 +1630,126 @@ SM.advui = (function () {
           ctx.lineTo(bx, by - s);
           ctx.lineTo(bx + s * 0.30, by - s * 0.66);
           ctx.closePath();
-          ctx.fillStyle = kind === 'ice' ? 'rgba(232,253,255,0.72)' : 'rgba(226,236,248,0.5)';
+          ctx.fillStyle = kind === 'ice' ? 'rgba(232,253,255,0.80)' : 'rgba(226,236,248,0.60)';
           ctx.fill();
         }
       }
       if (kind === 'ice') {
-        ctx.strokeStyle = 'rgba(198,236,247,0.35)';
+        // crevasse cross-hatch and a stippled shelf edge
+        ctx.strokeStyle = 'rgba(198, 236, 247, 0.45)';
         ctx.lineWidth = 1;
-        for (i = 0; i < 6; i++) {
-          px = x + rnd() * w; py = y + h * (0.55 + rnd() * 0.4);
-          ctx.beginPath();
+        ctx.beginPath();
+        for (i = 0; i < 7; i++) {
+          px = x + rnd() * w; py = y + h * (0.52 + rnd() * 0.4);
           ctx.moveTo(px, py);
           ctx.lineTo(px + w * 0.10 * (rnd() - 0.5), py + h * 0.10);
-          ctx.stroke();
+          ctx.moveTo(px - 3, py + 4);
+          ctx.lineTo(px + 5, py + 2);
+        }
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(232, 253, 255, 0.30)';
+        for (i = 0; i < 16; i++) {
+          ctx.fillRect(x + rnd() * w, y + h * (0.78 + rnd() * 0.2), 2, 2);
         }
       }
       return;
     }
     if (kind === 'quarry') {
-      // Terraces: concentric steps cut into the hill.
+      // Terraced benches with a shadowed cut face, and spoil heaps beside.
       for (i = 0; i < 4; i++) {
         ctx.beginPath();
         ctx.ellipse(x + w * 0.5, y + h * (0.62 + i * 0.03),
                     w * (0.34 - i * 0.07), h * (0.20 - i * 0.04), 0, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(0,0,0,0.32)';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.lineWidth = 2;
         ctx.stroke();
-        ctx.fillStyle = 'rgba(255, 220, 170, 0.045)';
+        // the bench catches light on its upper-left lip
+        ctx.strokeStyle = 'rgba(255, 220, 170, 0.28)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(x + w * 0.5, y + h * (0.615 + i * 0.03),
+                    w * (0.34 - i * 0.07), h * (0.20 - i * 0.04), 0, Math.PI * 1.05, Math.PI * 1.85);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255, 220, 170, 0.06)';
+        ctx.beginPath();
+        ctx.ellipse(x + w * 0.5, y + h * (0.62 + i * 0.03),
+                    w * (0.34 - i * 0.07), h * (0.20 - i * 0.04), 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+      for (i = 0; i < 9; i++) {
+        px = x + w * (0.12 + rnd() * 0.76); py = y + h * (0.24 + rnd() * 0.2);
+        ctx.beginPath();
+        ctx.arc(px, py, 1.6 + rnd() * 1.6, 0, Math.PI * 2);
         ctx.fill();
       }
       return;
     }
     if (kind === 'volcanic') {
-      // A cone with a hot throat, then glowing fissures across the ground.
-      var vx = x + w * 0.5, vy = y + h * 0.66, vs = h * 0.34;
+      // The cone, its shadow, a hot throat, fissures and an ash fall.
+      var vx = x + w * 0.5, vy = y + h * 0.62, vs = h * 0.36;
+      ctx.beginPath();                              // cast shadow first
+      ctx.moveTo(vx, vy - vs);
+      ctx.lineTo(vx + vs, vy);
+      ctx.lineTo(vx + vs * 1.7, vy + vs * 0.2);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.26)';
+      ctx.fill();
       ctx.beginPath();
       ctx.moveTo(vx - vs, vy);
       ctx.lineTo(vx - vs * 0.22, vy - vs);
       ctx.lineTo(vx + vs * 0.22, vy - vs);
       ctx.lineTo(vx + vs, vy);
       ctx.closePath();
-      ctx.fillStyle = 'rgba(0,0,0,0.42)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.50)';
       ctx.fill();
-      ctx.beginPath();
+      ctx.beginPath();                              // the throat
       ctx.moveTo(vx - vs * 0.22, vy - vs);
       ctx.lineTo(vx + vs * 0.22, vy - vs);
       ctx.lineTo(vx, vy - vs * 0.78);
       ctx.closePath();
       ctx.fillStyle = art.edge;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 122, 42, 0.55)';
+      ctx.strokeStyle = 'rgba(255, 122, 42, 0.70)';  // glowing fissures
       ctx.lineWidth = 1.6;
       for (i = 0; i < 5; i++) {
         px = x + w * (0.18 + rnd() * 0.64);
-        py = y + h * (0.62 + rnd() * 0.3);
+        py = y + h * (0.60 + rnd() * 0.3);
         ctx.beginPath();
         ctx.moveTo(px, py);
         ctx.lineTo(px + w * 0.09 * (rnd() - 0.5), py + h * 0.09);
         ctx.lineTo(px + w * 0.16 * (rnd() - 0.5), py + h * 0.16);
         ctx.stroke();
       }
-      return;
-    }
-    if (kind === 'rift') {
-      // Not land: a tear, with light coming out of it.
-      ctx.save();
-      var rg = ctx.createLinearGradient(x, y, x + w, y + h);
-      rg.addColorStop(0, 'rgba(196,107,255,0)');
-      rg.addColorStop(0.5, 'rgba(196,107,255,0.34)');
-      rg.addColorStop(1, 'rgba(196,107,255,0)');
-      ctx.fillStyle = rg;
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = 'rgba(245, 218, 255, 0.85)';
-      ctx.lineWidth = 2.2;
-      ctx.beginPath();
-      ctx.moveTo(x + w * 0.24, y + h * 0.26);
-      for (i = 1; i <= 6; i++) {
-        ctx.lineTo(x + w * (0.24 + i * 0.085) + (rnd() - 0.5) * w * 0.05,
-                   y + h * (0.26 + i * 0.085) + (rnd() - 0.5) * h * 0.05);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.24)';         // ash falling down-wind
+      for (i = 0; i < 20; i++) {
+        ctx.fillRect(vx + rnd() * w * 0.42, vy - vs + rnd() * h * 0.5, 2, 2);
       }
-      ctx.stroke();
-      ctx.restore();
       return;
     }
     if (kind === 'lowland') {
-      // Sunken ground: standing water and reed dabs.
+      // Standing water, then the chart-symbol marsh: rows of short dashes.
       for (i = 0; i < 5; i++) {
         ctx.beginPath();
         ctx.ellipse(x + w * (0.2 + rnd() * 0.6), y + h * (0.45 + rnd() * 0.42),
                     w * (0.06 + rnd() * 0.10), h * (0.03 + rnd() * 0.05), 0, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(90, 150, 165, 0.30)';
+        ctx.fillStyle = 'rgba(105, 170, 185, 0.40)';
         ctx.fill();
       }
-      ctx.fillStyle = 'rgba(0,0,0,0.20)';
-      for (i = 0; i < 26; i++) {
-        ctx.fillRect(x + rnd() * w, y + h * (0.4 + rnd() * 0.55), 2, 3);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.30)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (i = 0; i < 22; i++) {
+        px = x + w * (0.10 + rnd() * 0.78);
+        py = y + h * (0.30 + rnd() * 0.6);
+        ctx.moveTo(px - 4, py); ctx.lineTo(px + 4, py);
+        ctx.moveTo(px - 1.5, py - 2.5); ctx.lineTo(px + 1.5, py - 2.5);
       }
+      ctx.stroke();
       return;
     }
     if (kind === 'desert') {
-      ctx.strokeStyle = 'rgba(255, 238, 192, 0.20)';
+      ctx.strokeStyle = 'rgba(255, 238, 192, 0.32)';
       ctx.lineWidth = 1.4;
       for (i = 0; i < 6; i++) {
         py = y + h * (0.40 + i * 0.09);
@@ -1281,20 +1758,31 @@ SM.advui = (function () {
         ctx.quadraticCurveTo(x + w * 0.5, py - h * 0.06, x + w * 0.9, py);
         ctx.stroke();
       }
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+      for (i = 0; i < 18; i++) {
+        ctx.fillRect(x + rnd() * w, y + h * (0.3 + rnd() * 0.6), 2, 2);
+      }
       return;
     }
-    // hills: folded arcs, lightest at the top
+    // hills: folded arcs with a shadowed underside, and copses of dots
     for (i = 0; i < 5; i++) {
       py = y + h * (0.40 + i * 0.10);
+      var midx = x + w * (0.3 + rnd() * 0.4);
       ctx.beginPath();
       ctx.moveTo(x + w * 0.08, py);
-      ctx.quadraticCurveTo(x + w * (0.3 + rnd() * 0.4), py - h * 0.13, x + w * 0.92, py);
-      ctx.strokeStyle = 'rgba(255,255,255,' + (0.10 - i * 0.014).toFixed(3) + ')';
+      ctx.quadraticCurveTo(midx, py - h * 0.13, x + w * 0.92, py);
+      ctx.strokeStyle = 'rgba(255, 255, 255, ' + (0.22 - i * 0.02).toFixed(3) + ')';
       ctx.lineWidth = 2;
       ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.08, py + 2);
+      ctx.quadraticCurveTo(midx, py - h * 0.13 + 2, x + w * 0.92, py + 2);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.16)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
     }
-    for (i = 0; i < 14; i++) {
-      ctx.fillStyle = 'rgba(0,0,0,0.16)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+    for (i = 0; i < 20; i++) {
       ctx.fillRect(x + rnd() * w, y + h * (0.35 + rnd() * 0.55), 2, 2);
     }
   }
