@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------------------
  * THE SAVE RECORD
  *   {
- *     v: 1,                        // SM.config.ADV.SAVE_VERSION
+ *     v: 2,                        // SM.config.ADV.SAVE_VERSION
  *     company: 'Deep Rock Ltd',
  *     day: 47,
  *     cash: 128450,
@@ -21,7 +21,9 @@
  *         rails: [3, 1],                      // RAIL CHECKPOINTS bought per level
  *         visits: 12,
  *         deepestM: 173,                      // best depth reached, for the map card
- *         mask: '<rle>',                      // carved cells, see below
+ *         hauls: [3, 1],                      // QUALIFYING HAULS banked per level
+ *         taught: 2,                          // unlock notice shown down to level 2
+ *         carve: '<sparse>',                  // dug chunks, see below
  *         piles: [ [x, y, matIndex, units], ... ]   // cargo dumped underground
  *       }
  *     },
@@ -55,6 +57,25 @@
  *   record written before rails existed says, and it does not warrant a
  *   SAVE_VERSION bump (which would delete every existing company; see below).
  *
+ * THE PROGRESSION GATE — `hauls` IS COUNTS PER LEVEL, `taught` IS A COUNT
+ *   js/adv.js will not show the player the price of the next level down until
+ *   they have banked N real hauls out of the level they are on AND can afford
+ *   it. Both halves of that have to survive a reload or the gate would re-arm
+ *   every session, so both are stored here:
+ *
+ *   `hauls` is one count per level, index i = LEVEL i+1 — the same shape and the
+ *   same argument as `rails`. It counts QUALIFYING hauls only (js/adv.js decides
+ *   what qualifies; a token one-unit sale does not), so it cannot be farmed.
+ *
+ *   `taught` is how deep the one-time "you may buy another level down" notice
+ *   has been shown, as a level index. A COUNT for the third time in this file
+ *   and for the third identical reason: reveals happen strictly in order, so
+ *   there is no set to describe. `taught: 2` means the box for level 2 has been
+ *   seen and will never be shown again; the box for level 3 has not.
+ *
+ *   Both migrate to zero, which is the only safe direction — see the note by
+ *   each in validateMineState().
+ *
  *   SECURED ORE IS NOT HERE, ON PURPOSE. Ore deposited at a checkpoint is RUN
  *   state: it is credited when the company next surfaces and it does not exist
  *   between runs. Reloading mid-run was never supported — there is nowhere to
@@ -85,20 +106,23 @@
  * >>> and if a value is mysteriously not persisting, call
  * >>> SM.save.getDroppedKeys() and it will be the first thing you see.
  *
- * THE CARVE MASK — why it is a string
- *   js/advterrain.js keeps a Uint8Array with one byte per generation cell of a
- *   mine (roughly 84 x 900 for a deep one) marking what the player has already
- *   dug out. That is what makes tunnels PERSIST: geology is regenerated from
- *   the mine's seed every time a band streams in, and the mask subtracts what
- *   is gone. Raw, it is ~75 KB of almost entirely zeros; localStorage gets a
- *   RUN-LENGTH ENCODED string instead.
+ * THE CARVE STORE — why it is a string, and why it is sparse
+ *   js/advterrain.js remembers what the player has dug. That is what makes
+ *   tunnels PERSIST: geology is regenerated from the mine's seed every time rock
+ *   streams in, and the store subtracts what is gone.
  *
- *   Agent 2 owns the encoding. Agent 3 owns the array. The seam is exactly:
- *     SM.advterrain.exportMask()  -> Uint8Array (or null if no mine is loaded)
- *     SM.advterrain.importMask(u8)
+ *   IT USED TO BE A FLAT BYTE PER CELL OF A FINITE MINE. A level map is endless
+ *   east, west and south now (ARCHITECTURE.md §7), so there is nothing to size a
+ *   flat array against; the store is a sparse map of 32x32-cell chunks, one BIT
+ *   per cell, keyed on (level, chunkX, chunkY), and only chunks the player has
+ *   actually touched exist at all.
+ *
+ *   The seam is exactly:
+ *     SM.advterrain.exportCarve()   -> a descriptor (see below), or null
+ *     SM.advterrain.importCarve(desc)
  *   Encode/decode must round-trip EXACTLY, and decode must survive garbage
  *   (a hand-edited localStorage, a half-written string) by returning null
- *   rather than throwing — a corrupt mask should cost the player their tunnels,
+ *   rather than throwing — a corrupt store should cost the player their tunnels,
  *   never their company.
  *
  * HARD RULES
@@ -111,47 +135,73 @@
  *      trusted — a save from a future build must not crash this one.
  *
  * =============================================================================
- * ================  DESIGN NOTES — THE MASK CODEC  ====================
+ * ================  DESIGN NOTES — THE CARVE CODEC  ===================
  * =============================================================================
+ *
+ * THE DESCRIPTOR CROSSING THE SEAM
+ *
+ *     { count, level: Int32Array, cx: Int32Array, cy: Int32Array,
+ *       data: [Uint8Array(128), ...], chunkCells: 32, chunkBytes: 128 }
+ *
+ *   Parallel arrays, not an array of objects, because advterrain holds them as
+ *   its live store and this file only ever reads them. Chunk i is `data[i]`,
+ *   128 bytes = 1024 bits, ROW-MAJOR within the chunk (bit = cy*32 + cx).
  *
  * THE WIRE FORMAT
  *
- *     "1" <fmt> "," <len base36> "," <val base36> "," <payload>
+ *     "2S," <chunkCount base36> "," <payload>
  *
- *   fmt 'A'  ALTERNATING. The mask is zeros plus ONE other value (the normal
- *            case — advterrain marks carved cells with a single flag), so only
- *            RUN LENGTHS are stored, alternating 0, val, 0, val, ... starting
- *            with the zero run. `val` carries the non-zero value. This halves
- *            the payload against storing (value,length) pairs, which matters:
- *            three slots x seven mines is 21 masks in one 5 MB origin quota.
- *   fmt 'P'  PAIRS. Fallback for a mask that uses more than one non-zero value
- *            (if Agent 3 ever stores per-cell material or damage there). Runs
- *            are explicit (value, length) varints.
+ *   The leading "2" is the codec generation and it is checked: a v1 mask string
+ *   starts "1A" or "1P" and is REJECTED here rather than mis-parsed, which is
+ *   what makes an old tunnel set vanish cleanly instead of decoding into noise.
+ *
+ *   The payload is `chunkCount` records, each:
+ *
+ *     varint(level)  varint(zz(chunkX))  varint(zz(chunkY))  varint(head) body
+ *
+ *   `zz` is zigzag (n<0 ? -2n-1 : 2n), so a chunk west or north of the origin
+ *   costs the same as one east or south of it. `head` is (n << 1) | fmt:
+ *
+ *     fmt 0  RUNS. `n` is the number of runs; the body is that many varint run
+ *            lengths, alternating 0,1,0,1,... starting with the ZERO run, and
+ *            they must sum to exactly 1024. A leading zero-length run is legal
+ *            (and only legal) first, which is how a chunk whose very first cell
+ *            is carved is expressed. A tunnel is contiguous along rows, so a
+ *            real chunk is ~30 runs at ~2.2 characters each.
+ *     fmt 1  RAW. `n` is 0; the body is exactly 205 symbols of 5 bits each,
+ *            little-endian, carrying the 1024 bits. The fallback for a chunk so
+ *            speckled that RLE would cost more than the bits do — which the
+ *            drill's rectangular bite does not produce, but a save file is
+ *            untrusted input and the decoder must not be able to be made to
+ *            allocate unboundedly.
  *
  *   Run lengths and values are VARINTs over a 64-symbol alphabet, 5 data bits
  *   per symbol: symbol index < 32 is the LAST digit and carries that value,
  *   index >= 32 is a continuation carrying index-32. Little-endian groups.
- *   So runs up to 31 cost one character, up to 1023 cost two, and the long
- *   all-zero stretches that dominate a real mask cost three or four.
  *
  *   The alphabet deliberately excludes ',' ':' '"' and '\\' so the payload is a
  *   single JSON string token and the header can be split on ',' with no
  *   escaping anywhere.
  *
  * WHY IT IS AS STRICT AS IT IS
- *   decodeMask() rejects, rather than repairs: an unknown symbol, a truncated
- *   varint, a zero-length run anywhere except the very first, a run sum that
- *   does not equal the declared length, a declared length that disagrees with
- *   advterrain's maskDims(), a value above 255, or anything over MASK_MAX_CELLS.
- *   All of those return null. Repairing a corrupt mask would hand Agent 3 a
- *   plausible-looking array describing tunnels that are not there, and the mine
- *   would generate solid rock inside the player's own shaft. Losing the tunnels
- *   is recoverable; lying about them is not.
+ *   decodeCarve() rejects, rather than repairs: an unknown symbol, a truncated
+ *   varint, a zero-length run anywhere except the very first of a chunk, a run
+ *   sum that is not exactly 1024, a chunk count that disagrees with the payload,
+ *   a coordinate outside CARVE_MAX_COORD, a level outside 1..MAX_LEVELS, or more
+ *   than CARVE_MAX_CHUNKS chunks. All of those return null. Repairing a corrupt
+ *   store would hand advterrain a plausible-looking set of tunnels that are not
+ *   where it says they are, and the mine would generate solid rock inside the
+ *   player's own workings. Losing the tunnels is recoverable; lying about them
+ *   is not.
  *
- * MEASURED (see the report): a realistic 84 x 900 mask with ~6% carved in
- * row-contiguous runs encodes to roughly 2.5 characters per run and round-trips
- * byte-for-byte; a fully random byte array falls back to 'P' and still
- * round-trips exactly.
+ * MEASURED SIZE — the number that decides whether this fits in localStorage.
+ *   A chunk covers 672 x 672 world units. A machine cuts a corridor about 300
+ *   units wide at about 200 units/second, so an hour of driving over ground it
+ *   has never seen touches roughly 480 chunks, each encoding to about 70
+ *   characters: ~33 KB PER HOUR OF NOVEL DRIVING, per mine. Real play backtracks
+ *   constantly and re-uses chunks for free. Against a 5 MB origin quota shared
+ *   by three slots and seven mines that is comfortable, and writeRaw() still
+ *   drops every store rather than fail if it ever is not.
  * ========================================================================== */
 
 var SM = SM || {};
@@ -164,8 +214,17 @@ SM.save = (function () {
   var DEBOUNCE_MS = 1200;      // markDirty() coalescing window
   var MAX_COMPANY = 22;        // characters; the slot card is a fixed width
   var MAX_PILES = 400;         // per mine, so a griefed save cannot balloon
-  var MASK_MAX_CELLS = 4000000;// sanity ceiling on a decoded mask
-  var MASK_MAX_CHARS = 600000; // sanity ceiling on an encoded mask string
+  var MASK_MAX_CHARS = 600000; // sanity ceiling on an encoded carve string
+  /* Ceilings on a DECODED carve store, so a hand-edited save cannot make this
+   * allocate a gigabyte. CARVE_MAX_CHUNKS matches advterrain's own MAX_CHUNKS;
+   * CARVE_MAX_COORD is +-2^20 chunks, which is +-704 million world units and far
+   * beyond anything the biggest tank in the workshop can reach. */
+  var CARVE_MAX_CHUNKS = 4096;
+  var CARVE_MAX_COORD = 1 << 20;
+  var CARVE_CELLS = 32;                    // cells per chunk side
+  var CARVE_BITS = CARVE_CELLS * CARVE_CELLS;   // 1024
+  var CARVE_BYTES = CARVE_BITS >> 3;            // 128
+  var CARVE_RAW_SYMS = Math.ceil(CARVE_BITS / 5);  // 205
   var MAX_DAY = 100000;
   var MAX_CASH = 1e12;
   var MAX_SEEN = 64;           // world-map region keys; the catalogue has 7
@@ -178,6 +237,11 @@ SM.save = (function () {
    * same kind of paranoia ceiling as MAX_LEVELS — SM.adv clamps to what
    * SM.mines.checkpointsOf() actually offers. */
   var MAX_RAILS = 16;
+  /* Qualifying hauls banked from ONE level (js/adv.js's progression gate). The
+   * gate only ever asks "is this >= 2 or 3", so the counter is allowed to stop
+   * climbing long before this — it is a ceiling on a hand-edited save, not a
+   * game rule, and it keeps the stored number short. */
+  var MAX_HAULS = 9999;
 
   /* Set true to have every key validateRecord() discards printed once. Left OFF
    * because the build's bar is zero console output, but the list is always
@@ -201,7 +265,7 @@ SM.save = (function () {
   var listenersBound = false;
 
   /* =====================================================================
-   * THE MASK CODEC
+   * THE CARVE CODEC
    * ------------------------------------------------------------------
    * Kept at the top of the module and free of every other concern, because it
    * is the one piece of this file that has a provable contract.
@@ -223,182 +287,189 @@ SM.save = (function () {
     parts.push(ALPHA.charAt(n));
   }
 
+  /** Zigzag, so a negative chunk coordinate costs what a positive one does. */
+  function zz(n) { return n < 0 ? (-n * 2 - 1) : (n * 2); }
+  function unzz(n) { return (n & 1) ? -((n + 1) / 2) : (n / 2); }
+
+  /* THE VARINT READER, as a pair of module vars rather than a returned object.
+   * decodeCarve() reads several hundred thousand of these on a big store and a
+   * per-varint allocation would be the whole cost of the decode. `vPos` is the
+   * cursor into the body and `vVal` the value; vRead() returns false on a
+   * truncated or illegal varint and the caller bails the whole decode. */
+  var vBody = '', vPos = 0, vVal = 0;
+  function vRead() {
+    var n = 0, mul = 1, code, d;
+    while (vPos < vBody.length) {
+      code = vBody.charCodeAt(vPos++);
+      if (code > 127) return false;
+      d = UNALPHA[code];
+      if (d < 0) return false;
+      if (d < 32) { vVal = n + d * mul; return true; }
+      n += (d - 32) * mul; mul *= 32;
+      if (mul > 1e12) return false;              // absurd varint: refuse it
+    }
+    return false;                                 // ran off the end mid-value
+  }
+
   /**
-   * RLE-encode a Uint8Array (or any array-like of small integers) to a string.
-   * Returns '' for null/empty input — '' is the canonical "no mask" value and
-   * decodeMask('') returns null, so the pair is closed.
+   * Encode a carve descriptor (see the design note) to a string.
+   * Returns '' for a null/empty store — '' is the canonical "no tunnels" value
+   * and decodeCarve('') returns null, so the pair is closed.
    */
-  function encodeMask(u8) {
+  function encodeCarve(desc) {
     try {
-      if (!u8 || typeof u8.length !== 'number' || u8.length === 0) return '';
-      var len = u8.length;
-      if (len > MASK_MAX_CELLS) return '';
+      if (!desc || !(desc.count > 0) || !desc.data) return '';
+      var n = desc.count;
+      if (n > CARVE_MAX_CHUNKS) n = CARVE_MAX_CHUNKS;
+      if (desc.chunkBytes && desc.chunkBytes !== CARVE_BYTES) return '';
 
-      /* Pick the format: one distinct non-zero value -> alternating. */
-      var only = 0, multi = false, i, v;
-      for (i = 0; i < len; i++) {
-        v = u8[i];
-        if (v === 0) continue;
-        if (only === 0) only = v;
-        else if (v !== only) { multi = true; break; }
-      }
+      var parts = ['2S,', n.toString(36), ','];
+      var i, b, bits, runs, cur, run, k, sym, acc, accN;
 
-      var parts = [];
-      var runStart, cur;
+      for (i = 0; i < n; i++) {
+        b = desc.data[i];
+        if (!b || b.length !== CARVE_BYTES) return '';
+        putVarint(parts, desc.level[i] | 0);
+        putVarint(parts, zz(desc.cx[i] | 0));
+        putVarint(parts, zz(desc.cy[i] | 0));
 
-      if (!multi) {
-        /* --- format A: alternating run lengths, starting with the zero run.
-         * A leading zero-length run is legal (and only legal) at index 0, which
-         * is how a mask that begins with a carved cell is expressed. */
-        parts.push('1A,');
-        parts.push(len.toString(36));
-        parts.push(',');
-        parts.push((only & 255).toString(36));
-        parts.push(',');
-        var want = 0;                          // the value this run should hold
-        i = 0;
-        while (i < len) {
-          runStart = i;
-          while (i < len && u8[i] === want) i++;
-          putVarint(parts, i - runStart);
-          want = want === 0 ? only : 0;
-          /* If `only` is 0 the whole array is zeros and one run covers it. */
-          if (only === 0) break;
+        /* Count the runs first, so the head can carry the count and the decoder
+         * never has to guess where a chunk ends. Cheap: one pass over 1024 bits
+         * that the encoding pass would have made anyway. */
+        runs = 0; cur = 0; run = 0;
+        for (k = 0; k < CARVE_BITS; k++) {
+          bits = (b[k >> 3] >> (k & 7)) & 1;
+          if (bits === cur) { run++; continue; }
+          runs++; cur = bits; run = 1;
         }
-        return parts.join('');
-      }
+        runs++;                                   // the final run
 
-      /* --- format P: explicit (value, length) pairs. */
-      parts.push('1P,');
-      parts.push(len.toString(36));
-      parts.push(',0,');
-      i = 0;
-      while (i < len) {
-        cur = u8[i] & 255;
-        runStart = i;
-        while (i < len && (u8[i] & 255) === cur) i++;
-        putVarint(parts, cur);
-        putVarint(parts, i - runStart);
+        /* RAW when the runs would cost more than the bits do. `runs` varints of
+         * at most two symbols each against a flat 205, so the crossover is about
+         * 102 runs — a threshold a rectangular drill bite never reaches and a
+         * pathological save file does. */
+        if (runs > CARVE_RAW_SYMS) {
+          putVarint(parts, 1);                    // head: n = 0, fmt = 1 (raw)
+          acc = 0; accN = 0;
+          for (k = 0; k < CARVE_BITS; k++) {
+            acc |= (((b[k >> 3] >> (k & 7)) & 1) << accN);
+            if (++accN === 5) { parts.push(ALPHA.charAt(acc)); acc = 0; accN = 0; }
+          }
+          if (accN > 0) parts.push(ALPHA.charAt(acc));
+          continue;
+        }
+
+        putVarint(parts, runs << 1);              // head: n = runs, fmt = 0
+        cur = 0; run = 0;
+        for (k = 0; k < CARVE_BITS; k++) {
+          bits = (b[k >> 3] >> (k & 7)) & 1;
+          if (bits === cur) { run++; continue; }
+          putVarint(parts, run);                  // may be 0, and only for k = 0
+          cur = bits; run = 1;
+        }
+        putVarint(parts, run);
       }
-      return parts.join('');
+      var s = parts.join('');
+      return s.length > MASK_MAX_CHARS ? '' : s;
     } catch (e) {
       return '';
     }
   }
 
   /**
-   * Decode a mask string back to a Uint8Array.
-   * -> Uint8Array on success, null on ANY problem. Never throws.
-   * `expectedLength`, when a positive number, is enforced: pass
-   * SM.advterrain.maskDims().cols * rows so a save from a build with different
-   * mine dimensions is discarded instead of silently mis-shaped.
+   * Decode a carve string back into a descriptor advterrain can adopt.
+   * -> {count, level, cx, cy, data, chunkCells, chunkBytes} or null. Never throws.
+   *
+   * A v1 mask string ("1A..." / "1P...") is REJECTED here rather than parsed: it
+   * described a flat array of a finite mine and there is nothing honest to turn
+   * it into. See the migration note in validateRecord().
    */
-  function decodeMask(str, expectedLength) {
+  function decodeCarve(str) {
     try {
       if (typeof str !== 'string') return null;
-      if (str.length < 7 || str.length > MASK_MAX_CHARS) return null;
-      if (str.charAt(0) !== '1') return null;
-
-      var fmt = str.charAt(1);
-      if (fmt !== 'A' && fmt !== 'P') return null;
+      if (str.length < 5 || str.length > MASK_MAX_CHARS) return null;
+      if (str.charAt(0) !== '2' || str.charAt(1) !== 'S') return null;
 
       /* The payload alphabet excludes ',', so a well-formed string has exactly
-       * three of them and the two header fields are pure base-36. Checking the
-       * SHAPE before parseInt matters: parseInt('1.5', 36) is 1, so a sloppy
-       * header would otherwise decode to a plausible-looking length. */
+       * two of them and the count is pure base-36. Checking the SHAPE before
+       * parseInt matters: parseInt('1.5', 36) is 1, so a sloppy header would
+       * otherwise decode to a plausible-looking count. */
       var f = str.split(',');
-      if (f.length !== 4) return null;
+      if (f.length !== 3) return null;
       if (f[0].length !== 2) return null;
-      if (!/^[0-9a-z]{1,8}$/.test(f[1])) return null;
-      if (!/^[0-9a-z]{1,2}$/.test(f[2])) return null;
+      if (!/^[0-9a-z]{1,4}$/.test(f[1])) return null;
 
-      var len = parseInt(f[1], 36);
-      if (!(len >= 0) || len !== Math.floor(len) || len > MASK_MAX_CELLS) return null;
-      var only = parseInt(f[2], 36);
-      if (!(only >= 0) || only !== Math.floor(only) || only > 255) return null;
-      if (typeof expectedLength === 'number' && expectedLength > 0 &&
-          expectedLength !== len) return null;
+      var n = parseInt(f[1], 36);
+      if (!(n >= 0) || n !== Math.floor(n) || n > CARVE_MAX_CHUNKS) return null;
+      if (n === 0) return null;
 
-      var body = f[3];
-      var out = new Uint8Array(len);
-      var p = 0, written = 0;
-      var n, mul, code, d, terminal;
+      vBody = f[2]; vPos = 0;
 
-      if (fmt === 'A') {
-        if (len > 0 && only === 0) {
-          /* All zeros: exactly one run, covering everything. */
-          n = 0; mul = 1; terminal = false;
-          while (p < body.length) {
-            code = body.charCodeAt(p++);
-            if (code > 127) return null;
-            d = UNALPHA[code];
-            if (d < 0) return null;
-            if (d < 32) { n += d * mul; terminal = true; break; }
-            n += (d - 32) * mul; mul *= 32;
+      var out = {
+        count: 0,
+        level: new Int32Array(n),
+        cx: new Int32Array(n),
+        cy: new Int32Array(n),
+        data: new Array(n),
+        chunkCells: CARVE_CELLS,
+        chunkBytes: CARVE_BYTES
+      };
+
+      var i, k, lv, x, y, head, runs, b, want, written, r, acc, sym, bit;
+      for (i = 0; i < n; i++) {
+        if (!vRead()) return null;
+        lv = vVal;
+        if (lv < 0 || lv > MAX_LEVELS) return null;
+        if (!vRead()) return null;
+        x = unzz(vVal);
+        if (x < -CARVE_MAX_COORD || x > CARVE_MAX_COORD) return null;
+        if (!vRead()) return null;
+        y = unzz(vVal);
+        if (y < -CARVE_MAX_COORD || y > CARVE_MAX_COORD) return null;
+        if (!vRead()) return null;
+        head = vVal;
+
+        b = new Uint8Array(CARVE_BYTES);
+
+        if ((head & 1) === 1) {
+          /* --- RAW: exactly CARVE_RAW_SYMS symbols of five bits each. */
+          if ((head >> 1) !== 0) return null;
+          if (vPos + CARVE_RAW_SYMS > vBody.length) return null;
+          for (k = 0; k < CARVE_BITS; ) {
+            sym = UNALPHA[vBody.charCodeAt(vPos++)];
+            if (sym === undefined || sym < 0 || sym >= 32) return null;
+            for (r = 0; r < 5 && k < CARVE_BITS; r++, k++) {
+              if ((sym >> r) & 1) b[k >> 3] |= (1 << (k & 7));
+            }
           }
-          if (!terminal || p !== body.length || n !== len) return null;
-          return out;
+        } else {
+          /* --- RUNS: alternating 0,1,0,1..., summing to exactly CARVE_BITS. */
+          runs = head >> 1;
+          if (runs < 1 || runs > CARVE_BITS) return null;
+          want = 0; written = 0;
+          for (r = 0; r < runs; r++) {
+            if (!vRead()) return null;
+            if (vVal === 0 && r !== 0) return null;   // only run 0 may be empty
+            if (written + vVal > CARVE_BITS) return null;
+            if (want === 1) {
+              for (k = written; k < written + vVal; k++) b[k >> 3] |= (1 << (k & 7));
+            }
+            written += vVal;
+            want ^= 1;
+          }
+          if (written !== CARVE_BITS) return null;
         }
-        var want = 0;
-        var runIndex = 0;
-        while (p < body.length) {
-          n = 0; mul = 1; terminal = false;
-          while (p < body.length) {
-            code = body.charCodeAt(p++);
-            if (code > 127) return null;
-            d = UNALPHA[code];
-            if (d < 0) return null;
-            if (d < 32) { n += d * mul; terminal = true; break; }
-            n += (d - 32) * mul; mul *= 32;
-          }
-          if (!terminal) return null;                    // truncated varint
-          if (n === 0 && runIndex !== 0) return null;    // only run 0 may be empty
-          if (written + n > len) return null;
-          if (want !== 0 && n > 0) {
-            for (var j = written; j < written + n; j++) out[j] = only;
-          }
-          written += n;
-          want = want === 0 ? only : 0;
-          runIndex++;
-        }
-        if (written !== len) return null;
-        return out;
+
+        out.level[i] = lv; out.cx[i] = x; out.cy[i] = y;
+        out.data[i] = b;
       }
-
-      /* --- format P */
-      while (p < body.length) {
-        var val = 0;
-        mul = 1; terminal = false;
-        while (p < body.length) {
-          code = body.charCodeAt(p++);
-          if (code > 127) return null;
-          d = UNALPHA[code];
-          if (d < 0) return null;
-          if (d < 32) { val += d * mul; terminal = true; break; }
-          val += (d - 32) * mul; mul *= 32;
-        }
-        if (!terminal || val > 255) return null;
-        n = 0; mul = 1; terminal = false;
-        while (p < body.length) {
-          code = body.charCodeAt(p++);
-          if (code > 127) return null;
-          d = UNALPHA[code];
-          if (d < 0) return null;
-          if (d < 32) { n += d * mul; terminal = true; break; }
-          n += (d - 32) * mul; mul *= 32;
-        }
-        if (!terminal) return null;                      // odd number of varints
-        if (n <= 0) return null;
-        if (written + n > len) return null;
-        if (val !== 0) {
-          for (var k = written; k < written + n; k++) out[k] = val;
-        }
-        written += n;
-      }
-      if (written !== len) return null;
+      if (vPos !== vBody.length) return null;        // trailing junk
+      out.count = n;
       return out;
     } catch (e) {
       return null;
+    } finally {
+      vBody = '';                                    // do not pin a big string
     }
   }
 
@@ -474,7 +545,7 @@ SM.save = (function () {
     } catch (e) {
       lastError = 'storage full — tunnels dropped';
     }
-    /* Retry with every mask stripped. */
+    /* Retry with every carve store stripped. */
     try {
       var lean = JSON.parse(text);
       var i, id;
@@ -482,7 +553,7 @@ SM.save = (function () {
         if (!lean.slots[i] || !lean.slots[i].mines) continue;
         for (id in lean.slots[i].mines) {
           if (!lean.slots[i].mines.hasOwnProperty(id)) continue;
-          lean.slots[i].mines[id].mask = '';
+          lean.slots[i].mines[id].carve = '';
         }
       }
       s.setItem(A.SAVE_KEY, JSON.stringify(lean));
@@ -549,8 +620,11 @@ SM.save = (function () {
 
   var RECORD_KEYS = ['v', 'company', 'day', 'cash', 'integrity', 'rig',
                      'mines', 'seen', 'stats'];
+  /* `mask` is listed and never read: it is v1's flat carve mask, and leaving it
+   * in the known set is what stops a migrated record filling getDroppedKeys()
+   * with a key that was dropped on purpose. `carve` is v2's sparse store. */
   var MINE_KEYS = ['owned', 'levels', 'rails', 'visits', 'deepestM', 'mask',
-                   'piles'];
+                   'carve', 'piles', 'hauls', 'taught'];
 
   function knownMine(id) {
     if (!SM.mines || !SM.mines.count || SM.mines.count() === 0) return true;
@@ -559,7 +633,7 @@ SM.save = (function () {
 
   function blankMineState() {
     return { owned: false, levels: 0, rails: [], visits: 0, deepestM: 0,
-             mask: '', piles: [] };
+             carve: '', piles: [], hauls: [], taught: 0 };
   }
 
   function validateMineState(o) {
@@ -589,8 +663,40 @@ SM.save = (function () {
     }
     out.visits = Math.floor(num(o.visits, 0, 0, 1e7));
     out.deepestM = Math.floor(num(o.deepestM, 0, 0, 1e6));
-    out.mask = (typeof o.mask === 'string' && o.mask.length <= MASK_MAX_CHARS)
-      ? o.mask : '';
+    /* QUALIFYING HAULS BANKED PER LEVEL, index i = level i+1. Exactly the shape
+     * and exactly the argument as `rails` one dimension over: the progression
+     * gate (js/adv.js) asks "how many real hauls has this company brought up
+     * from level k", and a count per level is the only thing worth storing.
+     * Missing or short -> zeros, which is what every record written before the
+     * gate existed says and is the only safe direction: a company that reloads
+     * into "you have not proved this level yet" has lost nothing it can see,
+     * whereas inventing hauls would hand out a purchase nobody earned. */
+    out.hauls = [];
+    /* `typeof === 'object'` as well as a numeric length, for the same reason
+     * `rails` needs it: a hand-edited `"hauls": "3"` is array-like and would
+     * decode to [3]. */
+    if (o.hauls && typeof o.hauls === 'object' &&
+        typeof o.hauls.length === 'number') {
+      var nh = o.hauls.length < MAX_LEVELS ? o.hauls.length : MAX_LEVELS;
+      for (var h = 0; h < nh; h++) {
+        out.hauls.push(Math.floor(num(o.hauls[h], 0, 0, MAX_HAULS)));
+      }
+    }
+    /* HOW FAR THE UNLOCK NOTICE HAS BEEN SHOWN, as a level index — a COUNT, not
+     * a set, for the third time in this validator and for the third identical
+     * reason: reveals happen strictly in order, so `taught: 2` means "the box
+     * that says level 2 may now be bought has been seen" and nothing else is
+     * expressible. Missing -> 0: an existing company gets the notice once at
+     * whatever rung it is on, which is the correct behaviour for a feature that
+     * did not exist when the record was written. */
+    out.taught = Math.floor(num(o.taught, 0, 0, MAX_LEVELS));
+    /* THE SPARSE CARVE STORE. `o.mask` — v1's flat one — is deliberately not
+     * consulted: it described a byte per cell of a finite mine, and there is
+     * nothing honest to turn that into now that a level map is endless. A
+     * migrated company keeps its money, its machine and its levels and loses its
+     * tunnels; see the migration note in validateRecord(). */
+    out.carve = (typeof o.carve === 'string' && o.carve.length <= MASK_MAX_CHARS)
+      ? o.carve : '';
     out.piles = [];
     if (o.piles && o.piles.length) {
       var n = o.piles.length < MAX_PILES ? o.piles.length : MAX_PILES;
@@ -618,11 +724,35 @@ SM.save = (function () {
     return out;
   }
 
+  /* HOW FAR BACK A RECORD MAY COME FROM. Anything at or above this and below
+   * SAVE_VERSION is migrated in place rather than dropped. */
+  var MIN_MIGRATABLE_VERSION = 1;
+
   function validateRecord(o) {
     if (!o || typeof o !== 'object') return null;
-    /* Version gate. There is only v1, so anything else is from a future build
-     * and is dropped — the slot reads as empty rather than as a corrupt company. */
-    if (Math.floor(num(o.v, -1, -1, 1e6)) !== A.SAVE_VERSION) return null;
+    /* VERSION GATE, AND THE ONE MIGRATION.
+     *
+     * A record from the FUTURE is still dropped — the slot reads as empty rather
+     * than as a corrupt company, because this build cannot know what a later one
+     * meant. A record from v1 is MIGRATED, and the migration is deliberately
+     * cheap and lossy in exactly one place:
+     *
+     *   KEPT   company, day, cash, integrity, rig, mines owned, levels bought,
+     *          rails bought, visits, deepestM, dumped piles, surveyed regions,
+     *          lifetime stats. Everything a player worked for.
+     *   LOST   TUNNELS. v1's carve mask was one byte per cell of a mine that was
+     *          a finite box; a level map is endless in three directions now and
+     *          keyed per level, and there is no honest mapping from one to the
+     *          other. Inventing one would put solid rock inside workings the
+     *          player remembers digging, which is worse than a clean slate.
+     *
+     * Everything else falls out for free, because every field below already
+     * defaults correctly for a record that does not carry it. Nothing else in
+     * this validator needs to know a migration happened.
+     */
+    var v = Math.floor(num(o.v, -1, -1, 1e6));
+    if (v > A.SAVE_VERSION) return null;
+    if (v < MIN_MIGRATABLE_VERSION) return null;
 
     auditKeys(o, RECORD_KEYS, 'record');
 
@@ -979,6 +1109,53 @@ SM.save = (function () {
     return true;
   }
 
+  /* --- the progression gate -------------------------------------------
+   * Two counts, both per mine, both written only by js/adv.js — which owns what
+   * a "qualifying haul" is and when the notice has been seen. This file only
+   * stores them, exactly as it only stores `levels` and `rails`.
+   *
+   * Named haulsFrom/setHaulsFrom and noticeShown/setNoticeShown rather than
+   * get/setHauls and get/setTaught for the reason the block above gives twice:
+   * a name that could be read as a TABLE must not return a COUNT. */
+
+  /** Qualifying hauls banked from level `L` (1-based) of this mine. */
+  function haulsFrom(id, L) {
+    var m = record && record.mines ? record.mines[id] : null;
+    if (!m || !m.hauls) return 0;
+    var i = Math.floor(num(L, 0, 0, MAX_LEVELS)) - 1;
+    if (i < 0 || i >= m.hauls.length) return 0;
+    return Math.floor(num(m.hauls[i], 0, 0, MAX_HAULS));
+  }
+
+  /** Persist it. Dense, for the reason setRailsOwned() gives. */
+  function setHaulsFrom(id, L, n) {
+    var m = mineState(id);
+    if (!m) return false;
+    var i = Math.floor(num(L, 0, 0, MAX_LEVELS)) - 1;
+    if (i < 0) return false;
+    if (!m.hauls || typeof m.hauls.length !== 'number') m.hauls = [];
+    while (m.hauls.length <= i) m.hauls.push(0);
+    m.hauls[i] = Math.floor(num(n, 0, 0, MAX_HAULS));
+    markDirty();
+    return true;
+  }
+
+  /** The deepest level whose "you may buy down" notice has been shown. */
+  function noticeShown(id) {
+    var m = record && record.mines ? record.mines[id] : null;
+    if (!m) return 0;
+    return Math.floor(num(m.taught, 0, 0, MAX_LEVELS));
+  }
+
+  /** Persist it. Monotonic in js/adv.js; clamped here regardless. */
+  function setNoticeShown(id, n) {
+    var m = mineState(id);
+    if (!m) return false;
+    m.taught = Math.floor(num(n, 0, 0, MAX_LEVELS));
+    markDirty();
+    return true;
+  }
+
   /* --- hull integrity -------------------------------------------------
    * js/adv.js may keep writing record.integrity directly; these exist so that
    * nothing ELSE has to know whether the stored unit is a fraction or a point.
@@ -1018,20 +1195,21 @@ SM.save = (function () {
 
   /* --- convenience writes: the seams other modules actually use -------- */
 
-  /** Store a carve mask for a mine. Accepts a Uint8Array or an RLE string. */
-  function storeMask(mineId, u8OrString) {
+  /** Store a mine's carve store. Accepts an encoded string or a descriptor. */
+  function storeCarve(mineId, descOrString) {
     var m = mineState(mineId);
     if (!m) return false;
-    m.mask = (typeof u8OrString === 'string') ? u8OrString : encodeMask(u8OrString);
-    if (m.mask.length > MASK_MAX_CHARS) m.mask = '';
+    m.carve = (typeof descOrString === 'string')
+      ? descOrString : encodeCarve(descOrString);
+    if (m.carve.length > MASK_MAX_CHARS) m.carve = '';
     markDirty();
     return true;
   }
-  /** -> Uint8Array or null. `expectedLength` from advterrain.maskDims(). */
-  function loadMask(mineId, expectedLength) {
+  /** -> a descriptor for SM.advterrain.importCarve(), or null. */
+  function loadCarve(mineId) {
     var m = record && record.mines ? record.mines[mineId] : null;
-    if (!m || !m.mask) return null;
-    return decodeMask(m.mask, expectedLength);
+    if (!m || !m.carve) return null;
+    return decodeCarve(m.carve);
   }
   /** Replace a mine's dumped-cargo piles. Validated and capped. */
   function setPiles(mineId, piles) {
@@ -1081,8 +1259,10 @@ SM.save = (function () {
     mineState: mineState,
     isOwned: isOwned,
     setOwned: setOwned,
-    encodeMask: encodeMask,
-    decodeMask: decodeMask,
+    /* THE CARVE CODEC. See the design note at the top of this file for the wire
+     * format; the seam is SM.advterrain.exportCarve() / importCarve(). */
+    encodeCarve: encodeCarve,
+    decodeCarve: decodeCarve,
 
     /* --- Agent-2 additions (documented in the report) ------------------- */
     isAvailable: isAvailable,
@@ -1097,8 +1277,18 @@ SM.save = (function () {
     setLevelsOwned: setLevelsOwned,
     railsOwned: railsOwned,
     setRailsOwned: setRailsOwned,
-    storeMask: storeMask,
-    loadMask: loadMask,
+    /* THE PROGRESSION GATE (js/adv.js owns the rule; this only stores it).
+     * haulsFrom(id, L)     qualifying hauls banked from level L of that mine
+     * noticeShown(id)      deepest level whose unlock notice has been shown
+     * NOTE the neighbours: recordHaul(gross) below is the LIFETIME money stat
+     * and has nothing to do with these — one is dollars for the whole company,
+     * these are counts per level per mine. */
+    haulsFrom: haulsFrom,
+    setHaulsFrom: setHaulsFrom,
+    noticeShown: noticeShown,
+    setNoticeShown: setNoticeShown,
+    storeCarve: storeCarve,
+    loadCarve: loadCarve,
     setPiles: setPiles,
     getPiles: getPiles,
     recordVisit: recordVisit,

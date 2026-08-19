@@ -220,8 +220,19 @@ SM.config.ADV = {
   /* --- run pressures -------------------------------------------------- */
   EXIT_RADIUS: 200,            // within this of the mine mouth = extracted
 
-  /* --- persistence ---------------------------------------------------- */
+  /* --- persistence ----------------------------------------------------
+   * SAVE_KEY must not change: it is the same key every previous build wrote, so
+   * an existing company is FOUND rather than orphaned. SAVE_VERSION is what says
+   * what shape it is in once found.
+   *
+   * VERSION 2 — the endless-levels wave. A level map is unbounded east, west and
+   * south now, so v1's whole-mine carve mask (one byte per cell of a finite box)
+   * has been replaced by a sparse store of dug chunks under the key `carve`.
+   * js/save.js MIGRATES a v1 record rather than dropping it: the company, its
+   * cash, its day, its machine, its rights, its bought levels, its rails and its
+   * dumped piles all survive, and only the TUNNELS are lost, because there is no
+   * honest mapping from the old array to the new store. See validateRecord(). */
   SAVE_KEY: 'supermine.adventure.v1',
   SAVE_SLOTS: 3,
-  SAVE_VERSION: 1
+  SAVE_VERSION: 2
 };

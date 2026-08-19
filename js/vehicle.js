@@ -200,12 +200,12 @@ SM.vehicle = (function () {
                                  // has, and its peak is only 1/(1-RAMP) of the
                                  // average — an ease-in-out would need half as
                                  // long again to look this unhurried.
+  /* THE ONLY POSITION CLAMP LEFT IN THE GAME. A level map is unbounded east, west
+   * and south (ARCHITECTURE.md §7), so the lateral pair and the floor margin that
+   * used to sit here are gone with the walls they clamped against. What survives
+   * is the bedrock CEILING north of the lift, and it is absolute. */
   var ADV_CEIL_MARGIN = 40;      // closest the hull centre may get to the roof
-  var ADV_FLOOR_MARGIN = 40;     // ...and to the floor. THE LEVEL HAS A BOTTOM
-                                 // NOW: there was no lower y clamp in this file
-                                 // at all before, because the world had no floor
-                                 // that was not expressed as hardness.
-  var ADV_WALL_BOUNCE = 0.18;    // how much of the impact a wall gives back
+  var ADV_WALL_BOUNCE = 0.18;    // how much of the impact the ceiling gives back
 
   // --- the cut ---------------------------------------------------------
   var ADV_CUT_HALF = 84;         // half-extent of the drill box, world units
@@ -1005,10 +1005,15 @@ SM.vehicle = (function () {
     return 1;
   }
 
+  /* THE ACTIVE LEVEL'S EXTENT, or null. `botY` and `halfW` are Infinity — the map
+   * is endless in those three directions — so the guard tests only that the box
+   * exists and that its one real edge is a finite number. Infinity > topY and
+   * Infinity > 0 are both true, so the old guard would have passed anyway; this
+   * one says what it means. */
   function advBounds() {
     if (SM.advterrain && SM.advterrain.getLevelBounds) {
       var b = SM.advterrain.getLevelBounds();
-      if (b && b.botY > b.topY && b.halfW > 0) return b;
+      if (b && isFinite(b.topY)) return b;
     }
     return null;
   }
@@ -1306,8 +1311,8 @@ SM.vehicle = (function () {
 
     if (power > 0 && !stalled) {
       var res = SM.particles.damageSolidInRect(
-        clipL(hx - cutHalf), clipT(hy - cutHalf),
-        clipR(hx + cutHalf), clipB(hy + cutHalf),
+        hx - cutHalf, clipT(hy - cutHalf),
+        hx + cutHalf, hy + cutHalf,
         power * dt, hx, hy
       );
       damaged = res.damaged;
@@ -1315,11 +1320,11 @@ SM.vehicle = (function () {
       cutting = damaged > 0;
 
       // The hull's own janitor box (see the tunables note): stops the chassis
-      // being drawn standing inside rock when it pivots. Clipped to the level for
-      // the same reason the cut is — it is a cut, at 16% power.
+      // being drawn standing inside rock when it pivots. Clipped at the ceiling
+      // for the same reason the cut is — it is a cut, at 16% power.
       var hres = SM.particles.damageSolidInRect(
-        clipL(x - ADV_HULL_HALF), clipT(y - ADV_HULL_HALF),
-        clipR(x + ADV_HULL_HALF), clipB(y + ADV_HULL_HALF),
+        x - ADV_HULL_HALF, clipT(y - ADV_HULL_HALF),
+        x + ADV_HULL_HALF, y + ADV_HULL_HALF,
         power * ADV_HULL_GRIND * dt, x, y
       );
       damaged += hres.damaged;
@@ -1431,41 +1436,29 @@ SM.vehicle = (function () {
     speed = sp;
     vx = dvx;                    // getLateralSpeed() keeps its meaning
 
-    /* --- 5. THE FOUR WALLS OF THE LEVEL -------------------------------
+    /* --- 5. THE ONE WALL OF THE LEVEL ---------------------------------
      * THIS IS THE SEAL. Not the bedrock — the bedrock is the picture of it
-     * (ARCHITECTURE.md §7). A level is a bounded map and the ONE way off it is the
-     * lift, so the position is clamped on all four sides against the box
-     * js/advterrain.js publishes, and it is clamped regardless of drill tier, of
-     * what the carve mask says, and of what a v1.8 save dug through here before
-     * this rule existed. There is no combination of upgrades, saves or inputs that
-     * gets the machine out of its band, because the machine's position is simply
-     * written back inside it every step.
+     * (ARCHITECTURE.md §7). A level map is unbounded east, west and south, and
+     * the only boundary anywhere in the game is the bedrock CEILING north of its
+     * lift. The position is clamped against it regardless of drill tier, of what
+     * the carve store says, and of what an older save dug through here before
+     * this rule existed: there is no combination of upgrades, saves or inputs
+     * that gets the machine above its ceiling, because its position is simply
+     * written back below it every step.
      *
-     * IT USED TO BE TWO SIDES. x against the mine's fixed half-width, and a
-     * ceiling — with NO lower bound at all, because the bottom of the world was
-     * expressed as hardness and a determined player was allowed to chew at it.
+     * THIS BLOCK USED TO CLAMP FOUR SIDES. The two lateral ones and the floor are
+     * gone with the walls; retiring them rather than testing against an infinity
+     * is the point of the amendment. FUEL is what bounds a run now.
      *
-     * Every wall gives a little back so a full-speed impact reads as a collision
-     * rather than as a dead stop. The margins differ on purpose: laterally the
-     * bound is the machine's CIRCUMSCRIBED radius, because it can point any way
-     * and its ore bed must not be drawn inside the wall lining; vertically it is a
-     * short margin, because a band can be as little as 135 m tall and spending
-     * 440 units of that at each end would turn the shallowest level into a
-     * corridor. The cut box is clipped either way (block 3), so a hull that leans
-     * into the ceiling still cannot damage it.
+     * The wall gives a little back so a full-speed impact reads as a collision
+     * rather than as a dead stop, and the margin is short (40 rather than the
+     * machine's circumscribed radius) because a machine nosing into the roof of
+     * its own lift chamber should stop AT the roof and not a hull-length below
+     * it. The cut box is clipped too (block 3), so a hull that leans into the
+     * ceiling still cannot damage it.
      * ------------------------------------------------------------------ */
-    var rad = advRadius();
-    var bound = (lvB ? lvB.halfW : A.MINE_HALF_WIDTH) - rad;
-    if (bound < 80) bound = 80;
-    if (x < -bound) { x = -bound; if (dvx < 0) dvx = -dvx * ADV_WALL_BOUNCE; }
-    else if (x > bound) { x = bound; if (dvx > 0) dvx = -dvx * ADV_WALL_BOUNCE; }
     var roof = (lvB ? lvB.topY : A.MINE_CEILING_Y) + ADV_CEIL_MARGIN;
     if (y < roof) { y = roof; if (dvy < 0) dvy = -dvy * ADV_WALL_BOUNCE; }
-    if (lvB) {
-      var sole = lvB.botY - ADV_FLOOR_MARGIN;
-      if (sole < roof) sole = roof;      // a band too thin to stand in: pin, never invert
-      if (y > sole) { y = sole; if (dvy > 0) dvy = -dvy * ADV_WALL_BOUNCE; }
-    }
 
     /* --- 6. report the work, then hand our state to the particles ----- */
     advReportWork(dt, mag, damaged);
@@ -1475,26 +1468,27 @@ SM.vehicle = (function () {
     animateMachinery(dt, damaged);
   }
 
-  /* THE SEAL CLIP. Four one-line clamps that trim a damage rect to the active
-   * level's void, and one test that says whether the rect wanted to reach past it.
+  /* THE SEAL CLIP. ONE one-line clamp that trims a damage rect to the rock below
+   * the ceiling, and one test that says whether the rect wanted to reach past it.
    *
    * A RECT CLIP RATHER THAN A MATERIAL EXCLUSION, because particles.js is frozen
    * and damageSolidInRect() has no way to skip a material — the only place a
    * deposit can be spared is before the call, by not asking about the box it is
-   * in. It costs four compares on a path that already walks ~60 deposits.
+   * in. It costs one compare on a path that already walks ~60 deposits.
    *
-   * Null bounds (classic mode, or an older world module) leave every rect exactly
-   * as it was, which is what keeps classic byte-identical. */
-  function clipL(v) { return (lvB && v < -lvB.halfW) ? -lvB.halfW : v; }
-  function clipR(v) { return (lvB && v > lvB.halfW) ? lvB.halfW : v; }
+   * THERE WERE FOUR OF THESE. The lateral pair and the floor clamped against
+   * walls that no longer exist; clipL/clipR/clipB were identity functions the
+   * moment getLevelBounds() started answering Infinity, and an identity function
+   * threaded through every cut call is a worse thing to leave behind than the
+   * three deleted lines. Their call sites now pass the coordinate straight
+   * through. Null bounds (an older world module) leave every rect exactly as it
+   * was, which is what keeps this file correct against either half. */
   function clipT(v) { return (lvB && v < lvB.topY) ? lvB.topY : v; }
-  function clipB(v) { return (lvB && v > lvB.botY) ? lvB.botY : v; }
 
-  /** Does a box of half-extent `h` about (bx, by) reach outside the level? */
+  /** Does a box of half-extent `h` about (bx, by) reach past the ceiling? */
   function boxHitsSeal(bx, by, h) {
     if (!lvB) return false;
-    return bx - h < -lvB.halfW || bx + h > lvB.halfW ||
-           by - h < lvB.topY || by + h > lvB.botY;
+    return by - h < lvB.topY;
   }
 
   /* The material the border is made of, for the HUD's "blocked by" readout. Looked

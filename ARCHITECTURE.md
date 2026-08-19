@@ -85,7 +85,7 @@ between (say) camera and vehicle are fine.
 | 11 | `js/mines.js` | `SM.mines` | mine catalogue, layer tables, prices, volumes |
 | 12 | `js/rig.js` | `SM.rig` | eight part categories, tiers, prices, derived stats |
 | 13 | `js/save.js` | `SM.save` | three slots in localStorage, per-mine tunnels |
-| 14 | `js/advterrain.js` | `SM.advterrain` | deterministic geology, the carve mask, 2D streaming |
+| 14 | `js/advterrain.js` | `SM.advterrain` | deterministic geology, the sparse carve store, 2D streaming |
 | 15 | `js/scanner.js` | `SM.scanner` | ore signatures through rock |
 | 16 | `js/joystick.js` | `SM.joystick` | the translucent thumbstick |
 | 17 | `js/advhud.js` | `SM.advhud` | in-mine gauges, the pause card |
@@ -203,7 +203,7 @@ so a descent is the only state that simulates. Every module can therefore assume
 ### `SM.main.restart()`
 
 Delegates to `SM.adv.restart()` while a company is live (re-descending means
-rebuilding the mine from its saved seed and carve mask with the loadout the
+rebuilding the mine from its saved seed and carve store with the loadout the
 player paid for, none of which `main.js` knows about). Otherwise it is the
 campaign being closed back to the title: unpause, then empty the world
 (`vehicle`, `camera`, `particles`, `advterrain`, `effects`, `sound`, `input`),
@@ -243,14 +243,23 @@ Read freely. Coupled values to be aware of:
 `SM.config.ADV` is the shared block every module is tuned against:
 
 ```
-METERS_PER_UNIT 0.1     MINE_CEILING_Y 0        MINE_HALF_WIDTH 2600
+METERS_PER_UNIT 0.1     MINE_CEILING_Y 0        MINE_HALF_WIDTH 2600 (RETIRED)
 SPACING 21              SOLID_BUDGET 5200       STREAM_MARGIN 240
 CAM_ZOOM 0.80           EXIT_RADIUS 200
-SAVE_KEY / SAVE_SLOTS 3 / SAVE_VERSION 1
+SAVE_KEY / SAVE_SLOTS 3 / SAVE_VERSION 2
 ```
 
 `SAVE_KEY` is `'supermine.adventure.v1'` and **must not change** — it is the
-same key the two-mode build wrote, so existing companies load untouched.
+same key every previous build wrote, so an existing company is FOUND rather than
+orphaned. `SAVE_VERSION` says what shape it is in once found; **v1 records are
+migrated, not dropped** — company, cash, day, rig, rights, bought levels, rails
+and dumped piles all survive and only the TUNNELS are lost (§7b).
+
+**`MINE_HALF_WIDTH` IS NO LONGER A BOUND.** A level map is unbounded east, west
+and south (§7). The constant survives because this table is frozen, and it has
+exactly one live use left: `advterrain`'s `RATE_REF_W` (5200), the width every
+shipped `pocketRate`/`cavernRate` in `mines.js` was measured against. Keeping it
+fixed is what makes those numbers go on meaning what they meant.
 
 `config.js` still carries a handful of constants nothing reads any more (the old
 lane geometry, the level/upgrade block). They are harmless and the table is
@@ -268,7 +277,7 @@ SM.materials.getDensityScale() / getDensitySpacing()
 ```
 
 **Never reorder or delete entries in `list` — append only.** Indices are baked
-into the particle arrays, the sprite atlases and every save file's carve mask.
+into the particle arrays, the sprite atlases and every save file's carve store.
 
 ### `SM.input`
 
@@ -516,6 +525,7 @@ Payload shapes are exact. Anything that can fire more than a few times a second
 | `adv:heat` | `{pct}` | adv |
 | `adv:damage` | `{integrity, source}` | adv |
 | `lift:bought` / `lift:ride` | see adv.js | adv |
+| `lift:unlocked` | `{level, price, mineId}` — the progression gate opened on that level. Fires ONCE per rung, ever | adv |
 | `lift:docking` / `lift:entered` / `lift:undocking` / `lift:exited` | `{level, reason}` — see adv.js | adv |
 | `rail:bought` / `rail:deposit` / `rail:fuel` | see adv.js (dormant) | adv |
 | `drill:blocked` | `{x, y, matIndex, hardness, cap}` | vehicle |
@@ -627,42 +637,144 @@ colours at runtime will not take effect.
 
 ---
 
-## 7. LEVELS AS MAPS — the contract
+## 7. LEVELS AS ENDLESS MAPS — the contract
 
 **The model:** each level is ITS OWN MAP, conceptually stacked; the lift is the
-ONLY way between levels; levels are **SEALED ABSOLUTELY** (no drill tier digs
-through, ever). The lift is BIG CLOSED DOORS at the level's TOP-CENTRE:
-approach → they open → **drive in → the lift docks you** → the door menu (SELL /
-REFUEL / level list / MAP). Surface is UI only. L1 comes with the mining rights. Stranding drops the hold as a pile
-on that level. Levels can be hopped freely mid-run, hold intact. All levels are
-big; deeper = bigger (width grows with level index).
+ONLY way between levels. A level map is **UNBOUNDED east, west and SOUTH**. The
+only boundary anywhere in the game is the **bedrock CEILING just north of that
+level's lift** — one wall, and it is absolute. **FUEL is what stops a run, not
+rock.** The lift is BIG CLOSED DOORS at the map's TOP-CENTRE: approach → they
+open → **drive in → the lift docks you** → the door menu (SELL / REFUEL / level
+list / MAP). Surface is UI only. L1 comes with the mining rights. Stranding drops
+the hold as a pile on that level. Levels can be hopped freely mid-run, hold
+intact.
 
-**The realisation:** a level map is a bounded y-band of the existing coordinate
-space (level k = geological layer k's band). Absolute `(seed, cellX, cellY)`
-determinism, depth-driven heat and geology, the ONE whole-mine carve mask, the
-emissive `renderLit` pass, 2D streaming and the hash clamps are all UNCHANGED.
+**The realisation:** a level is not a y-band any more — it is a whole coordinate
+space of its own, distinguished by `genSeed = h3(mineSeed, S_LEVEL, k)`. That is
+what makes the levels-as-maps contract true *by construction* rather than by
+enforcement: you cannot dig from level 1's map into level 2's because level 2 is
+not there. Its geology is a different hash of the same coordinates and only the
+lift crosses. Absolute `(genSeed, cellX, cellY)` determinism, the emissive
+`renderLit` pass, 2D streaming and the hash clamps are all UNCHANGED.
 
-### THE TWO SEAL TRUTHS (measured — do not relearn)
+**Depth is ABSOLUTE everywhere.** A level's lift sits at that level's catalogue
+depth in world y, so level 3's board reads 300 m and a kilometre south of it
+reads 1300 m. The HUD gauge, the depth ruler and the red board on the doors all
+read the same number, and so does `adv.getDepthM()`.
 
-* **The mask BEATS the generator** (single consult, `generateRowStrip`, before
-  `cellMaterialAt`) — border rows therefore need an explicit *seal-beats-mask*
-  test, or old tunnels punch player-shaped holes in the seal.
+**ONE STRATUM PER LEVEL, FOREVER.** A level map does not descend through the
+layer table: it is the one stratum `mines.levelSpawnOf()` names, at every depth,
+south forever — country rock, hardness, heat and ore lottery alike. What changes
+within a map is a deliberate WHISPER (see §7a); what changes between maps is the
+whole table, and that is the progression axis.
+
+### THE SEAL TRUTHS (measured — do not relearn)
+
+* **The carve store BEATS the generator** (single consult, `generateRowStrip`,
+  before `cellMaterialAt`) — the ceiling rows therefore need an explicit
+  *seal-beats-store* test, or an old tunnel punches a player-shaped hole in the
+  one wall in the game.
 * **Tier-5 drills CUT bedrock** (cap 34 > 26). The seal GUARANTEE is the
-  **vehicle position clamps**, not the rock. Border bedrock is the visual. The
-  seal also heals: a tier-5 rig can bite border bedrock, but `markDestroyed`
-  refuses seal cells, so bites never enter the mask and regenerate on recycle.
-  Oracle-proven: a forged mask carve across seal rows is ignored.
+  **vehicle position clamp**, not the rock. Ceiling bedrock is the visual. The
+  seal also heals: a tier-5 rig can bite it, but `markDestroyed` refuses ceiling
+  cells, so bites never enter the store and regenerate on recycle. Measured on
+  the current build: a maxed rig driving north for 25 seconds stops exactly
+  `ADV_CEIL_MARGIN` (40 units) below `lvlTopY` with zero carved cells in the
+  ceiling rows.
+
+### 7a. WHAT A LEVEL PURCHASE BUYS — the spawn ladder
+
+Owner's rule, verbatim: *"the spawn percentage stays fixed in level 1 — well
+maybe it gets a little better as you drill south. But in the end, for better
+hauls you have to BUY lower levels in the lift and move on from there."*
+
+* **BETWEEN LEVELS** — the real axis. Each level owns a FIXED ore table
+  (`mines.levelSpawnOf(mine, k).weights`). Deeper is richer in both senses: the
+  cheap bulk shrinks as a share AND minerals that do not exist higher up start
+  appearing. Old Creek measures $11.87 → $26.15 → $74.61 per unit of hold.
+* **WITHIN A LEVEL** — a whisper, and it is capped so that digging south can
+  never substitute for buying down. Each material's weight is scaled by
+  `1 + drift_i * g`, `g = min(SOUTH_DRIFT_CAP, metresSouth/100 * SOUTH_PER_100M)`
+  — +3% of relative share per 100 m, plateauing 1000 m south. Measured worth
+  ~+11% of dollars-per-unit against a 2.1x step for a purchase.
+* **ANCIENT DEBRIS IS NOT AN ORE WEIGHT.** A pocket picks ONE material for the
+  whole blob, so a weight of even 0.05 means "one pocket in two thousand is
+  forty deposits of the richest material in the game" — a slot machine, not a
+  discovery. It is its own structure family (`gatherDebris`), a tight scatter of
+  2-4 deposits, priced per level through `debrisRate`.
+* **MOTHERLODES ARE LANDMARKS, AND THEIR RATE IS SIZE-SENSITIVE.** A lode paints
+  ~2 100 cells of its own mineral between shell and halo. The old default
+  (`0.42` on every mine's deepest layer) was written for a finite band; on an
+  endless map it made Old Creek L3's emerald 35.6% of all ore against a 4.7%
+  table share. The ladder now targets one rolled lode per ~90 M units², plus one
+  GUARANTEED lode a couple of hundred metres south of every level's own lift.
+
+### 7b. THE SPARSE CARVE STORE
+
+The whole-mine carve mask is gone: it was one byte per cell of a finite box and
+there is no box any more. `js/advterrain.js` keeps 32×32-cell chunks of one BIT
+per cell, keyed `(level, chunkX, chunkY)`, allocated only when something inside
+one is dug. `markDestroyed` keeps a one-entry chunk cache, so the hot path
+(~150 calls/step) is three integer compares, a shift and a byte write.
+
+The save seam is `advterrain.exportCarve()` / `importCarve(desc)` and
+`save.encodeCarve(desc)` / `save.decodeCarve(str)`. Wire format `"2S,<n>,<body>"`;
+a v1 mask string is REJECTED, not mis-parsed. **MEASURED: ~34-58 characters per
+touched chunk**, ~33 KB per hour of continuous novel driving. A scripted
+expedition that dug 88 132 cells across 377 chunks wrote a 22 430-character save
+record.
+
+### 7c. THE PROGRESSION GATE — the next level does not exist until it is earned
+
+**Owner's rule:** the option to buy the next level down is **not visible at all**
+until the player has (a) banked some real hauls out of the level they are on and
+(b) can afford it. No purchase row, no price, no greyed-out tease. When both
+halves first come true a small **instruction box** appears in the lift saying
+they may now buy another level down — once, ever, per rung.
+
+```
+level k+1 is revealed  <=>  qualifying hauls from level k >= HAULS_TO_REVEAL (3)
+                       AND  cash >= price(level k+1)
+```
+
+* **A qualifying haul is a banked sale carrying >= `HAUL_MIN_HOLD` (0.35) of the
+  hold, by VOLUME.** Volume because that is what the word means and because it
+  cannot be farmed — selling one unit repeatedly is 2% of a hold and never
+  counts. The money half of the gate is the affordability test.
+* **Reveal is a ONE-WAY DOOR.** If the cash later dips under the price the row
+  stays and greys, exactly like every other purchase in the game. Re-hiding it
+  would flicker on the commonest action at the doors (buying fuel) and would
+  retract a promise the instruction box just made.
+* **The unowned TAIL hides with its head.** A list that hid L2 and still showed
+  L3 as SEALED would have a hole in it, and a hole teases louder than the row it
+  replaced. So unowned levels appear only once the gate opens on the next one.
+* **It is enforced in `buyLevel()`, not just drawn.** A stale panel or a console
+  poke cannot spend the ledger early.
+* **Persisted per mine** as `hauls` (counts per level) and `taught` (how deep the
+  notice has been shown) — see `js/save.js`. Both migrate to 0, so an existing
+  company simply re-earns the current rung; nothing it paid for is lost.
+* Owned by `js/adv.js`; `js/advhud.js` (the lift menu) and `js/advui.js` (the
+  prep screen) both read `offered` off the level entries and neither re-derives
+  the rule.
 
 ### The interface
 
 ```
-mines.levelsOf(id)   level k = layer k BAND (1-based; L1 = first layer, owned
-                     with the rights). Entry:
-                     {i, name, depthTopM, depthBotM, price, widthU}
-advterrain.beginLevel(mineDef, L)   activate band L: streaming clamped to the
-                     band, seals spawned, door chamber carved at (x=0, band top)
-advterrain.getLevelBounds()   REUSED {level, topY, botY, halfW} — vehicle and
-                     camera clamp against THIS, nothing else
+mines.levelsOf(id)   level k = layer k (1-based; L1 = first layer, owned with the
+                     rights). Entry:
+                     {i, name, depthTopM, depthBotM, price, endless, widthU:0}
+                     depthBotM == depthTopM and endless is true: a level has ONE
+                     depth (its lift) and no width to sell
+mines.levelSpawnOf(id, k)  the resolved spawn record advterrain generates from
+mines.levelEconomyOf(id, k)  what a level is WORTH — for the pricing pass
+advterrain.beginLevel(mineDef, L)   activate level L: genSeed re-keyed, ore
+                     buckets rebuilt, ceiling spawned, door chamber carved at
+                     (x=0, ceiling), guaranteed motherlode re-placed below it
+advterrain.getLevelBounds()   REUSED {level, topY, botY, halfW, openX, openBot}.
+                     botY and halfW are **Infinity** — every clamp in the codebase
+                     is a compare, and a compare against Infinity is simply false,
+                     so an unvisited consumer degrades to "no clamp on that side"
+                     rather than to a wrong one. topY is the ONE real bound
 advterrain.getDoorX() / getDoorY()   door centre. The door-open animation is
                      advterrain's own, driven by machine proximity; no event —
                      EXCEPT while adv.js is docking or undocking, when it takes
@@ -673,8 +785,14 @@ advterrain.inDoorThreshold(x, y)     ...and for STARTING to go in: the same
                      column, DOOR_CATCH further out. This is what adv.js polls
 advterrain.getDoorFade(x, y)         the machine's alpha across the doorway;
                      reaches 0 before the cage's park, not at the door line
-adv.getLevels()      LIVE band entries plus owned:bool
+adv.getLevels()      LIVE level entries plus owned:bool and offered:bool — the
+                     latter is THE PROGRESSION GATE (§7c) and is what a painter
+                     reads to decide whether a purchase row may exist at all
 adv.getLevel()       current level index (1-based)
+adv.isLevelOffered(i)  the same answer as a question. True for exactly one level
+adv.getUnlockNotice()  REUSED {level, name, price} the one-time instruction box
+                     is waiting on, else null; clearUnlockNotice() takes it
+adv.haulsFrom(id, L) / adv.getHaulsNeeded()   the gate's haul counter
 adv.rideTo(L)        mid-run, hold intact: beginLevel + camera.reset +
                      lift:ride {from,to}, then UNDOCKS at the far end
 adv.getBoardable()   current level index while inside the door circle
@@ -688,8 +806,9 @@ adv.exitLift()       (= dismissing the menu) start the UNDOCKING; control comes
 adv.sellAtDoor()     banks hold + secured, rolls the day (the door IS surface
                      access). The results screen remains for STRAND only
 adv.leaveToMap()     teardown -> map state
-vehicle.parkAtDoor() set down just below the doors, heading down; the FOUR-SIDE
-                     clamps from getLevelBounds() are the seal guarantee
+vehicle.parkAtDoor() set down just below the doors, heading down; the CEILING
+                     clamp from getLevelBounds() is the seal guarantee, and it is
+                     the only position clamp left in the game
 vehicle.parkInLift() ...and its mirror, ADV_DOCK_Y INSIDE them — where the cage
                      holds the machine while the menu is up
 vehicle.beginDoorGlide(out) / setDoorGlide(p) / endDoorGlide() / isDoorGliding()
@@ -732,14 +851,20 @@ must not be stranded by the rescue that is already happening.
   cannot be rolled for free. `escape()` survives, working, called by nothing.
 * You cannot strand INSIDE the lift, nor DURING a docking or an undocking (the
   dry timer pauses for all three).
-* Old saves load: company/rig/levels intact; in-band tunnels persist; tunnels
-  that crossed a boundary seal over (accepted).
+* v1 saves load: company / cash / day / rig / rights / bought levels / rails /
+  dumped piles all intact. TUNNELS DO NOT — v1's flat carve mask described a
+  finite box and there is no honest mapping onto the sparse per-level store
+  (§7b). Accepted and deliberate: a fabricated mapping would put solid rock
+  inside workings the player remembers digging.
 
 **RAILS ARE DORMANT.** The rails layer (checkpoint purchase / refuel / deposit /
 secured, in `adv`/`mines`/`save`) stays on disk untouched — zero UI wiring,
 no-ops with an empty ledger. When rails return they run east AND west from the
-central door within a level band, and checkpoint rows sit on the **door's row**
-of a band, not the band ceiling (which is inside the seal).
+central door of a level map — which is now genuinely unbounded in both
+directions, so `CP_PER_LEVEL` is no longer bounded by the mine's width and
+`mines.js` design note 4d's margin arithmetic against `MINE_HALF_WIDTH` is
+obsolete. Checkpoint rows sit on the **door's row**, not the ceiling (which is
+inside the seal).
 
 ---
 
@@ -751,6 +876,16 @@ The engine's cost is **rasterisation**, not physics.
   (`despawnOutsideRect`, both axes); players drive back up as well as down.
   Watch `SM.particles.getStats().free` and keep the `DEBRIS_RESERVE` discipline:
   the graceful failure is "streaming pauses", never "pool exhausted".
+* **THE WINDOW IS ALWAYS FULL NOW, AND THAT IS NEW.** While levels were thin
+  y-bands the window was clamped to the band, so a shallow level held ~2 000
+  solids and half the screen was bedrock. An endless map fills the whole window:
+  measured 4 026 resident on Old Creek L1 where the band build held 1 966, and a
+  peak of 5 198 against the 5 200 budget on a 9 000 m descent. The budget holds —
+  `generateRowStrip`'s `canAfford` is a hard cap and `adaptBudget` never had to
+  stay trimmed — but **every level is now as expensive to render as the deepest
+  one used to be.** Measured against the band build on the same machine, at equal
+  geometry frame rate is unchanged; the mode pays ~13% of frame rate for ~105%
+  more rock on screen.
 * **The darkness composite is full-screen blending.** One radial gradient and one
   fill, not a per-particle lighting pass. If it costs more than a couple of
   milliseconds it is wrong. The gradient is baked at the origin and the *context*

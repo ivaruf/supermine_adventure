@@ -180,6 +180,12 @@ SM.advhud = (function () {
   var liftAt = -2;           // getBoardable() as of the last slow tick, -2 = never asked
   var liftOpen = false;
   var liftDismissed = -1;    // station whose panel the player waved away
+  /* THE UNLOCK NOTICE, for the life of ONE panel session. adv.js persists the
+   * fact that the rung was revealed and hands the box over exactly once; these
+   * three hold it on screen until the player leaves the cage. 0 = no box. */
+  var liftUnlock = 0;
+  var liftUnlockName = '';
+  var liftUnlockPrice = 0;
 
   /* =====================================================================
    * DOM helpers — the ui.js discipline, one cache per module
@@ -472,10 +478,15 @@ SM.advhud = (function () {
     /* --- THE DOOR MENU --------------------------------------------------
      * The lift is BIG CLOSED DOORS at the top-centre of the level (ARCHITECTURE.md
      * §7). Drive into them and this opens: SELL the haul, REFUEL, the level
-     * list, back to MAP. It is the whole surface, reached without leaving the
-     * mine, and it is what replaced BOTH the old in-mine station panel and the
-     * surface round trip — there is no auto-extraction to be surprised by any
-     * more, only four plates that each do one named thing.
+     * list, RETURN TO MINE, LEAVE. It is the whole surface, reached without
+     * leaving the mine, and it is what replaced BOTH the old in-mine station
+     * panel and the surface round trip — there is no auto-extraction to be
+     * surprised by any more, only plates that each do one named thing.
+     *
+     * IT IS A PLACE AND IT IS SIZED LIKE ONE. See THE DOOR MENU section below
+     * for the layout argument; the short version is that the machine is parked
+     * inside a lift and nothing else is happening, so the panel is allowed to
+     * take the screen it needs to make the numbers legible.
      *
      * It is a SIBLING of .sm-ah rather than a child for the same reason the
      * pause card is: in the wide layout .sm-ah is a content-height column
@@ -483,23 +494,22 @@ SM.advhud = (function () {
      * window. Hanging off #ui-root gives the panel one containing block in both
      * layouts.
      *
-     * IT IS AN OFFER, NOT A MODE. A player parked at the doors may simply want
-     * to carry on drilling, so there is a cross on it, driving out of the
-     * doorway takes it away by itself, and the container is pointer-events:none
-     * — only the plates and the cross accept a tap, so a drag that starts
-     * anywhere else on it still falls through to the stick layer and drives.
+     * IT IS DISMISSIBLE, AND DISMISSING IT IS A MOVE. There is a cross on it and
+     * a RETURN TO MINE plate, and both run the same undocking — a player who
+     * waves the panel away wants to be back in the rock, not sitting in a cage
+     * with no controls.
      *
-     * WHERE IT SITS. Bottom-centre, in the band between the machine and the
-     * hold, and it clears the hold by arithmetic rather than by hope: the hold
-     * box grows upward as minerals come aboard, so refreshManifest() publishes
-     * the row count as --sm-ah-hold-rows and the stylesheet adds it to this
-     * panel's `bottom`. No measuring, one guarded write, and the manifest is
-     * never covered by the thing that offers to sell it. */
+     * WHERE IT SITS. Dead centre, sized like the room it is (style-adventure.css
+     * §12). It used to hug the bottom edge and dodge the hold box by arithmetic,
+     * because it could appear while the player was still driving; it cannot any
+     * more — it opens only once the machine is INSIDE the cage — so there is
+     * nothing to dodge and nothing to measure. */
     els.lift = el('div', 'sm-ah-lift', root);
     var lhead = el('div', 'sm-ah-lift-head', els.lift);
     el('div', 'sm-ah-lbl', lhead, 'LIFT');
     els.liftWhere = el('div', 'sm-ah-lift-where', lhead, '');
     els.liftClose = el('button', 'sm-ah-lift-close', lhead);
+    /* (the cross is wired below; the rest of the panel is built after it) */
     els.liftClose.setAttribute('type', 'button');
     els.liftClose.setAttribute('title', 'Roll out — back to the rock');
     els.liftClose.setAttribute('aria-label', 'Leave the lift');
@@ -514,26 +524,66 @@ SM.advhud = (function () {
       onDoorOut();
     }, false);
 
-    /* THE THREE SURFACE VERBS, ABOVE THE LEVEL LIST.
-     * SELL first because it is why you drove back; REFUEL second because it is
-     * what you do with the money; MAP last because leaving is the rare choice.
-     * Every one of them keeps its label and greys out through :disabled — the
-     * reason goes in the note line at the foot of the panel, never on the
-     * plate. */
+    /* --- THE TRADE PLATES: SELL AND REFUEL ------------------------------
+     * The two verbs the player came up for, and the redesign's first rule is
+     * that their NUMBERS have to be readable at a glance — you are standing at
+     * the surface deciding whether to bank $1 240 and whether $37 of diesel is
+     * worth it, and both of those are the whole decision. So they get half the
+     * panel width each and their value line is the biggest type in here.
+     *
+     * They keep their labels and grey out through :disabled; the reason always
+     * goes in the note line at the foot, never on the plate. */
     els.doorActs = el('div', 'sm-ah-door-acts', els.lift);
     els.doorSell = doorButton(els.doorActs, 'sm-ah-door-sell', 'SELL', onDoorSell);
     els.doorFuel = doorButton(els.doorActs, 'sm-ah-door-fuel', 'REFUEL', onDoorRefuel);
-    /* OUT IS A PLATE, NOT JUST THE CROSS. The machine is INSIDE the lift while
-     * this panel is up — hidden, parked, with no controls — so "get me back in
-     * the rock" is a first-class verb and it needs a thumb-sized target, not a
-     * 28 px dismiss cross in a corner. The cross does the same thing. */
-    els.doorOut = doorButton(els.doorActs, 'sm-ah-door-out', 'OUT', onDoorOut);
-    els.doorMap = doorButton(els.doorActs, 'sm-ah-door-map', 'MAP', onDoorMap);
+
+    /* --- THE UNLOCK NOTICE ----------------------------------------------
+     * THE PROGRESSION GATE'S ONE PIECE OF TEACHING (js/adv.js's note above
+     * buyLevel). When the player has finally worked enough of this level and has
+     * the money, the next one down stops being invisible — and that is a big
+     * enough change to the game that it is told rather than left to be noticed.
+     *
+     * IT LIVES HERE, IN THE LIFT, and that is the whole reason it can be a
+     * quiet box instead of a modal. The owner's constraint was "noticed without
+     * interrupting driving": a banner over the rock would either be missed at 60
+     * km/h or would have to stop the machine to be read. The lift is where the
+     * player is already stationary, already reading numbers, and already looking
+     * at the list the notice is about — so it appears directly above that list,
+     * once, and the very next thing under the player's thumb is the row it is
+     * talking about.
+     *
+     * ONE PANEL SESSION. refreshLift() takes it from adv.getUnlockNotice() and
+     * clears it there and then — adv.js has already persisted the fact, so it
+     * cannot come back after a reload — and hideLift() drops it, so leaving the
+     * cage and coming back does not re-teach a lesson already given. */
+    els.unlock = el('div', 'sm-ah-unlock', els.lift);
+    els.unlockTitle = el('div', 'sm-ah-unlock-title', els.unlock, '');
+    els.unlockBody = el('div', 'sm-ah-unlock-body', els.unlock, '');
 
     els.liftList = el('div', 'sm-ah-lift-list', els.lift);
     /* The panel text. Where every reason lives: what SELL would bank, why
      * REFUEL is dim, how short the ledger is of the next level. */
     els.liftNote = el('div', 'sm-ah-lift-note', els.lift, '');
+
+    /* --- THE FOOT: THE CALL TO ACTION, AND THE WAY OUT -------------------
+     * RETURN TO MINE IS THE PRIMARY, AND IT IS THE OWNER'S WORDING. The machine
+     * is INSIDE the lift while this panel is up — hidden, parked, with no
+     * controls — so the single most likely thing the player wants is to be back
+     * in the rock, and the panel should say so in the largest, lowest, most
+     * thumb-reachable plate it has. It used to be one of four equal squares
+     * labelled OUT with "TO THE ROCK" underneath, which made the most common
+     * action in the menu look like the third choice on a list.
+     *
+     * LEAVE IS SECONDARY AND STAYS TWO-TAP. It ends the expedition, which is the
+     * rare choice, so it is a small quiet plate beside the big one — and its
+     * confirm still rides in the VALUE line, because the label is not allowed to
+     * move (see the results footer's rule).
+     *
+     * The cross in the head does exactly what RETURN TO MINE does; both are the
+     * undocking, and dismissing the panel has always meant leaving the cage. */
+    els.doorFoot = el('div', 'sm-ah-door-foot', els.lift);
+    els.doorOut = doorButton(els.doorFoot, 'sm-ah-door-return', 'RETURN TO MINE', onDoorOut);
+    els.doorMap = doorButton(els.doorFoot, 'sm-ah-door-map', 'LEAVE', onDoorMap);
 
     /* --- THE RIDE TRANSITION -------------------------------------------
      * A level is its own map, so a ride has to READ as a load: the screen goes
@@ -853,13 +903,14 @@ SM.advhud = (function () {
      * this file does — never a separate count. */
     setText('hnum', els.holdCount, '' + used);
     setClass('hbempty', els.holdBtn, 'sm-ah-holdbtn-empty', used === 0);
-    /* HOW TALL THE HOLD BOX IS, PUBLISHED AS A NUMBER OF ROWS.
-     * The lift panel has to sit clear above the hold, and the hold grows upward
-     * with every new mineral. Measuring it is forbidden in this file and would
-     * be wrong anyway (the box is animated), but the row count is already in
-     * hand here — so the stylesheet does the arithmetic off a var instead. One
-     * guarded write on the slow timer, no layout read. */
-    setVar('liftrows', els.lift, '--sm-ah-hold-rows', '' + used);
+    /* THE HOLD'S HEIGHT USED TO BE PUBLISHED HERE, as --sm-ah-hold-rows, so the
+     * stylesheet could stack the lift panel clear above this box without anyone
+     * measuring anything. The lift is a CENTRED PLACE now (style-adventure.css
+     * §12) and it only ever opens with the machine parked inside the cage, so
+     * there is no longer a panel that has to dodge the manifest — and SELL states
+     * the hold's whole worth on its own plate, which was the number the manifest
+     * was being consulted for. The write is gone with the rule that read it;
+     * removing it also takes one guarded DOM write off the slow timer. */
   }
 
   /* =====================================================================
@@ -870,7 +921,22 @@ SM.advhud = (function () {
    * raises the panel, polled on the SLOW timer, because it is a question about
    * position that changes at walking pace and not per fixed step.
    *
-   * FOUR VERBS AND A LIST, AND NOTHING HAPPENS BY ITSELF.
+   * IT IS A PLACE, NOT A POPUP — that is the redesign, in one line. The lift is
+   * somewhere the player has DRIVEN TO and it is where every decision between
+   * two descents gets made, so it takes the room a room deserves and it is laid
+   * out in the order those decisions actually happen:
+   *
+   *   1. THE TRADE, at the top and in the biggest type in the panel. SELL and
+   *      REFUEL side by side, each a label over ONE NUMBER — $1 240 to bank, $37
+   *      to fill — because that pair IS the decision and it has to be readable
+   *      at a glance, not parsed.
+   *   2. THE LADDER, in the middle. Where you can go, where you are, and — only
+   *      once it has been earned — what the next rung costs.
+   *   3. THE WAY OUT, at the bottom, where the thumb is. RETURN TO MINE is the
+   *      primary and it is the whole reason the panel is dismissible; LEAVE is
+   *      the small one beside it.
+   *
+   * FIVE VERBS, AND NOTHING HAPPENS BY ITSELF.
    *   SELL      adv.sellAtDoor() — banks the hold AND the secured ledger, rolls
    *             the day, and leaves the machine where it is. Greyed when there is
    *             nothing aboard to sell.
@@ -878,9 +944,15 @@ SM.advhud = (function () {
    *             through mines.fuelCost() so the number matches every other
    *             screen. Greyed when the tank is full or the ledger is empty.
    *   the LEVELS  owned rows RIDE (adv.rideTo, free, hold intact); the next one
-   *             down carries BUY and its price (adv.buyLevel); everything past
-   *             that is SEALED and is a read, not a control.
-   *   MAP       adv.leaveToMap() — ends the expedition. Two-tap, because it is
+   *             down carries BUY and its price (adv.buyLevel) ONLY once the
+   *             progression gate has opened on it — before that it is not drawn
+   *             at all, and neither is anything below it. See js/adv.js's note
+   *             above buyLevel for the rule and the unlock notice that announces
+   *             it.
+   *   RETURN TO MINE  adv.exitLift() — the primary. Opens the doors and drives
+   *             the machine back out to the park; the cross in the head is the
+   *             same verb.
+   *   LEAVE     adv.leaveToMap() — ends the expedition. Two-tap, because it is
    *             the one plate here that throws a run away.
    *
    * Everything about the API is feature-detected. Until adv.js exports the door
@@ -892,12 +964,33 @@ SM.advhud = (function () {
     return 'LEVEL ' + i;
   }
 
-  /** "0–135 m" — a band, because a level is a band now, not a boundary. */
+  /**
+   * A LEVEL'S DEPTH, AND IT IS ONE NUMBER NOW.
+   *
+   * A level map is unbounded east, west and south (ARCHITECTURE.md §7), so the
+   * only depth it has is where its lift sits — `depthBotM` is written equal to
+   * `depthTopM` and there is no width to quote either. This used to print a band
+   * ("0–135 m") and it still can, for a catalogue that ever says bot > top; on
+   * everything the game ships it collapses to "0 m" on its own, which is the
+   * graceful presentation the world pass asked for rather than a special case.
+   */
   function bandText(L) {
     if (!L) return '';
     var top = Math.round(num(L.depthTopM, num(L.depthM, 0)));
     var bot = Math.round(num(L.depthBotM, top));
     return bot > top ? (fmt(top) + '–' + fmt(bot) + ' m') : (fmt(top) + ' m');
+  }
+
+  /**
+   * HAS THE PROGRESSION GATE OPENED ON THIS LEVEL? js/adv.js owns the rule; the
+   * live entry already carries the answer as `offered`, and isLevelOffered() is
+   * the fallback for a build where adv.js has the verb but not the field.
+   */
+  function levelOffered(L, i) {
+    if (L && typeof L.offered === 'boolean') return L.offered;
+    var a = A();
+    if (a && a.isLevelOffered) return !!a.isLevelOffered(i);
+    return false;
   }
 
   function liftRow(i) {
@@ -1068,21 +1161,31 @@ SM.advhud = (function () {
     var a = A();
     if (!els.doorSell || !a) return;
 
+    /* THE TWO NUMBERS THAT ARE THE DECISION. Both plates carry money and nothing
+     * else, because that is what is being weighed — the manifest is already on
+     * screen in the hold box and the tank is already a gauge. */
     var sellV = doorSellValue();
-    setText('dsellv', els.doorSell.smVal, sellV > 0 ? ('$' + fmt(sellV)) : '—');
+    setText('dsellv', els.doorSell.smVal, sellV > 0 ? ('$' + fmt(sellV)) : 'HOLD EMPTY');
     els.doorSell.disabled = !(sellV > 0);
 
     var q = (a.getDoorFuelQuote) ? a.getDoorFuelQuote() : null;
     var cost = num(q && q.cost, 0);
     var cash = num(a.getCash && a.getCash(), 0);
-    setText('dfuelv', els.doorFuel.smVal, cost > 0 ? ('$' + fmt(cost)) : 'FULL');
+    setText('dfuelv', els.doorFuel.smVal, cost > 0 ? ('$' + fmt(cost)) : 'TANK FULL');
     els.doorFuel.disabled = !(cost > 0) || cash < 1;
 
-    setText('doutv', els.doorOut.smVal, 'TO THE ROCK');
+    /* THE CALL TO ACTION SAYS WHERE IT PUTS YOU. "RETURN TO MINE" is the label
+     * and it never moves; the value line names the level the doors are about to
+     * open onto, which is the one fact a player about to be handed the controls
+     * back actually wants confirmed. */
+    var at = num(a.getLevel && a.getLevel(), 0);
+    var hereL = (a.getLevelDef && at >= 1) ? a.getLevelDef(at) : null;
+    setText('doutv', els.doorOut.smVal,
+            at >= 1 ? ('L' + fmt(at) + '  ' + liftLabel(hereL, at)) : 'BACK TO THE ROCK');
 
-    /* MAP is the one plate whose VALUE line changes, because the confirm has to
+    /* LEAVE is the one plate whose VALUE line changes, because the confirm has to
      * be visible somewhere and the label is not allowed to move. */
-    setText('dmapv', els.doorMap.smVal, mapArmed > 0 ? 'CONFIRM' : 'LEAVE');
+    setText('dmapv', els.doorMap.smVal, mapArmed > 0 ? 'CONFIRM' : 'TO THE MAP');
     setClass('dmaparm', els.doorMap, 'sm-ah-door-armed', mapArmed > 0);
   }
 
@@ -1101,6 +1204,11 @@ SM.advhud = (function () {
     liftOpen = false;
     setClass('lifton', els.lift, 'sm-ah-lift-on', false);
     setClass('liftbump', els.root, 'sm-ah-lift-on', false);
+    /* ONE PANEL SESSION PER UNLOCK. The box has been read (or waved away, which
+     * is the player's right); coming back into the cage must not re-teach it.
+     * adv.js has already persisted the reveal, so the ROW stays either way —
+     * only the teaching goes. */
+    if (liftUnlock) { liftUnlock = 0; liftSig = ''; }
   }
 
   function refreshLift() {
@@ -1144,6 +1252,29 @@ SM.advhud = (function () {
     // fragment, so they repaint on every slow tick rather than off the signature.
     paintDoorActs();
 
+    /* THE UNLOCK NOTICE, TAKEN AND CLEARED IN ONE MOVE.
+     *
+     * adv.js has already written and saved the fact that this rung is revealed,
+     * so clearing it here cannot lose anything — and taking it the moment the
+     * panel is up is what makes the box "one time per unlock" rather than "every
+     * time you open the lift". It is held in `liftUnlock` for the life of this
+     * panel session and dropped by hideLift().
+     *
+     * The player can be told OUT of the cage — a strand's results screen can bank
+     * the sale that opens the gate — so a pending notice simply waits until they
+     * are somewhere it is actionable, which is here. */
+    if (a.getUnlockNotice) {
+      var un = a.getUnlockNotice();
+      if (un && num(un.level, 0) >= 1) {
+        liftUnlock = num(un.level, 0);
+        liftUnlockName = String(un.name || '').toUpperCase();
+        liftUnlockPrice = num(un.price, 0);
+        liftSig = '';
+        if (a.clearUnlockNotice) a.clearUnlockNotice();
+        if (SM.sound && SM.sound.play) SM.sound.play('sparkle');
+      }
+    }
+
     var cash = num(a.getCash && a.getCash(), 0);
     var i, L, nextI = -1;
     for (i = 0; i < levels.length; i++) {
@@ -1151,12 +1282,21 @@ SM.advhud = (function () {
     }
     var nextL = (nextI >= 1) ? levels[nextI - 1] : null;
     var nextPrice = nextL ? num(nextL.price, 0) : 0;
+    /* THE PROGRESSION GATE. Until it opens on the next level down, that level —
+     * and every level under it — is not on this list at all: no row, no price,
+     * no greyed tease. See js/adv.js's note above buyLevel for the rule, and
+     * js/advui.js's paintPrepLift for why the whole unowned tail goes rather
+     * than just its head (a list with a hole in it teases louder than the row it
+     * replaced). */
+    var gateOpen = !!(nextL && levelOffered(nextL, nextI));
 
     /* The change-detector, same discipline as the manifest: one cheap string
      * covering everything a repaint could alter, so the array walk below only
      * happens when the list has actually moved. Affordability is in it because
-     * BUY greys out on cash, which the player can change from this very panel. */
-    var sig = at + '/' + levels.length + '/' + nextI + '/' + (cash >= nextPrice ? 'y' : 'n') + '/';
+     * BUY greys out on cash, which the player can change from this very panel;
+     * the gate is in it because it changes which rows EXIST. */
+    var sig = at + '/' + levels.length + '/' + nextI + '/' + (cash >= nextPrice ? 'y' : 'n') +
+              '/' + (gateOpen ? 'g' : '-') + '/' + liftUnlock + '/';
     for (i = 0; i < levels.length; i++) {
       L = levels[i];
       if (!L) continue;
@@ -1167,21 +1307,39 @@ SM.advhud = (function () {
     liftSig = sig;
 
     var here = levels[at - 1];
+    /* THE HEAD NAMES THE PLACE. A level reads as one depth now, so the header is
+     * where you are and how deep that is — the same string shape the rows use. */
     setText('liftwhere', els.liftWhere,
-            'IN THE CAGE  ·  LEVEL ' + fmt(at) + '  ·  ' + liftLabel(here, at));
+            'LEVEL ' + fmt(at) + '  ·  ' + liftLabel(here, at) + '  ·  ' + bandText(here));
+
+    /* THE INSTRUCTION BOX. Written before the list, because it is about the list
+     * and the eye should meet it first. */
+    setClass('unlockon', els.unlock, 'sm-ah-unlock-on', liftUnlock >= 1);
+    if (liftUnlock >= 1) {
+      setText('unlockt', els.unlockTitle, 'THE LIFT WILL GO DEEPER');
+      setText('unlockb', els.unlockBody,
+              'You have worked this level and the ledger covers it. LEVEL ' +
+              fmt(liftUnlock) + ' — ' + liftUnlockName + ' is now for sale at $' +
+              fmt(liftUnlockPrice) + '. Buy it below, then ride down: richer rock, ' +
+              'same lift.');
+    }
 
     var used = 0, r, lvl;
 
-    /* EVERY LEVEL IS A ROW, IN LIFT ORDER — the ones you own ride, the next one
-     * down is for sale, and the rest are SEALED. There is no surface row any
-     * more: the surface is UI, and the three plates above this list are what it
-     * used to be for. */
+    /* THE LEVELS YOU CAN GO TO, IN LIFT ORDER — the ones you own ride, and the
+     * next one down is for sale ONLY once the gate has opened on it. Everything
+     * below that is SEALED and is a read, not a control. There is no surface row
+     * any more: the surface is UI, and the trade plates above are what it used to
+     * be for. */
     for (i = 0; i < levels.length; i++) {
       L = levels[i];
       if (!L) continue;
       lvl = num(L.i, i + 1);
       var owned = !!L.owned;
       var isNext = (lvl === nextI);
+      // THE GATE, IN ONE LINE: an unowned level is not drawn at all until the
+      // next one down has been earned.
+      if (!owned && !gateOpen) continue;
       // Nothing past the next one is offered: the lift is extended downward, so
       // there is no skipping ahead to pay for. Deeper rows are a READ.
       var dress = owned ? (lvl === at ? ' sm-ah-liftrow-here' : '')
@@ -1217,20 +1375,37 @@ SM.advhud = (function () {
 
     /* THE NOTE LINE IS WHERE EVERY REASON GOES. Priority order: what the ledger
      * is short of, then what the next level costs, then what the doors are for. */
-    var note;
+    /* ONE LEAD AND ONE TAIL, AND NEITHER IS ALLOWED TO REPEAT THE OTHER.
+     *
+     * The lead is what the hold is worth, because that is the live number and it
+     * changes with every fragment collected. The tail is the standing reason —
+     * what the ledger is short of, or what the doors are for.
+     *
+     * THE TAIL MUST NOT LEAK THE GATE. While the next level is hidden there is
+     * nothing to be short of and nothing to save for; quoting a shortfall would
+     * put the price on screen by the back door, which is the exact thing the
+     * gate exists to prevent. And on the one visit where the unlock box is up,
+     * the box has already said the name, the price and what to do about it in
+     * bigger type and in gold — so the tail stands down entirely rather than
+     * saying it again six pixels lower in grey.
+     *
+     * The generic "the doors are the surface" line is the tail ONLY when the
+     * lead is absent: with a hold to sell, "SELL BANKS $600" has already made
+     * the same point better, and printing both puts the word SELL on the line
+     * twice. */
     var sellV = doorSellValue();
-    var q = (a.getDoorFuelQuote) ? a.getDoorFuelQuote() : null;
-    var fuelCost = num(q && q.cost, 0);
-    if (nextL && (nextPrice - cash) > 0) {
-      note = 'NEED $' + fmt(nextPrice - cash) + ' MORE FOR ' + liftLabel(nextL, nextI) + '.';
-    } else if (nextL) {
-      note = liftLabel(nextL, nextI) + ' COSTS $' + fmt(nextPrice) + ' — BUY IT FROM HERE.';
+    var lead = sellV > 0 ? ('SELL BANKS $' + fmt(sellV) + ' AND ROLLS THE DAY.') : '';
+    var tail;
+    if (!nextL) tail = 'EVERY LEVEL OF THIS MINE IS OPEN.';
+    else if (!gateOpen || liftUnlock >= 1) tail = '';
+    else if ((nextPrice - cash) > 0) {
+      tail = 'NEED $' + fmt(nextPrice - cash) + ' MORE FOR ' + liftLabel(nextL, nextI) + '.';
     } else {
-      note = 'EVERY LEVEL OF THIS MINE IS OPEN.';
+      tail = liftLabel(nextL, nextI) + ' COSTS $' + fmt(nextPrice) + ' — BUY IT FROM HERE.';
     }
-    if (sellV > 0) note = 'SELL BANKS $' + fmt(sellV) + ' AND ROLLS THE DAY.  ' + note;
-    else if (fuelCost > 0 && cash >= 1) note = 'THE DOORS ARE THE SURFACE.  ' + note;
-    setText('liftnote', els.liftNote, note);
+    if (!lead && !tail) tail = 'THE DOORS ARE THE SURFACE — SELL, REFUEL, AND BACK TO WORK.';
+    setText('liftnote', els.liftNote,
+            (lead && tail) ? (lead + '  ' + tail) : (lead || tail));
 
     for (i = used; i < liftRows.length; i++) {
       if (liftRows[i]) {

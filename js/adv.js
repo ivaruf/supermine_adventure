@@ -109,6 +109,12 @@
  *                                                moved" — the results screen's
  *                                                beat AND the door sale's
  *   lift:bought   {i, price, mineId}          <- a level was bought
+ *   lift:unlocked {level, price, mineId}      <- the PROGRESSION GATE opened on
+ *                                                that level: its purchase row
+ *                                                may now be drawn, and the
+ *                                                one-time instruction box is
+ *                                                waiting in getUnlockNotice().
+ *                                                Fires ONCE per rung, ever
  *   lift:docking  {level, reason}             <- the doorway CAUGHT the machine.
  *                                                Control is gone; it is driving
  *                                                itself in and is still visible
@@ -362,6 +368,16 @@ SM.adv = (function () {
    * purchase path can produce. Mirrored into save.js, which stores the same
    * shape. Sparse until read: ownedCheckpoints() fills a slot on first touch. */
   var railsHeld = Object.create(null);
+  /* mineId -> ARRAY of "qualifying hauls banked FROM this level", index 0 being
+   * LEVEL 1. The progression gate's first half — see THE PROGRESSION GATE below.
+   * Same shape and same argument as `railsHeld`, and mirrored into save.js the
+   * same way: sparse until read, filled on first touch. */
+  var haulsHeld = Object.create(null);
+  /* mineId -> how deep the "you may buy another level down" notice has been
+   * shown, as a level index. Doubles as the REVEAL flag: a purchase row is on
+   * screen for level k if and only if this has reached k. A count, not a set,
+   * because reveals happen strictly in order. */
+  var taughtHeld = Object.create(null);
   var companyName = '';
 
   /* --- selection / loadout -------------------------------------------- */
@@ -417,6 +433,7 @@ SM.adv = (function () {
   var levels = [];
   var lvMineId = null;                 // which mine `levels` describes
   var lvOwned = -1;                    // ...and how many levels were owned then
+  var lvTaught = -1;                   // ...and how far the reveal had got
   var lvMouthX = 0;                    // ...and where advterrain put the door x
   var runLevel = 1;                    // the level map the run is ON right now
 
@@ -520,15 +537,31 @@ SM.adv = (function () {
     return FALLBACK_MINE.id;
   }
 
-  /** The layer covering the machine right now, or null while tables are empty. */
+  /**
+   * THE STRATUM THE MACHINE IS WORKING. Heat and the HUD's rock readout both
+   * come off this, so what it answers is what "which layer am I in" means.
+   *
+   * IT IS THE LEVEL'S LAYER, NOT THE DEPTH'S, and that order is the whole of
+   * js/mines.js design note 4e on this side of the seam. A level map is ONE
+   * stratum at every depth (ARCHITECTURE.md §7) and runs south without limit, so
+   * asking layerAt(mine, depthM) — which is what this did — would hand a player
+   * who drilled a kilometre below level 1's lift the geology, and the HEAT, of
+   * level 4. The depth lookup survives as the last fallback, for a caller with
+   * no run in progress and nothing better to say.
+   */
   function currentLayer() {
     if (!mineDef) return null;
+    if (SM.mines && SM.mines.layerOfLevel && runLevel >= 1) {
+      var lv = SM.mines.layerOfLevel(mineDef, runLevel);
+      if (lv) return lv;
+    }
+    if (SM.advterrain && SM.advterrain.layerAtY && SM.vehicle) {
+      var l2 = SM.advterrain.layerAtY(SM.vehicle.getY());
+      if (l2) return l2;
+    }
     if (SM.mines && SM.mines.layerAt) {
       var l = SM.mines.layerAt(mineDef, depthM);
       if (l) return l;
-    }
-    if (SM.advterrain && SM.advterrain.layerAtY && SM.vehicle) {
-      return SM.advterrain.layerAtY(SM.vehicle.getY());
     }
     return null;
   }
@@ -723,6 +756,255 @@ SM.adv = (function () {
     }
   }
 
+  /* =====================================================================
+   * THE PROGRESSION GATE — WHEN THE NEXT LEVEL IS ALLOWED TO EXIST
+   * ---------------------------------------------------------------------
+   * OWNER'S RULE: the option to buy the next level down is NOT VISIBLE AT ALL
+   * until the player has (a) done some real hauls out of the level they are on
+   * and (b) can actually afford it. Not greyed, not teased, not a price with a
+   * line through it — ABSENT. When both halves first come true, a small
+   * instruction box appears saying they may now buy another level down.
+   *
+   * WHY IT IS A GATE AND NOT A HINT. The lift's price list is the campaign's
+   * whole progression, and a price on screen is an instruction: it tells the
+   * player the game wants them to save for it. Showing it on the first descent
+   * makes the first haul feel like a deposit rather than a haul — the player is
+   * shopping before they have learned what a hold is worth. Hiding it until they
+   * have worked the level means the reveal lands as a REWARD for having played,
+   * and it arrives at the exact moment it is actionable.
+   *
+   * THE RULE, GENERALISED TO EVERY RUNG:
+   *
+   *     level k+1 is revealed  <=>  hauls banked FROM level k >= HAULS_TO_REVEAL
+   *                            AND  cash >= price(level k+1)
+   *
+   * ...and once revealed it STAYS revealed (see REVEAL IS A ONE-WAY DOOR).
+   *
+   * WHAT COUNTS AS A HAUL, and why it is measured in VOLUME.
+   * A haul is a banked sale — sellAtDoor(), the results screen's sell(), or the
+   * bank-on-the-way-out in leaveToMap() — that carried at least HAUL_MIN_HOLD of
+   * the machine's hold capacity. VOLUME, not money, for two reasons. It is what
+   * the word means: a haul is a load brought up, and a hold full of cheap coal
+   * out of a poor level is a real day's work even though it pays badly. And it
+   * is unfarmable in the way the owner was worried about — selling one unit
+   * repeatedly is 2% of a hold, so it never counts, however many times it is
+   * done. The MONEY half of the gate is the affordability test, which is already
+   * the other condition, so measuring hauls in dollars too would be the same
+   * question asked twice.
+   *
+   * >> BOTH NUMBERS ARE TUNABLES AND THIS IS WHERE THEY LIVE. <<
+   *
+   * WHY THREE, AND NOT TWO. The brief allowed 2-3; three is right because it
+   * makes the gate and the PRICE say the same thing. Old Creek's levels are
+   * priced at three full hauls of the level above (js/mines.js design note 4f:
+   * L2 = $1 700 against a $570 hold, L3 = $3 800 against a $1 255 one), so a
+   * player who has done the three hauls the counter wants has, to within a tank
+   * of diesel, exactly the money the price wants. The two halves of the gate
+   * land on the same run, the lesson is one lesson — "three good loads buys the
+   * next level down" — and the $900 a company starts with reads as working
+   * capital rather than as a shortcut past the tutorial. At two, the starting
+   * cash pays for a third of the rung and the price stops meaning anything.
+   *
+   * MEASURED on a fresh Old Creek company: hauls 1 and 2 leave the row hidden
+   * (haul 2 ends on ~$1 960, which is over the price — the counter is what
+   * holds it), and haul 3 opens both halves at once.
+   *
+   * REVEAL IS A ONE-WAY DOOR, and that is the answer to "what if the cash dips
+   * back under the price". The row STAYS, in its ordinary unaffordable state:
+   * the BUY greys out and the note line says what the ledger is short of, which
+   * is the same treatment every other purchase in this game gets. Re-hiding it
+   * would be worse in three separate ways. It would flicker on the single most
+   * common action a player takes at the doors (buying fuel drops the cash), it
+   * would make the instruction box a lie — it says you MAY buy another level
+   * down, and a UI that then removes the row has retracted that — and it would
+   * re-ask a question the player has already answered by playing. What the gate
+   * is protecting is the moment of FIRST KNOWLEDGE, and knowledge does not go
+   * back in the box. `taughtHeld` is therefore both "the notice has been shown"
+   * and "the row is out", one field doing one job under two names.
+   *
+   * IT IS ENFORCED, NOT DECORATED. buyLevel() refuses an unrevealed level, so
+   * the rule is true of the LEDGER and not merely of the pixels — a stale panel,
+   * a console poke or a second UI that has not been taught the rule cannot spend
+   * the money early.
+   * ================================================================== */
+
+  /** Qualifying hauls out of a level before the next one down is revealed. */
+  var HAULS_TO_REVEAL = 3;
+  /** ...and what makes a sale qualify: this much of the hold, by volume. */
+  var HAUL_MIN_HOLD = 0.35;
+
+  /* The notice the UI has not yet shown, as a 1-based level index; 0 = none.
+   * RUN-INDEPENDENT and deliberately not saved: `taughtHeld` is what persists,
+   * and this is only the one-frame hand-off to whichever screen is up. */
+  var noticeLevel = 0;
+  var evUnlocked = { level: 0, price: 0, mineId: '' };
+
+  /**
+   * How many qualifying hauls this company has banked out of level L of a mine.
+   * Read through from js/save.js once and then mirrored, exactly as
+   * ownedCheckpoints() does.
+   */
+  function haulsFrom(id, L) {
+    if (!id || !(L >= 1)) return 0;
+    var arr = haulsHeld[id];
+    if (!arr) { arr = []; haulsHeld[id] = arr; }
+    var i = L - 1;
+    if (typeof arr[i] !== 'number') {
+      var n = 0;
+      if (SM.save && SM.save.haulsFrom) {
+        var v = SM.save.haulsFrom(id, L);
+        if (typeof v === 'number' && v > 0) n = Math.floor(v);
+      }
+      arr[i] = n;
+    }
+    return arr[i];
+  }
+
+  /** Record one more. Stops counting at the threshold: nothing reads past it. */
+  function bumpHaul(id, L) {
+    if (!id || !(L >= 1)) return 0;
+    var n = haulsFrom(id, L);
+    if (n >= HAULS_TO_REVEAL) return n;      // no need to keep a bigger number
+    n++;
+    var arr = haulsHeld[id];
+    var i = L - 1;
+    while (arr.length <= i) arr.push(0);
+    arr[i] = n;
+    if (SM.save && SM.save.setHaulsFrom) SM.save.setHaulsFrom(id, L, n);
+    else {
+      // No dedicated accessor (an older save.js): write the documented field.
+      var ms = mineRecord(id);
+      if (ms) {
+        if (!ms.hauls || typeof ms.hauls.length !== 'number') ms.hauls = [];
+        while (ms.hauls.length <= i) ms.hauls.push(0);
+        ms.hauls[i] = n;
+        markDirty();
+      }
+    }
+    return n;
+  }
+
+  /** How deep the unlock notice has been shown in a mine. 0 = never. */
+  function taughtLevel(id) {
+    if (!id) return 0;
+    var n = taughtHeld[id];
+    if (typeof n !== 'number') {
+      n = 0;
+      if (SM.save && SM.save.noticeShown) {
+        var v = SM.save.noticeShown(id);
+        if (typeof v === 'number' && v > 0) n = Math.floor(v);
+      }
+      taughtHeld[id] = n;
+    }
+    return n;
+  }
+
+  function setTaughtLevel(id, n) {
+    taughtHeld[id] = n;
+    if (SM.save && SM.save.setNoticeShown) SM.save.setNoticeShown(id, n);
+    else {
+      var ms = mineRecord(id);
+      if (ms) { ms.taught = n; markDirty(); }
+    }
+  }
+
+  /** The one level that could be bought next in a mine: 1-based, or -1. */
+  function nextLevelIndex(id) {
+    if (!id) return -1;
+    var owned = ownedLevels(id);
+    var total = levelCount(id);
+    if (!(total > 0) || owned >= total) return -1;
+    return owned + 1;
+  }
+
+  /**
+   * Is level `i`'s purchase row allowed on screen? True only for the ONE level
+   * that is next in line, and only once the gate has opened on it.
+   *
+   * Every UI asks this and none of them re-derives it: the door menu, the prep
+   * screen's level picker, and anything added later all get the same answer to
+   * the same question, which is the only way a rule about VISIBILITY stays
+   * consistent across screens.
+   */
+  function isLevelOffered(i) {
+    var def = getMine();
+    var id = def ? def.id : null;
+    if (!id) return false;
+    i = Math.floor(i);
+    if (i !== nextLevelIndex(id)) return false;
+    return taughtLevel(id) >= i;
+  }
+
+  /**
+   * Test the gate and, if it has just opened, ARM THE NOTICE.
+   *
+   * Called from the two places that can move either half — bankRun() (hauls) and
+   * moveCash() (money) — so there is no polling anywhere and no per-frame cost.
+   * Idempotent: once `taughtHeld` has reached the level, this returns false
+   * forever, which is what makes the box one-time per rung.
+   */
+  function checkLevelReveal() {
+    if (state === 'off') return false;
+    var def = getMine();
+    var id = def ? def.id : null;
+    if (!id || !ownsRights(id)) return false;
+    var i = nextLevelIndex(id);
+    if (i < 0) return false;                       // every level is owned
+    if (taughtLevel(id) >= i) return false;        // already revealed
+    if (haulsFrom(id, i - 1) < HAULS_TO_REVEAL) return false;
+    ensureLevels();
+    var e = levels[i - 1];
+    if (!e || !canAfford(e.price)) return false;
+
+    setTaughtLevel(id, i);
+    /* `taught` is part of ensureLevels()'s cache key, so this one call is what
+     * republishes `offered` onto the entries every painter is holding. */
+    ensureLevels();
+    noticeLevel = i;
+    evUnlocked.level = i;
+    evUnlocked.price = e.price;
+    evUnlocked.mineId = id;
+    SM.events.emit('lift:unlocked', evUnlocked);
+    flushSave();
+    return true;
+  }
+
+  /**
+   * The unlock notice waiting to be shown, as a REUSED {level, name, price}, or
+   * null. The UI that shows it calls clearUnlockNotice() — `taughtHeld` has
+   * already been written and saved, so a reload can never re-raise it even if
+   * the screen never got the chance to draw.
+   */
+  var noticeOut = { level: 0, name: '', price: 0 };
+  function getUnlockNotice() {
+    if (!(noticeLevel >= 1)) return null;
+    ensureLevels();
+    var e = levels[noticeLevel - 1];
+    if (!e) return null;
+    noticeOut.level = noticeLevel;
+    noticeOut.name = e.name;
+    noticeOut.price = e.price;
+    return noticeOut;
+  }
+
+  function clearUnlockNotice() { noticeLevel = 0; return true; }
+
+  /**
+   * Count a banked sale towards the gate, if it was a real load.
+   *
+   * `units` is everything that left the machine in the sale — the hold plus
+   * anything the rails had secured — measured against the hold's capacity. See
+   * WHAT COUNTS AS A HAUL above for why this is volume and not money.
+   */
+  function creditHaul(units) {
+    if (!runMineId || !(runLevel >= 1)) return false;
+    var cap = getCargoCap();
+    if (!(cap > 0)) return false;
+    if (!(units >= cap * HAUL_MIN_HOLD)) return false;
+    bumpHaul(runMineId, runLevel);
+    return true;
+  }
+
   /**
    * Rebuild `levels` if the mine in context, the levels owned in it, or the
    * door's x has changed since the last call. Everything else about a band is
@@ -738,11 +1020,18 @@ SM.adv = (function () {
     var id = def ? def.id : null;
     var owned = id ? ownedLevels(id) : 0;
     var mx = doorX();
-    if (id === lvMineId && owned === lvOwned && mx === lvMouthX) return levels;
+    /* THE REVEAL IS PART OF THE CACHE KEY. `offered` below is written onto the
+     * entries and every UI reads it off them, so a gate that opened without
+     * moving the mine, the ownership or the door would otherwise hand back a
+     * table that still says the row is hidden. */
+    var taught = id ? taughtLevel(id) : 0;
+    if (id === lvMineId && owned === lvOwned && mx === lvMouthX &&
+        taught === lvTaught) return levels;
 
     lvMineId = id;
     lvOwned = owned;
     lvMouthX = mx;
+    lvTaught = taught;
 
     var tbl = id ? levelTable(def) : null;
     var want = tbl ? tbl.length : 0;
@@ -750,7 +1039,7 @@ SM.adv = (function () {
     while (levels.length < want) {
       levels.push({
         i: 0, name: '', depthTopM: 0, depthBotM: 0, depthM: 0,
-        price: 0, widthU: 0, y: 0, owned: false
+        price: 0, widthU: 0, y: 0, owned: false, offered: false, endless: true
       });
     }
     for (var k = 0; k < want; k++) {
@@ -767,6 +1056,15 @@ SM.adv = (function () {
        * used to read a station's y (the HUD, a fallback park) wants this. */
       e.y = yOfDepth(e.depthTopM);
       e.owned = e.i <= owned;
+      /* AN ENDLESS MAP HAS ONE DEPTH. Carried through from the catalogue so a UI
+       * can present the row as a single depth ("300 m") rather than inventing a
+       * band; entries where the catalogue is silent default to true, which is
+       * what every level in the game now is. */
+      e.endless = (typeof L.endless === 'boolean') ? L.endless : true;
+      /* MAY ITS PRICE BE ON SCREEN? Exactly one row can ever say yes — the next
+       * one down — and only after the gate has opened on it. Every UI reads this
+       * and none of them re-derives the rule. */
+      e.offered = (e.i === owned + 1) && (taught >= e.i);
     }
     return levels;
   }
@@ -822,6 +1120,10 @@ SM.adv = (function () {
     i = Math.floor(i);
     if (!(i > 1) || i > levels.length) return false;
     if (i !== ownedLevels(def.id) + 1) return false;
+    /* THE PROGRESSION GATE IS ENFORCED HERE, not merely drawn. See its note
+     * above: a rule that only the pixels obey is a rule a stale panel, a console
+     * poke or the next UI to be written can spend the ledger straight through. */
+    if (!isLevelOffered(i)) return false;
     var price = levels[i - 1].price;
     if (!canAfford(price)) return false;
 
@@ -1295,7 +1597,7 @@ SM.adv = (function () {
    * beginLevel() is still in flight, endMine/beginMine is a legitimate way to
    * rebuild the world around a new band, and doing nothing at all would leave
    * the machine parked at a door in a map that is still the old level's. The
-   * mask survives either way — advterrain.endMine() hands it back and
+   * carve store survives either way — advterrain.endMine() hands it back and
    * beginMine() takes it straight in again.
    */
   function beginLevel(i) {
@@ -1304,8 +1606,8 @@ SM.adv = (function () {
     if (t.beginLevel) { t.beginLevel(mineDef, i); return true; }
     if (t.endMine && t.beginMine) {
       var ms = mineRecord(runMineId);
-      var mask = t.endMine();
-      if (ms && typeof mask === 'string' && mask) ms.mask = mask;
+      var carve = t.endMine();
+      if (ms && typeof carve === 'string' && carve) ms.carve = carve;
       t.beginMine(mineDef, ms);
       return true;
     }
@@ -1379,6 +1681,13 @@ SM.adv = (function () {
     if (requireValue && !(gross + secGross > 0)) return null;
     var secLines = securedForResults();
 
+    /* THE PROGRESSION GATE'S FIRST HALF, counted BEFORE the hold is emptied
+     * because the size of the load is the whole test. Everything that left the
+     * machine counts — the hold plus whatever the rails had already secured —
+     * since a player who deposited a full hold at a checkpoint and drove back
+     * with a second one has unarguably done a haul. */
+    var soldUnits = cargo + secUnits;
+
     clearHold();
     clearSecured();
 
@@ -1409,6 +1718,15 @@ SM.adv = (function () {
     evSold.cash = cash;
     evSold.day = day;
     SM.events.emit('adv:sold', evSold);
+
+    /* ...AND NOW THE GATE. The haul is credited and the reveal tested AFTER the
+     * money has moved and `adv:sold` has gone out, so the notice — which is the
+     * loudest thing on the screen when it lands — is the LAST beat of the sale
+     * rather than something that interrupts the payday it is a reward for.
+     * creditHaul() is a no-op on a token sale; checkLevelReveal() is a no-op
+     * unless both halves are true and it has not fired for this rung before. */
+    creditHaul(soldUnits);
+    checkLevelReveal();
 
     flushSave();
     return {
@@ -2064,6 +2382,13 @@ SM.adv = (function () {
     rightsHeld = Object.create(null);
     levelsHeld = Object.create(null);
     railsHeld = Object.create(null);
+    /* ...and the progression gate's two mirrors with them, for exactly the same
+     * reason: slot B must not inherit slot A's hauls or its reveal, which would
+     * hand a brand-new company a purchase row it has not earned. */
+    haulsHeld = Object.create(null);
+    taughtHeld = Object.create(null);
+    noticeLevel = 0;
+    lvTaught = -1;
     lvMineId = null;                     // ...and so the station table rebuilds
     /* ...and the checkpoint tables with it. The ARRAYS are kept — a UI holding
      * getCheckpoints(1) keeps a live reference — and only the cache keys are
@@ -2352,8 +2677,12 @@ SM.adv = (function () {
     liftArmed = false;
     var ms = mineRecord(runMineId);
     if (SM.advterrain && SM.advterrain.endMine) {
-      var mask = SM.advterrain.endMine();
-      if (ms && typeof mask === 'string' && mask) ms.mask = mask;
+      /* THE SPARSE CARVE STORE, encoded. It covers EVERY level of this mine in
+       * one string — the store is keyed on (level, chunk), so one write persists
+       * the whole company's history here rather than only the level the run
+       * happened to end on. */
+      var carve = SM.advterrain.endMine();
+      if (ms && typeof carve === 'string' && carve) ms.carve = carve;
     }
     if (ms) {
       ms.visits = (ms.visits || 0) + 1;
@@ -3053,6 +3382,13 @@ SM.adv = (function () {
     evCash.delta = delta;
     evCash.reason = reason || '';
     SM.events.emit('adv:cash', evCash);
+    /* THE GATE'S SECOND HALF. Only on a RISE: the affordability test can only
+     * ever be crossed upward, so a fuel purchase or a repair — which is most of
+     * what moves money — costs one comparison and returns. This is what catches
+     * the player who banked their third haul while broke and then came into
+     * money by some other route. Never fired from buyLevel()'s own debit: by the
+     * time that runs the rung is long since revealed, so it is a no-op anyway. */
+    if (delta > 0) checkLevelReveal();
   }
 
   function buyRights(mineId) {
@@ -3367,6 +3703,34 @@ SM.adv = (function () {
     getDistanceToExitM: getDistanceToExitM,
     getExitLevel: getExitLevel,
     ownedLevels: ownedLevels,
+
+    /* --- THE PROGRESSION GATE (see its note above buyLevel's neighbours) ---
+     * The next level down does not exist on screen until the player has worked
+     * for it. One rule, one owner, every screen asking the same question.
+     *
+     * isLevelOffered(i)  may level i's PRICE and BUY be drawn at all? True for
+     *                    exactly one level — the next unowned one — and only
+     *                    once HAULS_TO_REVEAL qualifying hauls have been banked
+     *                    from the level above it AND the ledger covers it. Once
+     *                    true it stays true (see REVEAL IS A ONE-WAY DOOR), so
+     *                    a row that goes unaffordable greys rather than
+     *                    vanishing. getLevels() entries carry the same answer as
+     *                    `offered`, which is what a painter should read.
+     * getUnlockNotice()  the one-time instruction box waiting to be shown, as a
+     *                    REUSED {level, name, price}, or null. Raised the moment
+     *                    the gate opens; the screen that draws it calls
+     *                    clearUnlockNotice(). Persisted BEFORE it is handed over,
+     *                    so it can never appear twice across a reload even if
+     *                    nothing ever drew it.
+     * haulsFrom(id, L)   qualifying hauls banked out of that level
+     * getHaulsNeeded()   HAULS_TO_REVEAL, for a UI that wants to say "1 of 3"
+     * lift:unlocked {level, price, mineId} is the event
+     */
+    isLevelOffered: isLevelOffered,
+    getUnlockNotice: getUnlockNotice,
+    clearUnlockNotice: clearUnlockNotice,
+    haulsFrom: haulsFrom,
+    getHaulsNeeded: function () { return HAULS_TO_REVEAL; },
 
     /* --- THE RAILS -----------------------------------------------------
      * getCheckpoints(L)     LIVE [{k, outM, x, y, price, owned}] for level L of

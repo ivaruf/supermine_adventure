@@ -336,7 +336,12 @@ SM.advui = (function () {
       out.push({ i: k + 1, name: L.name || ('LEVEL ' + (k + 1)),
                  depthTopM: top, depthBotM: num(L.depthBotM, top), depthM: top,
                  price: num(L.price, 0), widthU: num(L.widthU, 0),
-                 owned: (k + 1) <= owned });
+                 owned: (k + 1) <= owned,
+                 /* THE PROGRESSION GATE. Only adv.js can answer this, and only
+                  * about the mine it has in context — which this branch is by
+                  * definition not. A card describing some other pin on the chart
+                  * never offers a purchase, so `false` is both safe and true. */
+                 offered: false });
     }
     return out;
   }
@@ -364,6 +369,20 @@ SM.advui = (function () {
       if (levels[k] && !levels[k].owned) return num(levels[k].i, k + 1);
     }
     return -1;
+  }
+
+  /**
+   * HAS THE PROGRESSION GATE OPENED ON LEVEL i? js/adv.js owns the rule (see its
+   * note above buyLevel) and every screen asks it rather than re-deriving it;
+   * the entry's own `offered` is preferred because it is the same answer already
+   * baked into the live table, and isLevelOffered() is the fallback for a table
+   * assembled from the catalogue.
+   */
+  function levelOffered(levels, i) {
+    var L = levelAt(levels, i);
+    if (L && typeof L.offered === 'boolean') return L.offered;
+    if (SM.adv && SM.adv.isLevelOffered) return !!SM.adv.isLevelOffered(i);
+    return false;
   }
 
   function ownedCount(levels) {
@@ -1957,10 +1976,22 @@ SM.advui = (function () {
 
     var cash = advNum('getCash', 0);
     var blocked = '';
+    /* THE PROGRESSION GATE (js/adv.js's note above buyLevel). Until the player
+     * has worked the level they are on AND can afford the next one, the next one
+     * DOES NOT EXIST on this screen — no row, no price, no greyed tease.
+     *
+     * AND NEITHER DO THE ONES BELOW IT, which is the only way to keep the ladder
+     * honest: a list that hid L2 and still showed L3 as SEALED would have a hole
+     * in it, and a hole is a louder tease than the row it replaced. So the
+     * unowned tail is drawn only once the gate has opened on its head — and then
+     * it is drawn in full, price and all, because at that point the shape of the
+     * ladder is exactly what the player has earned the right to shop. */
+    var gateOpen = !!(nextI > 0 && levelOffered(levels, nextI));
     for (var k = 0; k < levels.length; k++) {
       var L = levels[k];
       if (!L) continue;
       var i = num(L.i, k + 1);
+      if (!L.owned && !gateOpen) continue;
       var state = L.owned ? 'owned' : (i === nextI ? 'next' : 'locked');
       var short = makeLevelRow(L, i, state, cash);
       if (short) blocked = short;

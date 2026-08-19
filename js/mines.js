@@ -192,12 +192,12 @@
  *    rides to them for free, so a purchased level is not a shortcut: it is the
  *    only way to spend a whole tank WORKING a stratum instead of driving to it.
  *
- *    RE-CUT AS BANDS (ARCHITECTURE.md §7): level k IS layer k, each level is its
- *    own map, and LEVEL 1 IS FREE — it comes with the mining rights. The layer
- *    table is still the price list and every price is unchanged; only the index
- *    moved, because band i>=2 opens the stratum old level i-1 opened. Levels
- *    also carry a WIDTH now (widthU, see WIDTH_BASE): deeper is bigger, and the
- *    size is part of what the purchase buys. levelsOf() prices each one at
+ *    RE-CUT AS ENDLESS MAPS (ARCHITECTURE.md §7): level k IS layer k, each level
+ *    is its own map, and LEVEL 1 IS FREE — it comes with the mining rights. A
+ *    level map is now UNBOUNDED east, west and south; the only wall in the game
+ *    is the bedrock ceiling just north of that level's lift. So a level no longer
+ *    has a width or a bottom to sell — what it sells is a BETTER TABLE, and that
+ *    is what design note 4e is about. levelsOf() prices each one at
  *
  *        LEVEL_K x refHold(mine) x rateOfLayer(stratum) x LEVEL_GROWTH^(i-1)
  *
@@ -217,11 +217,83 @@
  *    (design note 4's own assumption, read straight off js/rig.js rather than
  *    copied), so the ladder tracks the workshop instead of drifting from it.
  *
- *    MEASURED, at 48 units of hold and Old Creek's own rates: the two Old Creek
- *    levels cost $200 and $380, and a hold worked out of the deeper one grosses
- *    ~$570 — so a company that buys both is inside Red Ridge's $1 600 of rights
- *    after three or four runs, which is the ladder the brief asks for. Every
- *    mine's table is in audit() under `levels`; re-read it after any retune.
+ *    Every mine's table is in audit() under `levels`; re-read it after any
+ *    retune.
+ *
+ * 4f. ...AND WHY THE STARTER MINE IS PRICED BY A DIFFERENT QUESTION
+ *
+ *    The equation above prices a rung against the rock it OPENS. That is right
+ *    for a catalogue you shop across and wrong for the one mine a new company
+ *    learns the loop in, because it says nothing about how long the player has
+ *    to WORK for the rung. Measured on Old Creek under LEVEL_K alone: L2 cost
+ *    $510 against a full L1 hold worth $570 — one haul, and the ladder that is
+ *    supposed to BE the progression was over before it registered as one.
+ *
+ *    So a mine may state `levelPriceHolds: n` and be priced in the unit the
+ *    player actually feels — HAULS out of the level above:
+ *
+ *        price(level i) = n x refHold x rateEffective(level i-1)
+ *
+ *    Old Creek states 3. At 48 units of hold and its own balanced tables that
+ *    is $0 / $1 700 / $3 800 against full hauls of $570 / $1 255 / $3 582, so
+ *    every rung is three good hauls of exactly where the player is standing.
+ *    NOTHING ELSE IN THE CATALOGUE STATES IT and every other mine's price list
+ *    is unchanged to the dollar — this is an override, not a new default. See
+ *    the LEVEL_PRICE_HOLDS_MIN block for why the two questions must not be
+ *    merged, and js/adv.js's GATING note for the rule that decides when the
+ *    price is allowed to be on screen at all.
+ *
+ * 4e. PER-LEVEL SPAWN TABLES — THE OWNER'S PROGRESSION AXIS
+ *
+ *    >> OWNER'S RULE, VERBATIM: "the spawn percentage stays fixed in level 1 —
+ *    >> well maybe it gets a little better as you drill south. But in the end,
+ *    >> for better hauls you have to BUY lower levels in the lift and move on
+ *    >> from there."
+ *
+ *    So there are two axes and they are deliberately not the same size:
+ *
+ *      BETWEEN LEVELS — the real one. Each level owns a FIXED ore table
+ *        (`spawn.levels[k].weights`). A deeper level is richer in both senses the
+ *        brief asks for: the cheap bulk shrinks as a share, and minerals that
+ *        simply do not exist higher up start appearing. Old Creek's ladder is
+ *        $11.04 -> $23.39 -> $55.92 per unit of hold, i.e. 2.1x then 2.4x. The
+ *        only way onto the next rung is the lift's price list.
+ *
+ *      WITHIN A LEVEL — a whisper. A level map is endless southward, so "dig
+ *        down forever in L1" must never become an alternative to buying L2. Each
+ *        material carries a `drift` coefficient in -1..+1.5 and its weight is
+ *        scaled by (1 + drift * g), where
+ *
+ *            g = min(SOUTH_DRIFT_CAP, metresSouthOfLift / 100 * SOUTH_PER_100M)
+ *
+ *        At SOUTH_PER_100M 0.030 and SOUTH_DRIFT_CAP 0.30 that is +3.0% of
+ *        relative share per 100 m for a drift-1 mineral, saturating 1000 m south
+ *        of the lift. MEASURED on Old Creek L1: $11.04/unit at the lift, $12.33
+ *        at the cap — ELEVEN PER CENT, against L2's 112% step. Ore DENSITY gets
+ *        the same treatment at half strength (DENSITY_DRIFT 0.5, so +15% pockets
+ *        at the cap), which is worth another ~15% of $/minute. Roughly +28% of
+ *        income for a thousand metres of driving nobody has to do, against a 2.1x
+ *        step for a purchase. That is the ratio the owner's rule asks for; if it
+ *        ever needs to be zero, set SOUTH_PER_100M to 0.
+ *
+ *    ANCIENT DEBRIS IS NOT IN THE ORE LOTTERY, AND THAT IS STRUCTURAL.
+ *    A pocket picks ONE material for the whole blob (js/advterrain.js's
+ *    gatherPockets), so an 'ancient' weight of even 0.05 would mean "one pocket
+ *    in two thousand is FORTY DEPOSITS of the richest material in the game" —
+ *    $80 000 out of the free starter mine, or nothing, decided by one hash. That
+ *    is not a rare find, it is a slot machine.
+ *
+ *    So it is its own structure family: a DEBRIS SCATTER, a handful of cells in a
+ *    tight cluster, priced per LEVEL through `debrisRate` (clusters per reference
+ *    band, the same unit pocketRate uses). Old Creek: 0.016 / 0.05 / 0.12 down
+ *    the three levels, which is roughly one find per 25 / 8 / 3 starter-scale
+ *    expeditions, at 2 / 3 / 4 deposits a cluster and $2 000 a deposit.
+ *
+ *    >> AND ON LEVEL 1 A STARTING RIG CANNOT CUT IT. Ancient is hardness 9.5
+ *    >> against the worn auger's cap of 8.5 (design note 2), so the first one a
+ *    >> company ever finds is a tease that sells the $1 000 tungsten bit. That is
+ *    >> deliberate and it is the most likely number in this file to want the
+ *    >> owner's opinion.
  *
  * 4d. RAILS — THE LATERAL TWIN OF THE LIFT
  *
@@ -435,26 +507,73 @@ SM.mines = (function () {
   var LEVEL_GROWTH = 1.5;
   var LEVEL_MIN = 50;        // a station is infrastructure; none of them is free
 
-  /* LEVEL WIDTH — "all levels big; deeper = bigger" (ARCHITECTURE.md §7).
+  /* --- THE HAUL-COUNTED LADDER, PER MINE (design note 4f) ---------------
+   * A mine may state `levelPriceHolds: n` and be priced by a completely
+   * different question: NOT "a fraction of the hold this level opens" but
+   * "how many full hauls out of the level ABOVE does the next one cost?"
    *
-   * A level is now its own MAP, realized as a bounded y-band, and its width is
-   * part of what the purchase buys. `widthU` is the FULL field width in world
-   * units for band i (1-based):
+   *     price(level i) = n x refHold x rateEffective(level i-1)
    *
-   *     widthU(i) = min(WIDTH_BASE + (i - 1) * WIDTH_STEP, WIDTH_MAX)
+   * WHY THIS EXISTS, AND WHY IT IS PER-MINE. The LEVEL_K ladder prices a rung
+   * against the rock it OPENS, which is the right question for a catalogue you
+   * shop across — a rich stratum is dear, a dead one is cheap, and the map reads
+   * honestly. It is the wrong question for the ONE mine a new company is
+   * learning the loop in, because it says nothing about how long the player must
+   * WORK to afford the rung. Measured on Old Creek before this landed: level 2
+   * cost $510 against a full L1 hold worth $570 — the first haul a player ever
+   * banks pays for the next level outright, so the ladder that is supposed to BE
+   * the progression is cleared before the player has understood there was one.
    *
-   * WIDTH_MAX is 5200 because that is 2 x ADV.MINE_HALF_WIDTH, and that number
-   * is not taste: js/particles.js's spatial hash wraps at 2944 units in x, so
-   * the LIVE window is clamped to 2800 and the mine's own width only costs mask
-   * bytes (ARCHITECTURE.md §6). The deepest mine in the catalogue has FIVE
-   * layers, so WIDTH_STEP 400 lands band 5 exactly on the ceiling — no mine can
-   * ask for a band the engine cannot hold.
+   * `levelPriceHolds` states the answer in the unit the player actually feels:
+   * HAULS. Old Creek states 3, so every rung costs three full holds of the level
+   * above it, and the number goes on meaning that if the spawn tables are ever
+   * retuned — which a hard-coded price list could not do.
    *
-   * BALANCE IS DEFERRED (owner's standing decision): these are tunables, and
-   * audit() prints the resulting table per mine under `levels`. */
-  var WIDTH_BASE = 3600;     // full width of band 1, in world units (360 m)
-  var WIDTH_STEP = 400;      // ...and this much wider per band down (40 m)
-  var WIDTH_MAX = 5200;      // 2 x ADV.MINE_HALF_WIDTH — the hash-safe ceiling
+   * IT IS AN OVERRIDE AND NOTHING ELSE. A mine that does not state it is priced
+   * exactly as it was; the six that do not are byte-identical (verified against
+   * the shipped tables). Do not promote this to a global default without
+   * re-pricing the whole catalogue against it — LEVEL_K and this are two
+   * different questions and the answers do not agree. */
+  var LEVEL_PRICE_HOLDS_MIN = 0;   // <= 0 on a mine = use the LEVEL_K ladder
+
+  /* LEVEL WIDTH IS GONE. A level map is UNBOUNDED east, west and south now
+   * (ARCHITECTURE.md §7), so there is no width to sell and no `widthU` to state.
+   * The entry keeps the key at 0 so a UI that still reads it prints nothing
+   * rather than a lie; `endless: true` is what a new UI should key off.
+   *
+   * WHAT REPLACED IT AS "what a level purchase buys" is design note 4e: a
+   * strictly better ore table. RATE_REF_WIDTH below is the one number the old
+   * width left behind, and it is NOT a bound — it is the width every shipped
+   * `pocketRate` / `cavernRate` was quoted against, kept so those numbers go on
+   * meaning exactly what they meant when they were measured. */
+  var RATE_REF_WIDTH = 5200; // the width "per generated band" was measured at
+
+  /* --- THE SOUTHWARD WHISPER (design note 4e) -------------------------
+   * Within one endless level map, richness drifts UP as you drill south, by a
+   * deliberately tiny amount. Set SOUTH_PER_100M to 0 to switch it off entirely;
+   * raise SOUTH_DRIFT_CAP to let it run further before it plateaus.
+   *   g(metresSouth) = min(SOUTH_DRIFT_CAP, metresSouth / 100 * SOUTH_PER_100M)
+   *   weight_i      *= 1 + drift_i * g          (drift_i is per material)
+   *   oreDensity    *= 1 + DENSITY_DRIFT * g
+   * At these values g saturates 1000 m south of the lift and is worth ~+12% on
+   * Old Creek L1's dollars-per-unit and ~+15% on its ore density. */
+  var SOUTH_PER_100M = 0.030;
+  var SOUTH_DRIFT_CAP = 0.30;
+  var DENSITY_DRIFT = 0.50;
+
+  /* ANCIENT DEBRIS — the headline rare find (design note 4e). Its own structure
+   * family in js/advterrain.js, never an ore-lottery weight. `debrisRate` is per
+   * level and is quoted in the same unit as pocketRate: expected clusters per
+   * reference band (BAND_HEIGHT tall x RATE_REF_WIDTH wide). */
+  var DEBRIS_MAT = 'ancient';
+  /* Derivation for a mine with no authored spawn block: a layer that named
+   * `ancient` in its ore weights gets that share converted into a cluster rate
+   * instead, so the old catalogue keeps its ancient formations without ever
+   * rolling a forty-deposit pocket of them. Capped, because two of the shipped
+   * layers name it heavily. */
+  var DEBRIS_FROM_WEIGHT = 6.0;
+  var DEBRIS_RATE_MAX = 0.60;
+
   /* Fallback reference hold per mine, index-aligned with LIST, for a build where
    * js/rig.js has not landed. These ARE the current cargo tiers (48/96/192/384/
    * 384/768/1536) at the drill tier each mine's recDrill names — refHoldOf()
@@ -598,6 +717,89 @@ SM.mines = (function () {
         blurb: 'A worked-out family claim in the creek bed. Shallow, soft, ' +
                'and picked over twice already — but the coal is still there ' +
                'and nobody charges you to take it.',
+        /* THREE FULL HAULS PER RUNG (design note 4f). Old Creek is the only
+         * mine that states this, because it is the only one where the LEVEL_K
+         * ladder was pricing the tutorial wrong: L2 came out at $510 against a
+         * full L1 hold worth $570, so the first haul a new company ever banked
+         * bought the next level outright and the progression the lift IS never
+         * happened. Three is the number the loop wants — long enough that a rung
+         * is a small campaign, short enough that it never becomes a grind.
+         *
+         * MEASURED, at refHold 48 and this mine's own balanced tables:
+         *   L1  free (comes with the rights)   full hold $570
+         *   L2  $1 700   = 3 x $570            full hold $1 255
+         *   L3  $3 800   = 3 x $1 255          full hold $3 582
+         * Re-read those with SM.mines.levelEconomyOf('old_creek', k) after any
+         * retune of the spawn ladder above; the price follows it automatically. */
+        levelPriceHolds: 3,
+        /* ===============================================================
+         * THE ONE BALANCED SPAWN LADDER IN THE CATALOGUE (design note 4e).
+         *
+         * Old Creek is the mine every company starts in and the only one the
+         * owner asked to have tuned, so it is the only one that states its own
+         * `spawn`. Every other mine derives one from its layer table (see
+         * deriveSpawn), which reproduces exactly what it generated before.
+         *
+         * READ THE TABLE AS SHARES, NOT AS WEIGHTS. What matters is the
+         * dollars-per-unit-of-hold each row produces and how far apart the three
+         * rungs are, because that spread IS the reason to buy a level:
+         *
+         *   L1 TOPSOIL      $11.04/unit   coal 62.9  copper 24.7  iron 10.1
+         *                                 silver 2.25
+         *   L2 CREEK GRAVEL $23.39/unit   coal 26.5  copper 29.1  iron 23.8
+         *                                 silver 15.9  GOLD 4.64
+         *   L3 OLD WORKINGS $55.92/unit   coal  6.3  copper 15.6  iron 23.4
+         *                                 silver 32.8  gold 17.2  EMERALD 4.69
+         *
+         * 2.12x then 2.39x, and each rung introduces a mineral the one above it
+         * does not have at all. VALUE TRACKS SCARCITY all the way down: coal is
+         * the commonest and the cheapest per unit ($7), emerald the rarest and
+         * the dearest of the ordinary table ($240), and ancient debris — which is
+         * not in this table at all — is rarer than any of them and worth $2 000.
+         *
+         * `drift` is the southward whisper. Negative for the bulk you want to
+         * stop finding, positive for the money. See design note 4e for the
+         * measured size of it (+11% of $/unit across a thousand metres).
+         * ============================================================ */
+        spawn: {
+          levels: [
+            { weights: { coal: 56, copper: 22, iron: 9, silver: 2.0 },
+              drift:   { coal: -1.0, copper: -0.4, iron: 0.2, silver: 0.8 },
+              /* One cluster per ~29 million square units of rock, which is about
+               * one find per 25 starter-scale expeditions. Two deposits a
+               * cluster, $2 000 each: a $4 000 event in a mine whose ordinary run
+               * grosses ~$530, and one a worn auger cannot cut. */
+              debrisRate: 0.016, debrisCells: 2,
+              lode: 'silver', lodeRate: 0.020, lodeUplift: 1.075 },
+            { weights: { coal: 20, copper: 22, iron: 18, silver: 12, gold: 3.5 },
+              drift:   { coal: -1.0, copper: -0.5, iron: 0.0, silver: 0.6,
+                         gold: 1.1 },
+              debrisRate: 0.050, debrisCells: 3,
+              lode: 'gold', lodeRate: 0.026, lodeUplift: 1.118 },
+            { weights: { coal: 4, copper: 10, iron: 15, silver: 21, gold: 11,
+                         gem: 3.0 },
+              drift:   { coal: -1.0, copper: -0.8, iron: -0.3, silver: 0.3,
+                         gold: 0.9, gem: 1.3 },
+              debrisRate: 0.120, debrisCells: 4,
+              /* MEASURED, AND THE ONE NUMBER THIS MINE HAD TO STATE FOR ITSELF.
+               * js/advterrain.js's default lodeRate ladder is
+               * (f - 0.55) / 0.45 * 0.42 over the layer index, which puts 0.42 on
+               * the DEEPEST layer of every mine — written for a world where you
+               * descended through all of them in one run and the bottom was
+               * supposed to be spectacular. A level is its own endless map now, so
+               * 0.42 means a motherlode every 6.3 million square units FOREVER:
+               * counted, that made emerald 33.8% of Old Creek L3's ore against a
+               * table share of 4.7%, and doubled the level's dollars-per-unit
+               * against the price it is sold at. A headline formation has to be
+               * rare enough to be a landmark, so all three levels state their own,
+               * rising with depth: roughly one rolled lode per 132 / 102 / 78
+               * million square units, on top of the guaranteed one below the lift
+               * that every player finds on their first run down. advterrain's own
+               * default ladder moved with them, for the six mines that do not
+               * state one. */
+              lode: 'gem', lodeRate: 0.034, lodeUplift: 1.335 }
+          ]
+        },
         layers: [
           { toDepth: 135, name: 'Topsoil', fill: 'dirt',
             weights: { coal: 5, clay: 3, copper: 1 },
@@ -1117,23 +1319,226 @@ SM.mines = (function () {
     return f > 0 ? f : 48;
   }
 
-  /** Full field width, in world units, of band `i` (1-based). */
-  function widthOfLevel(i) {
-    var w = WIDTH_BASE + ((i > 1 ? i : 1) - 1) * WIDTH_STEP;
-    return w > WIDTH_MAX ? WIDTH_MAX : w;
+  /* =====================================================================
+   * PER-LEVEL SPAWN TABLES (design note 4e)
+   * ------------------------------------------------------------------
+   * ONE RESOLVED RECORD PER LEVEL, cached on the mine, handed to
+   * js/advterrain.js as the complete description of what that endless map
+   * generates. It is the only thing a level purchase changes about the world,
+   * so it is the only thing this section has to get right.
+   *
+   * A mine may state its own `spawn.levels[]`; Old Creek does and nothing else
+   * does. Everything absent is derived from the layer table so an unauthored
+   * mine generates exactly what it generated before the levels were re-cut.
+   * ================================================================== */
+
+  var EMPTY_SPAWN = [];
+
+  /** The layer a level opens. Level k is layer k-1, clamped. */
+  function layerOfLevel(mineOrId, i) {
+    var m = coerce(mineOrId);
+    if (!m || !m.layers.length) return null;
+    var j = Math.floor(i) - 1;
+    if (!(j >= 0)) j = 0;
+    if (j >= m.layers.length) j = m.layers.length - 1;
+    return m.layers[j];
   }
 
   /**
-   * THE LEVELS OF A MINE, RE-CUT AS BANDS (ARCHITECTURE.md §7).
+   * Weight -> drift coefficient, for a mine that did not author one. Ordered by
+   * dollars per DEPOSIT, so the cheapest thing in the table drifts out (-1) and
+   * the dearest drifts in (+1) as the player works south. Spoil never drifts:
+   * it is not why anyone is down there.
+   */
+  function deriveDrift(weights) {
+    var ids = [], id, i;
+    for (id in weights) {
+      if (!weights.hasOwnProperty(id)) continue;
+      if (!(volumeOf(id) > 0)) continue;
+      ids.push(id);
+    }
+    ids.sort(function (a, b) { return depositValue(a) - depositValue(b); });
+    var out = {};
+    for (i = 0; i < ids.length; i++) {
+      out[ids[i]] = (ids.length < 2) ? 0 : (-1 + 2 * (i / (ids.length - 1)));
+    }
+    return out;
+  }
+
+  /**
+   * The best ore in a table worth calling a motherlode. Deliberately IGNORES
+   * anything under MIN_LODE_SHARE of the table: a lode is the formation the mine
+   * is famous for, and picking the rarest trace mineral in the lottery would put
+   * a chamber of something you meet twice a campaign on every level.
+   */
+  var MIN_LODE_SHARE = 0.02;
+  function bestLodeIn(weights) {
+    var id, tot = 0, best = null, bv = -1;
+    for (id in weights) {
+      if (weights.hasOwnProperty(id)) tot += weights[id];
+    }
+    if (!(tot > 0)) return null;
+    for (id in weights) {
+      if (!weights.hasOwnProperty(id)) continue;
+      if (weights[id] / tot < MIN_LODE_SHARE) continue;
+      var v = depositValue(id);
+      if (v > bv) { bv = v; best = id; }
+    }
+    return best;
+  }
+
+  /**
+   * Resolve level `i`'s spawn record. Authored fields win; everything else comes
+   * off the layer, which is what keeps the six unbalanced mines generating what
+   * they always generated.
+   */
+  function deriveSpawn(m, i) {
+    var L = layerOfLevel(m, i);
+    if (!L) return null;
+    var authored = (m.spawn && m.spawn.levels && m.spawn.levels[i - 1])
+      ? m.spawn.levels[i - 1] : null;
+
+    /* THE ORE TABLE. Authored, or the layer's own weights with `ancient` lifted
+     * out of the lottery — see design note 4e for why an ancient WEIGHT is a
+     * forty-deposit jackpot rather than a rare find. */
+    var w = {}, id, ancientShare = 0, tot = 0;
+    var src = (authored && authored.weights) ? authored.weights : L.weights;
+    for (id in src) {
+      if (!src.hasOwnProperty(id)) continue;
+      if (!(src[id] > 0)) continue;
+      tot += src[id];
+      if (id === DEBRIS_MAT) { ancientShare += src[id]; continue; }
+      w[resolve(id)] = (w[resolve(id)] || 0) + src[id];
+    }
+    ancientShare = tot > 0 ? ancientShare / tot : 0;
+
+    var drift = (authored && authored.drift) ? authored.drift : deriveDrift(w);
+
+    var debris = authored && typeof authored.debrisRate === 'number'
+      ? authored.debrisRate
+      : Math.min(DEBRIS_RATE_MAX, ancientShare * DEBRIS_FROM_WEIGHT);
+
+    return {
+      i: i,
+      name: L.name,
+      layerIndex: L.index,
+      /* --- the country rock: straight off the layer, unchanged ---------- */
+      fill: L.fill,
+      beds: L.beds || null,
+      bedPitch: L.bedPitch || 0,
+      hardnessScale: L.hardnessScale || 1,
+      heat: L.heat || 0,
+      vugChance: (typeof L.vugChance === 'number') ? L.vugChance : -1,
+      /* --- structure rates, in "per generated band" units --------------- */
+      pocketRate: (typeof L.pocketRate === 'number') ? L.pocketRate : -1,
+      cavernRate: (typeof L.cavernRate === 'number') ? L.cavernRate : -1,
+      seamRate: (typeof L.seamRate === 'number') ? L.seamRate : -1,
+      driftRate: (typeof L.driftRate === 'number') ? L.driftRate : -1,
+      lodeRate: (typeof L.lodeRate === 'number') ? L.lodeRate : -1,
+      /* --- the ore lottery and its southward whisper -------------------- */
+      weights: w,
+      drift: drift,
+      /* --- the headline formations -------------------------------------- */
+      lode: (authored && authored.lode) ? resolve(authored.lode)
+                                        : (L.lode ? resolve(L.lode)
+                                                  : bestLodeIn(w)),
+      debrisMat: resolve(DEBRIS_MAT),
+      debrisRate: debris,
+      /* HOW MUCH THE MOTHERLODES ADD ON TOP OF THE LOTTERY, MEASURED.
+       *
+       * The ore table above describes pockets, seams and cavern linings. It does
+       * NOT describe the level's headline formation: a motherlode paints about
+       * 2 100 cells of its own mineral between its shell and its halo, and none
+       * of that goes through the lottery. So the rock a player actually fills a
+       * hold from is worth MORE than rateOfWeights() says, by an amount that
+       * depends on how rich the lode's mineral is relative to the table.
+       *
+       * These three are COUNTED, not derived — the analytic version needs the
+       * halo's area integral and was wrong by 4x when it was tried. Re-measure
+       * with SM.advterrain.sampleSpawn(20, 500, 44000) on each level and divide
+       * the generated dollars-per-unit by rateAtLift. 1.0 for a mine nobody has
+       * measured, which is the honest answer for the six that are not balanced. */
+      lodeUplift: (authored && authored.lodeUplift > 0) ? authored.lodeUplift : 1,
+      debrisCells: (authored && authored.debrisCells > 0)
+        ? authored.debrisCells : (2 + i),
+      /* --- what the whole thing is worth, at the lift -------------------- */
+      rate: rateOfWeights(w)
+    };
+  }
+
+  /**
+   * LIVE, cached array of every level's spawn record for a mine, level 1 first.
+   * js/advterrain.js holds the entry for the active level for a whole run, so
+   * this must not reallocate once warm.
+   */
+  function spawnTableOf(mineOrId) {
+    var m = coerce(mineOrId);
+    if (!m || !m.layers || !m.layers.length) return EMPTY_SPAWN;
+    if (m.spawnTable) return m.spawnTable;
+    var out = [];
+    for (var i = 1; i <= m.layers.length; i++) out.push(deriveSpawn(m, i));
+    m.spawnTable = out;
+    return out;
+  }
+
+  /** One level's spawn record (1-based), or null. */
+  function levelSpawnOf(mineOrId, i) {
+    var t = spawnTableOf(mineOrId);
+    var k = Math.floor(i);
+    if (!(k >= 1)) k = 1;
+    if (k > t.length) k = t.length;
+    return t.length ? t[k - 1] : null;
+  }
+
+  /**
+   * The southward whisper's three coefficients, as one REUSED object.
+   * js/advterrain.js reads them once per level and bakes the buckets, so this is
+   * not a hot path — it is a single source of truth for a number that would
+   * otherwise be written down twice.
+   */
+  var driftOut = { per100M: 0, cap: 0, density: 0, fullM: 0 };
+  function getSouthDrift() {
+    driftOut.per100M = SOUTH_PER_100M;
+    driftOut.cap = SOUTH_DRIFT_CAP;
+    driftOut.density = DENSITY_DRIFT;
+    driftOut.fullM = SOUTH_PER_100M > 0
+      ? (SOUTH_DRIFT_CAP / SOUTH_PER_100M) * 100 : 0;
+    return driftOut;
+  }
+
+  /** g(metres south of this level's lift), 0..SOUTH_DRIFT_CAP. */
+  function southDriftAt(metresSouth) {
+    if (!(metresSouth > 0) || !(SOUTH_PER_100M > 0)) return 0;
+    var g = (metresSouth / 100) * SOUTH_PER_100M;
+    return g > SOUTH_DRIFT_CAP ? SOUTH_DRIFT_CAP : g;
+  }
+
+  /** The ore weights of a level, drifted by `g`. Writes into `out`; -> out. */
+  function driftedWeights(sp, g, out) {
+    var id, d;
+    for (id in out) { if (out.hasOwnProperty(id)) delete out[id]; }
+    if (!sp) return out;
+    for (id in sp.weights) {
+      if (!sp.weights.hasOwnProperty(id)) continue;
+      d = (typeof sp.drift[id] === 'number') ? sp.drift[id] : 0;
+      var w = sp.weights[id] * (1 + d * g);
+      out[id] = w > 0 ? w : 0;
+    }
+    return out;
+  }
+
+  /**
+   * THE LEVELS OF A MINE, RE-CUT AS ENDLESS MAPS (ARCHITECTURE.md §7).
    *
-   * A level is ITS OWN MAP now, not a station on one long shaft, and level k IS
-   * geological layer k — so this enumerates every layer, shallowest first, and
-   * entry k is level k+1:
+   * A level is ITS OWN MAP now, not a station on one long shaft and not a band
+   * either — it runs east, west and south without limit, and the only wall is
+   * the bedrock ceiling above its lift. Level k IS geological layer k, so this
+   * enumerates every layer, shallowest first, and entry k is level k+1:
    *
-   *     [{ i: 3, name: 'Silver Veins', depthTopM: 270, depthBotM: 690,
-   *        price: 7800, widthU: 4400, layerIndex: 2, rate: 60.4 }, ...]
+   *     [{ i: 3, name: 'Silver Veins', depthTopM: 270, depthBotM: 270,
+   *        price: 7800, endless: true, widthU: 0, layerIndex: 2, rate: 60.4 }]
    *
-   * TWO THINGS CHANGED FROM THE SHAFT ERA, AND ONLY TWO.
+   * THREE THINGS TO KNOW ABOUT THE ENTRY SHAPE.
    *
    *   LEVEL 1 IS IN THE TABLE, AT PRICE 0. It is the first layer and it comes
    *   with the mining rights (there is no surface entry any more — the surface
@@ -1141,16 +1546,19 @@ SM.mines = (function () {
    *   owned" a fact about the catalogue rather than a rule every caller has to
    *   remember, and js/adv.js's ownership count is anchored on it.
    *
-   *   EVERY PRICE CARRIES OVER UNCHANGED. Band i>=2 opens layer i-1 (0-based),
-   *   which is exactly the stratum the old level i-1 opened, and the growth
-   *   exponent (i-2) is exactly the old `out.length`. So the ladder a company
-   *   already paid for costs what it always cost, and design note 4c's measured
-   *   numbers still hold — the indices moved, the economy did not.
+   *   `depthTopM` IS THE LIFT'S DEPTH and it is the only depth a level has. The
+   *   map runs south from it forever, so `depthBotM` is written EQUAL to it and
+   *   `endless` is true; the two HUD readouts that print "top-bottom m" collapse
+   *   to a single depth on their own when they are equal, which is why the key
+   *   is kept rather than removed. `widthU` is 0 for the same reason — a level
+   *   has no width to sell any more (design note 4e says what it sells instead).
    *
-   * `depthTopM`/`depthBotM` are the BAND, which is what advterrain clamps
-   * streaming to and what vehicle.js clamps position to. `depthM` is kept as an
-   * alias of `depthTopM` because it is the number every screen was already
-   * printing ("the depth of this level") and half the consumers read it.
+   *   EVERY PRICE CARRIES OVER, but it is now priced against the level's own
+   *   SPAWN TABLE (design note 4e) rather than its layer's ore weights. For every
+   *   mine except Old Creek those are the same numbers, so nothing moved; Old
+   *   Creek is priced by design note 4f's per-mine `levelPriceHolds` override
+   *   instead — three full hauls of the level above, $0 / $1 700 / $3 800 — and
+   *   is the only entry in the catalogue that states it.
    *
    * LIVE array, cached on the mine: js/adv.js holds the reference and walks it,
    * so this must not allocate once warm. Cached LAZILY rather than in init(),
@@ -1162,13 +1570,30 @@ SM.mines = (function () {
     if (m.levelTable) return m.levelTable;
 
     var hold = refHoldOf(m);
-    var out = [], j, L, i, rate, price;
+    /* HAULS PER RUNG, if this mine states one — see the LEVEL_PRICE_HOLDS_MIN
+     * note above. Read once: it is a constant of the catalogue entry. */
+    var holds = (typeof m.levelPriceHolds === 'number' && m.levelPriceHolds > 0)
+      ? m.levelPriceHolds : LEVEL_PRICE_HOLDS_MIN;
+    var out = [], j, L, i, rate, price, sp, above;
     for (j = 0; j < m.layers.length; j++) {
       L = m.layers[j];
       i = j + 1;
-      rate = rateOfLayer(L);
+      sp = levelSpawnOf(m, i);
+      rate = sp ? sp.rate : rateOfLayer(L);
       if (j === 0) {
         price = 0;                       // L1 comes with the mining rights
+      } else if (holds > 0) {
+        /* PRICED IN HAULS OF THE LEVEL ABOVE. `rateEffective` (the ore table
+         * TIMES the motherlode uplift) is what a hold out of that level is
+         * really worth — the same number levelEconomyOf() reports — so this is
+         * literally "n full hauls out of where you are standing". Level i's
+         * predecessor is level i-1, which is index j-1 in the layer table and
+         * therefore levelSpawnOf(m, j). */
+        above = levelSpawnOf(m, j);
+        price = above
+          ? niceMoney(holds * hold * above.rate * above.lodeUplift)
+          : niceMoney(LEVEL_K * hold * rate * Math.pow(LEVEL_GROWTH, j - 1));
+        if (price < LEVEL_MIN) price = LEVEL_MIN;
       } else {
         price = niceMoney(LEVEL_K * hold * rate * Math.pow(LEVEL_GROWTH, j - 1));
         if (price < LEVEL_MIN) price = LEVEL_MIN;
@@ -1177,18 +1602,116 @@ SM.mines = (function () {
         i: i,
         name: L.name,
         depthTopM: L.fromDepth,
-        depthBotM: L.toDepth,
+        /* EQUAL TO THE TOP, DELIBERATELY: an endless map has no bottom, and the
+         * two consumers that print a band render "top-bot" only when bot > top. */
+        depthBotM: L.fromDepth,
+        endless: true,
         price: price,
-        widthU: widthOfLevel(i),
-        /* Alias: the one depth a UI quotes for a level is where it starts. */
+        widthU: 0,                       // see the note above
+        /* Alias: the one depth a UI quotes for a level is where its lift is. */
         depthM: L.fromDepth,
         /* Extras, for the map card and for audit(): which stratum this is and
-         * what a unit of hold out of it is worth. */
+         * what a unit of hold out of it is worth AT THE LIFT. */
         layerIndex: j,
         rate: Math.round(rate * 10) / 10
       });
     }
     m.levelTable = out;
+    return out;
+  }
+
+  /* =====================================================================
+   * WHAT A LEVEL IS WORTH — the data the pricing pass needs
+   * ------------------------------------------------------------------
+   * >> BUILT FOR THE NEXT AGENT. Nothing in the game calls this; it exists so
+   * >> that "what should level 3 cost" can be answered from measurements rather
+   * >> than from a growth exponent. Allocates: it is a tool, not a hot path.
+   * ================================================================== */
+
+  /**
+   * The expected economics of one level of one mine.
+   *
+   *   rateAtLift    dollars per unit of hold, working the ore at the lift
+   *   rateAtCap     ...and at the southward whisper's plateau (design note 4e)
+   *   holdAtLift    one full reference hold of it, in dollars
+   *   share         [{id, pct, unit, perDeposit}] the ore lottery as PERCENTAGES,
+   *                 richest last — this is the table the owner asked to see
+   *   debris        {rate, cells, perFind, expedM2PerFind} the ancient staging
+   *   stepFromAbove how many times richer this level is than the one above it
+   */
+  function levelEconomyOf(mineOrId, i) {
+    var m = coerce(mineOrId);
+    if (!m) return null;
+    var sp = levelSpawnOf(m, i);
+    if (!sp) return null;
+    var lv = levelsOf(m);
+    var e = lv[sp.i - 1];
+    var hold = refHoldOf(m);
+
+    var capW = {};
+    driftedWeights(sp, SOUTH_DRIFT_CAP, capW);
+
+    var tot = 0, id;
+    for (id in sp.weights) { if (sp.weights.hasOwnProperty(id)) tot += sp.weights[id]; }
+    var share = [];
+    for (id in sp.weights) {
+      if (!sp.weights.hasOwnProperty(id)) continue;
+      share.push({
+        id: id,
+        pct: tot > 0 ? Math.round(sp.weights[id] / tot * 10000) / 100 : 0,
+        unit: priceOf(id),
+        volume: volumeOf(id),
+        perDeposit: depositValue(id)
+      });
+    }
+    share.sort(function (a, b) { return a.perDeposit - b.perDeposit; });
+
+    var prev = (sp.i > 1) ? levelSpawnOf(m, sp.i - 1) : null;
+    /* One reference band is BAND_HEIGHT tall and RATE_REF_WIDTH wide; a
+     * `debrisRate` of r means r clusters in one of those, so a find costs
+     * (area / r) square units of rock swept. */
+    var bandArea = SM.config.BAND_HEIGHT * RATE_REF_WIDTH;
+
+    return {
+      i: sp.i,
+      name: sp.name,
+      price: e ? e.price : 0,
+      depthM: e ? e.depthTopM : 0,
+      refHold: hold,
+      rateAtLift: Math.round(sp.rate * 100) / 100,
+      rateAtCap: Math.round(rateOfWeights(capW) * 100) / 100,
+      /* WHAT THE ROCK IS ACTUALLY WORTH, motherlodes included. This is the
+       * number to price a level against; `rateAtLift` is the ore table alone.
+       * See `lodeUplift` in deriveSpawn() for where the multiplier comes from. */
+      rateEffective: Math.round(sp.rate * sp.lodeUplift * 100) / 100,
+      lodeUplift: sp.lodeUplift,
+      holdAtLift: Math.round(hold * sp.rate),
+      holdAtCap: Math.round(hold * rateOfWeights(capW)),
+      holdEffective: Math.round(hold * sp.rate * sp.lodeUplift),
+      stepFromAbove: (prev && prev.rate > 0)
+        ? Math.round(sp.rate / prev.rate * 100) / 100 : 0,
+      share: share,
+      lode: sp.lode,
+      debris: {
+        mat: sp.debrisMat,
+        rate: sp.debrisRate,
+        cells: sp.debrisCells,
+        perFind: Math.round(sp.debrisCells * priceOf(sp.debrisMat) *
+                            (volumeOf(sp.debrisMat) || 1)),
+        areaPerFind: sp.debrisRate > 0 ? Math.round(bandArea / sp.debrisRate) : 0
+      },
+      pocketRate: sp.pocketRate,
+      heat: sp.heat,
+      hardnessScale: sp.hardnessScale
+    };
+  }
+
+  /** Every level of a mine, as levelEconomyOf() rows. A tool; allocates. */
+  function mineEconomyOf(mineOrId) {
+    var m = coerce(mineOrId);
+    if (!m) return [];
+    var out = [];
+    for (var i = 1; i <= m.layers.length; i++) out.push(levelEconomyOf(m, i));
     return out;
   }
 
@@ -1305,12 +1828,12 @@ SM.mines = (function () {
    * material that is four units per deposit contributes four units of the
    * average. This is the number that decides what a run is worth.
    */
-  function rateOfLayer(L) {
+  function rateOfWeights(weights) {
     var id, num = 0, den = 0, w, v;
-    if (!L) return 0;
-    for (id in L.weights) {
-      if (!L.weights.hasOwnProperty(id)) continue;
-      w = L.weights[id];
+    if (!weights) return 0;
+    for (id in weights) {
+      if (!weights.hasOwnProperty(id)) continue;
+      w = weights[id];
       v = volumeOf(id);
       if (v <= 0) continue;                 // spoil never enters the hold
       num += w * priceOf(id) * v;
@@ -1318,6 +1841,7 @@ SM.mines = (function () {
     }
     return den > 0 ? num / den : 0;
   }
+  function rateOfLayer(L) { return L ? rateOfWeights(L.weights) : 0; }
 
   /**
    * The advance-rate model from design note 1. `power` and `hardness` must be in
@@ -1399,6 +1923,10 @@ SM.mines = (function () {
         holdRun: Math.round(refHoldOf(m) *
                             rateOfLayer(m.layers[m.layers.length - 1])),
         levels: levelsOf(m),
+        /* THE SPAWN LADDER (design note 4e). One row per level: what it pays at
+         * its lift, what the southward whisper adds, and how big a step it is
+         * from the level above. This is the table a retune is checked against. */
+        spawn: mineEconomyOf(m),
         /* THE RAIL LADDER (design note 4d). `holds` is each checkpoint's price
          * expressed in FULL HOLDS of the stratum it stands in — the only unit
          * the 0.5-1.0 / 2-3 target can be read in, so it is printed rather than
@@ -1473,9 +2001,31 @@ SM.mines = (function () {
     levelsOf: levelsOf,
     levelPriceOf: levelPriceOf,
     levelCountOf: levelCountOf,
-    /* Full field width in world units of band i (1-based). The band entries
-     * carry it as `widthU`; this is for a caller that has only the index. */
-    levelWidthOf: widthOfLevel,
+    /* A level map has no width any more — it is endless east, west and south.
+     * Kept so a caller written against the band era gets 0 (which every consumer
+     * already reads as "say nothing") instead of a TypeError. */
+    levelWidthOf: function () { return 0; },
+    /* --- per-level spawn tables (design note 4e) -----------------------
+     * levelSpawnOf(mine, i)  the resolved record js/advterrain.js generates from:
+     *                        {weights, drift, pocketRate.., lode, debrisRate..}
+     * spawnTableOf(mine)     all of them, level 1 first. LIVE and cached.
+     * layerOfLevel(mine, i)  the stratum level i opens — the country rock of its
+     *                        WHOLE map, because a level is one stratum now
+     * getSouthDrift()        REUSED {per100M, cap, density, fullM}
+     * southDriftAt(m)        g at `m` metres south of a level's lift
+     * driftedWeights(sp,g,o) the ore table at that g, written into `o`
+     */
+    levelSpawnOf: levelSpawnOf,
+    spawnTableOf: spawnTableOf,
+    layerOfLevel: layerOfLevel,
+    getSouthDrift: getSouthDrift,
+    southDriftAt: southDriftAt,
+    driftedWeights: driftedWeights,
+    rateOfWeights: rateOfWeights,
+    /* --- pricing tools, for whoever revamps the lift's price list -------
+     * NOT called by the game. See levelEconomyOf() for the shape. */
+    levelEconomyOf: levelEconomyOf,
+    mineEconomyOf: mineEconomyOf,
     /* --- rails (design note 4d) ----------------------------------------
      * checkpointsOf(mine, L)  LIVE, cached [{k, outM, price}] for level L
      *                         (1-based, indexes levelsOf()). Empty for the

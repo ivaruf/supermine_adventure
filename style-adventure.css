@@ -2909,16 +2909,19 @@
  * top (which is the sale and the end of the run), then the stations the company
  * holds, then the one it can buy.
  *
- * THREE THINGS DECIDE WHERE IT GOES.
+ * TWO THINGS DECIDE WHERE IT GOES, and the third one that used to is gone.
  *
- * 1. IT MAY NOT COVER THE HOLD. The manifest is what the "ride up and sell"
- *    decision is weighed against, so hiding it behind the panel that offers the
- *    ride would be exactly backwards. The hold box is bottom-left and it GROWS
- *    UPWARD as minerals come aboard, so the clearance cannot be a fixed number
- *    and it cannot be measured (advhud.js may not read layout). Instead
- *    refreshManifest() publishes the row count as --sm-ah-hold-rows on this
- *    element — a number it already had in hand — and `bottom` adds it up. 24px
- *    is one manifest row plus its gap (see .sm-ah-mrow in §7).
+ * 1. IT IS A PLACE, SO IT SITS IN THE MIDDLE. The machine is inside the cage
+ *    while this is up — hidden, parked, undriveable — so there is nothing
+ *    behind the panel worth seeing and no reason to squeeze it into a strip.
+ *    See the .sm-ah-lift rule for the full argument.
+ *
+ *    (IT USED TO DODGE THE HOLD. The manifest was what the "ride up and sell"
+ *    decision was weighed against, so the panel was pinned above the hold box by
+ *    adding a published row count to its `bottom`. Both reasons expired: the
+ *    panel no longer appears while driving, and SELL now states the hold's whole
+ *    worth on its own plate. --sm-ah-hold-rows and --sm-ah-hold-base went with
+ *    the rule, and so did the setVar() that fed them.)
  *
  * 2. IT MAY NOT EAT THE BANNER. CARGO FULL and the fuel reserve warning live in
  *    this same band, so while the panel is up the banner moves to just under the
@@ -2926,10 +2929,11 @@
  *    panel for exactly this — one class, two jobs, no measuring.
  *
  * 3. ONLY THE CONTROLS TAKE POINTERS. The container is pointer-events:none and
- *    the rows, BUY and the cross opt back in, so a drag that starts on the
- *    panel's own plate still reaches the stick layer (z-index 3) and drives.
- *    z-index 7 puts the buttons above that layer, so a tap that lands on a row
- *    is a row press and not a lurch sideways.
+ *    the rows, BUY, the plates and the cross opt back in. That mattered when a
+ *    drag on the panel had to reach the stick layer; it is kept because it still
+ *    costs nothing and still means a tap that lands between plates does nothing
+ *    rather than something. z-index 7 puts the buttons above the stick layer, so
+ *    a tap that lands on a row is a row press and not a lurch sideways.
  *
  * The panel is a SIBLING of .sm-ah in #ui-root, not a child, because in the wide
  * layout .sm-ah is a content-height column pinned top-left and an absolute child
@@ -2955,57 +2959,101 @@
 .sm-adv .sm-ah-lift { display: block; }
 .sm-adv .sm-ah-ride { display: flex; }
 
+/* ========================================================================
+   THE LIFT IS A PLACE, NOT A POPUP — and this rule is where that is decided.
+
+   IT USED TO BE A 340 px CARD hugging the bottom edge, clearing the hold box
+   by arithmetic, because it could appear while the player was merely NEAR the
+   doors and might want to carry on drilling around it. That is no longer true
+   of anything: the panel opens only when the machine is INSIDE the cage
+   (adv.isInLift()), where it is hidden, parked and undriveable. There is
+   nothing to drill around and nothing to see behind it — so the old card was
+   squeezing a room's worth of decisions into a strip for a reason that had
+   already been engineered away.
+
+   SO IT IS CENTRED AND IT IS BIG. Middle of the glass, up to 560 px wide, up
+   to 86% of the height, laid out as a column: the trade at the top, the ladder
+   in the middle taking whatever room is left, the way out at the bottom under
+   the thumb. The list is the only part that scrolls, so the two things a
+   player reaches for — the SELL number and RETURN TO MINE — never move.
+
+   THE SCRIM IS A BOX-SHADOW, not an element. A 100vmax spread paints the rest
+   of the window down without a second div to build, position, show and hide;
+   it costs one composited layer and it is what makes the panel read as
+   somewhere you ARE rather than something on top of where you were.
+   ==================================================================== */
 .sm-adv .sm-ah-lift {
   position: absolute;
   left: 50%;
-  bottom: 26px;
-  width: min(340px, calc(100% - var(--sm-gutter) * 2 - 4px));
-  padding: 7px 9px 8px;
-  border-radius: 5px;
+  top: 50%;
+  width: min(560px, calc(100% - var(--sm-gutter) * 2 - 4px));
+  max-height: min(86%, 760px);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px 13px;
+  border-radius: 6px;
   /* No backdrop blur, for the reason given in §3b: these plates sit over dark
      rock at DPR 3 and the blur is fill rate spent on an effect nobody sees. */
-  background: linear-gradient(180deg, rgba(9, 12, 17, 0.94), rgba(12, 16, 22, 0.88));
-  border: 1px solid rgba(255, 194, 31, 0.42);
+  /* Near-opaque: the HUD is dimmed behind this by the scrim below, but the hold
+     box reaches into the panel's top corner and 6% of a bright manifest row was
+     legible through it. */
+  background: linear-gradient(180deg, rgba(9, 12, 17, 0.99), rgba(12, 16, 22, 0.975));
+  border: 1px solid rgba(255, 194, 31, 0.46);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 10px 30px rgba(0, 0, 0, 0.62);
+    0 18px 50px rgba(0, 0, 0, 0.7),
+    0 0 0 100vmax rgba(3, 5, 8, 0.58);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateX(-50%) translateY(10px);
+  transform: translate(-50%, -50%) translateY(12px);
   transition: opacity 0.18s ease, transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 7;
 }
 .sm-adv .sm-ah-lift.sm-ah-lift-on {
   opacity: 1;
   visibility: visible;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
 }
 
 .sm-ah-lift-head {
+  flex: 0 0 auto;
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin-bottom: 6px;
-  padding-right: 26px;           /* clear of the cross */
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  padding-right: 30px;           /* clear of the cross */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+/* The head is the room's nameplate now, so it carries the weight a title has:
+   LIFT on the left, and where you are standing on the right, in gold. */
+.sm-ah-lift-head .sm-ah-lbl {
+  font-size: 10px;
+  letter-spacing: 2.6px;
+  color: var(--sm-gold);
 }
 .sm-ah-lift-where {
   margin-left: auto;
   font-family: var(--sm-mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 1.6px;
-  color: var(--sm-gold);
+  color: var(--sm-text);
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 /* THE CROSS. The panel is an offer, not a mode: a player parked at a station may
    simply want to keep drilling, and driving off the platform also dismisses it. */
 .sm-ah-lift-close {
   position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 28px;
-  height: 28px;
+  top: 7px;
+  right: 7px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3020,12 +3068,26 @@
 .sm-ah-lift-close svg { display: block; width: 13px; height: 13px; }
 .sm-ah-lift-close:hover { color: var(--sm-text); background: rgba(255, 255, 255, 0.07); }
 
-.sm-ah-lift-list { display: flex; flex-direction: column; gap: 3px; }
+/* THE LADDER TAKES WHAT IS LEFT, AND IT IS THE ONLY THING THAT SCROLLS.
+   A mine sells up to five levels and a phone in landscape is short, so the list
+   is the give in the column — the trade plates above and the call to action
+   below keep their positions whatever the list does, which is what stops the
+   two most-tapped controls in the panel from moving under the thumb. */
+.sm-ah-lift-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: auto;
+}
 
 .sm-ah-liftrow {
   display: flex;
   align-items: stretch;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
 }
 /* The ride target. Same negotiation as everything else in this stylesheet: the
@@ -3037,9 +3099,9 @@
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  padding: 0 8px;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 11px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-left: 3px solid rgba(126, 140, 158, 0.35);
   border-radius: 2px;
@@ -3069,27 +3131,31 @@
   box-shadow: 0 0 6px rgba(90, 226, 140, 0.5);
 }
 .sm-ah-liftname {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 800;
-  letter-spacing: 1.3px;
+  letter-spacing: 1.4px;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* ONE DEPTH, NOT A BAND. A level map is endless south (ARCHITECTURE.md §7), so
+   this is where its lift sits and nothing else — "0 m", "135 m", "300 m". It is
+   deliberately quiet: the NAME is what identifies a level and the depth is the
+   supporting fact, not the headline. */
 .sm-ah-liftdep {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   color: var(--sm-dim);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .sm-ah-lifttag {
-  font-size: 8.5px;
+  font-size: 9.5px;
   font-weight: 800;
   letter-spacing: 1.2px;
   color: var(--sm-dimmer);
-  min-width: 34px;
+  min-width: 44px;
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -3135,15 +3201,15 @@
    family — and the label stays BUY whatever happens. */
 .sm-ah-liftbuy {
   flex: 0 0 auto;
-  min-width: 54px;
-  min-height: 30px;
-  padding: 0 10px;
+  min-width: 68px;
+  min-height: 40px;
+  padding: 0 14px;
   border-radius: 2px;
   border: 1px solid rgba(255, 240, 168, 0.6);
   background: linear-gradient(180deg, #ffd979, var(--sm-gold) 45%, #c98a06 100%);
   color: #150b02;
   font-family: var(--sm-mono);
-  font-size: 8.5px;
+  font-size: 9.5px;
   font-weight: 800;
   letter-spacing: 1.6px;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
@@ -3188,44 +3254,47 @@
    pointer-events:none so a drag that starts on its background still reaches the
    stick layer and drives (see the panel's own note above).
    ==================================================================== */
+/* THE TRADE. Two plates, half the panel each, and they are the biggest type in
+   here on purpose: standing in the lift the player is weighing ONE PAIR OF
+   NUMBERS — what the hold banks and what a tank costs — and everything else on
+   this panel is downstream of that answer. A grid rather than wrapping flex,
+   because there are exactly two and they must never reflow to a stack. */
 .sm-ah-door-acts {
-  /* FOUR PLATES, WRAPPING TO 2x2. A flex row with a 50%-minus-gap basis needs no
-     media query and no measuring: at the panel's 320-340 px it lays out as two
-     rows of two, which is the thumb-friendly shape, and it degrades gracefully if
-     a fifth verb is ever added. */
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 6px;
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
 }
-.sm-ah-doorbtn { flex: 1 1 calc(50% - 4px); }
 .sm-ah-doorbtn {
   min-width: 0;
-  min-height: 34px;
+  min-height: 40px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
-  padding: 3px 4px;
+  gap: 2px;
+  padding: 5px 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
+  border-radius: 3px;
   background: rgba(14, 18, 24, 0.86);
   font-family: var(--sm-mono);
   color: var(--sm-text);
   pointer-events: auto;
   cursor: pointer;
 }
+.sm-ah-door-acts .sm-ah-doorbtn { min-height: 62px; }
 .sm-ah-doorbtn:hover { background: rgba(30, 38, 48, 0.9); }
 .sm-ah-doorlbl {
-  font-size: 8.5px;
+  font-size: 9px;
   font-weight: 800;
-  letter-spacing: 1.4px;
+  letter-spacing: 1.8px;
+  color: var(--sm-dim);
   white-space: nowrap;
 }
 .sm-ah-doorval {
   max-width: 100%;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.6px;
   color: var(--sm-dim);
@@ -3234,19 +3303,99 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* THE NUMBER IS THE PLATE. On the two trade plates the value line is the thing
+   being read at a glance, so the hierarchy inverts: the label goes quiet and
+   small above it and the money is set at 20 px. */
+.sm-ah-door-acts .sm-ah-doorval {
+  font-size: 20px;
+  letter-spacing: 0.4px;
+  line-height: 1.15;
+}
 /* SELL is the loop's payday, so it wears the gold — the same plate family as
    BUY and DESCEND, at HUD scale. */
 .sm-ah-door-sell {
   border-color: rgba(255, 240, 168, 0.5);
   background: linear-gradient(180deg, rgba(94, 68, 8, 0.72), rgba(14, 18, 24, 0.86) 74%);
 }
-.sm-ah-door-sell .sm-ah-doorlbl { color: #fff3cf; }
+.sm-ah-door-sell .sm-ah-doorlbl { color: #e6cf95; }
 .sm-ah-door-sell .sm-ah-doorval { color: var(--sm-gold); }
 .sm-ah-door-fuel { border-color: rgba(90, 226, 140, 0.34); }
 .sm-ah-door-fuel .sm-ah-doorval { color: var(--sm-green); }
-.sm-ah-door-out { border-color: rgba(122, 214, 255, 0.34); }
-.sm-ah-door-out .sm-ah-doorval { color: var(--sm-cyan); }
-.sm-ah-door-map .sm-ah-doorval { color: var(--sm-dimmer); }
+
+/* ========================================================================
+   THE FOOT — THE CALL TO ACTION, AND THE WAY OUT
+   ------------------------------------------------------------------------
+   RETURN TO MINE gets two thirds of the width, the cyan the machine wears and
+   the lowest position in the panel, because it is what the player wants nine
+   times out of ten and because the bottom of a panel is where a thumb already
+   is. LEAVE gets the remaining third, no colour and no weight: it ends the
+   expedition, which is the rare choice, and it still takes two taps.
+   ==================================================================== */
+.sm-ah-door-foot {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+.sm-ah-door-return {
+  min-height: 54px;
+  border-color: rgba(122, 214, 255, 0.6);
+  background: linear-gradient(180deg, rgba(18, 62, 82, 0.92), rgba(12, 26, 36, 0.9) 78%);
+}
+.sm-ah-door-return .sm-ah-doorlbl {
+  font-size: 13px;
+  letter-spacing: 2.6px;
+  color: #dff4ff;
+}
+.sm-ah-door-return .sm-ah-doorval {
+  font-size: 9.5px;
+  letter-spacing: 1.4px;
+  color: var(--sm-cyan);
+}
+.sm-ah-door-return:hover {
+  background: linear-gradient(180deg, rgba(24, 82, 108, 0.95), rgba(16, 34, 46, 0.92) 78%);
+}
+.sm-ah-door-map { min-height: 54px; }
+.sm-ah-door-map .sm-ah-doorlbl { color: var(--sm-dimmer); }
+.sm-ah-door-map .sm-ah-doorval { color: var(--sm-dimmer); font-size: 8.5px; }
+
+/* ========================================================================
+   THE UNLOCK NOTICE — the progression gate's one piece of teaching
+   ------------------------------------------------------------------------
+   It appears ONCE, in the lift, directly above the list it is talking about,
+   and it is gold because gold is this game's colour for "money may now change
+   hands". It is a BOX and not a banner: banners here expire on a timer, and
+   this one has to survive being read slowly. js/advhud.js takes it from
+   SM.adv.getUnlockNotice() and drops it when the player leaves the cage.
+   ==================================================================== */
+.sm-ah-unlock {
+  flex: 0 0 auto;
+  display: none;
+  margin-bottom: 10px;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 194, 31, 0.55);
+  border-left: 3px solid var(--sm-gold);
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(94, 68, 8, 0.5), rgba(14, 18, 24, 0.72) 76%);
+}
+.sm-ah-unlock.sm-ah-unlock-on { display: block; }
+.sm-ah-unlock-title {
+  font-family: var(--sm-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2.2px;
+  color: var(--sm-gold);
+}
+.sm-ah-unlock-body {
+  margin-top: 4px;
+  font-family: var(--sm-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  line-height: 1.55;
+  color: #e8dcc0;
+}
 /* ARMED. LEAVE is one tap from ending the expedition, so the second tap is the
    one that does it — and the plate says so in its VALUE line, never by renaming
    itself (see the results footer's rule). */
@@ -3264,13 +3413,14 @@
 }
 
 .sm-ah-lift-note {
+  flex: 0 0 auto;
   font-family: var(--sm-mono);
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 1.2px;
   line-height: 1.5;
   color: var(--sm-dimmer);
-  margin-top: 7px;
+  margin-top: 9px;
 }
 
 /* ========================================================================
@@ -3344,29 +3494,94 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* --- COMPACT: stack it on top of the hold, by arithmetic ----------------
- * --sm-ah-hold-base is the height of an EMPTY hold box: padding, the units/worth
- * line, the fill bar and the shut drawer. Measured at 67 px on a 390x844 phone,
- * carried at 78 px, and the 11 px of slack is deliberate rather than sloppy —
- * that box's height is a stack of text lines, and --sm-mono is SF Mono here and
- * Roboto Mono on Android, where the same px size is a taller line box. Slack
- * costs a panel sitting a few pixels higher; a tight fit costs the manifest.
+/* --- COMPACT / PORTRAIT: the same room, tightened -----------------------
+ * THE HOLD ARITHMETIC IS GONE, AND ITS ABSENCE IS THE POINT. This panel used to
+ * be pinned above the hold box by adding up --sm-ah-hold-base and a published
+ * row count, because it could appear while the player was still driving and it
+ * was not allowed to cover the manifest the sell decision was weighed against.
+ * Neither half of that is true any more: the panel opens only when the machine
+ * is INSIDE the cage, and SELL now states the hold's whole worth on its own
+ * plate in 20 px type — so the number the manifest was being consulted for is
+ * on the panel itself. Centred, and nothing to measure.
  *
- * --sm-ah-hold-rows is written by advhud.js's refreshManifest() as a plain
- * number, and 24 px is one manifest row (22) plus its gap (2). This is the term
- * that actually matters: a twelve-mineral hold is 288 px taller than an empty
- * one, which no fixed offset could have covered.
+ * WHAT CHANGES ON A PHONE is only the fit: full width inside the gutters, a
+ * little less padding, and the type steps down a point where it can afford to.
+ * The list scrolls (see .sm-ah-lift-list), so a five-level mine on a 667 px
+ * landscape phone loses nothing — and RETURN TO MINE stays pinned to the foot
+ * where the thumb is. */
+/* ON A PHONE IT HANGS FROM THE BOTTOM, NOT THE MIDDLE — and that is a fix, not
+ * a preference. Centred on a 844x390 landscape phone the panel is 830x343 in a
+ * 390 px window, which put its head (and the dismiss cross in the head's right
+ * corner) directly underneath the sound and pause buttons: those sit at z-index
+ * 8, this at 7, so they drew straight over the cross. Measured on the shot.
  *
- * NOT --sm-ah-hold-h, which is the 42 px the scanner line reserved back in
- * revision 2 and is not the box's real height. */
-.sm-adv.sm-compact {
-  --sm-ah-hold-base: 78px;
-}
+ * Anchoring to the bottom edge fixes it by construction — the head can never
+ * reach the top strip whatever the panel's height — and it is the better phone
+ * layout anyway: RETURN TO MINE ends up exactly where the thumb already rests,
+ * which is the same argument the joystick is placed by. The max-height keeps a
+ * clear lane along the top on the shortest screens.
+ *
+ * The wide layout stays centred: there is room for everything, and a panel this
+ * size hanging off one edge of a 1280 px window reads as a drawer. */
 .sm-adv.sm-compact .sm-ah-lift {
-  width: min(320px, calc(100% - var(--sm-gutter) * 2));
-  bottom: calc(var(--sm-top-y) + var(--sm-ah-hold-base)
-               + var(--sm-ah-hold-rows, 0) * 24px + 10px);
+  width: calc(100% - var(--sm-gutter) * 2);
+  top: auto;
+  bottom: calc(var(--sm-gutter) + env(safe-area-inset-bottom, 0px));
+  max-height: calc(100% - 68px);
+  padding: 10px 11px 11px;
+  transform: translateX(-50%) translateY(12px);
 }
+.sm-adv.sm-compact .sm-ah-lift.sm-ah-lift-on { transform: translateX(-50%); }
+.sm-adv.sm-compact .sm-ah-door-acts { gap: 6px; margin-bottom: 8px; }
+.sm-adv.sm-compact .sm-ah-door-acts .sm-ah-doorbtn { min-height: 54px; }
+.sm-adv.sm-compact .sm-ah-door-acts .sm-ah-doorval { font-size: 17px; }
+.sm-adv.sm-compact .sm-ah-liftgo { min-height: 36px; gap: 8px; padding: 0 9px; }
+.sm-adv.sm-compact .sm-ah-liftbuy { min-height: 36px; min-width: 60px; }
+.sm-adv.sm-compact .sm-ah-door-return { min-height: 48px; }
+.sm-adv.sm-compact .sm-ah-door-return .sm-ah-doorlbl { font-size: 11.5px; letter-spacing: 2px; }
+.sm-adv.sm-compact .sm-ah-door-map { min-height: 48px; }
+.sm-adv.sm-compact .sm-ah-unlock { padding: 8px 9px; margin-bottom: 8px; }
+.sm-adv.sm-compact .sm-ah-unlock-body { font-size: 9px; line-height: 1.5; }
+
+/* --- A PHONE ON ITS SIDE IS THE TIGHT CASE, and it has its own budget ---
+ * `.sm-compact:not(.sm-portrait)` IS the landscape phone — ui.js publishes both
+ * classes and this file may not invent a fourth (ARCHITECTURE.md §4: the whole
+ * phone layout hangs off those three and nothing else sets them), so a height
+ * media query is out and this selector is exactly right anyway.
+ *
+ * WHY IT NEEDS ONE. Measured at 844x390 with the unlock box up: the fixed parts
+ * of the column — head, trade plates, notice, note, foot — came to 272 px of a
+ * 322 px panel, leaving 50 px for the ladder. That is one row and a sliver of
+ * the next, and a row sliced through the middle reads as a rendering fault
+ * rather than as "scroll for more". Every number below buys height back for the
+ * list; nothing here changes what is on screen, only how tightly it is set. */
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-lift { max-height: calc(100% - 54px); }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-lift-head { margin-bottom: 7px; padding-bottom: 6px; }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-door-acts { margin-bottom: 7px; }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-door-acts .sm-ah-doorbtn { min-height: 44px; }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-door-acts .sm-ah-doorval { font-size: 15px; }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-unlock { padding: 6px 9px; margin-bottom: 7px; }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-unlock-title { font-size: 10px; }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-unlock-body { font-size: 8.5px; line-height: 1.45; }
+/* TWO FULL ROWS, ALWAYS. Below this the list stops being a list. */
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-lift-list { min-height: 80px; }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-lift-note { margin-top: 6px; }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-door-foot { margin-top: 7px; }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-door-return,
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-door-map { min-height: 42px; }
+
+/* TINY (a very short or very narrow phone). One more step down, and the two
+ * trade plates keep their grid — a stacked SELL and REFUEL would push the
+ * ladder off the bottom, which is worse than smaller numbers. */
+.sm-adv.sm-tiny .sm-ah-lift { padding: 9px 10px 10px; }
+.sm-adv.sm-tiny .sm-ah-door-acts .sm-ah-doorbtn { min-height: 48px; }
+.sm-adv.sm-tiny .sm-ah-door-acts .sm-ah-doorval { font-size: 15px; }
+.sm-adv.sm-tiny .sm-ah-liftname { font-size: 10px; }
+.sm-adv.sm-tiny .sm-ah-liftgo { min-height: 34px; }
+.sm-adv.sm-tiny .sm-ah-liftbuy { min-height: 34px; }
+.sm-adv.sm-tiny .sm-ah-door-return { min-height: 44px; }
+.sm-adv.sm-tiny .sm-ah-door-return .sm-ah-doorlbl { font-size: 10.5px; }
+.sm-adv.sm-tiny .sm-ah-door-map { min-height: 44px; }
 
 /* --- ...and the banner gets out of its way ------------------------------
  * Under the info bar rather than over the panel. A banner is on screen for two

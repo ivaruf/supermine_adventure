@@ -65,7 +65,7 @@
 //         no module load order and no asset changed, so the list below is
 //         unchanged; the bump is here because a cached client would otherwise
 //         keep the old flow forever.
-const VERSION = 'v2.2.0';
+const VERSION = 'v2.3.0';
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 

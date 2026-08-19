@@ -33,29 +33,36 @@
  *        contract. Material identity is; which of three shade rows it drew is
  *        not.
  *
- * 2. THE CARVE MASK IS WHAT MAKES TUNNELS REAL.
- *    One byte per generation cell for the whole mine (cols x rows, 247 x 260 =
- *    63 KB for the shallowest mine in the catalogue and 247 x 1745 = 421 KB for
- *    the deepest). ONE FLAT TYPED ARRAY, deliberately, rather than a sparse map
- *    of allocated blocks: this is the hottest path in the file
- *    (`material:destroyed` fires up to ~150 times per step) and a flat array
- *    makes it two integer divides and one byte write with no hashing, no
- *    allocation and no branch on "has this block been created yet". 421 KB for
- *    the one mine that is resident at a time is a price worth paying for that,
- *    and it is also what keeps the save seam (exportMask/importMask, a plain
- *    length check) as simple as it is.
- *    `material:destroyed` marks the cell it came from — O(1), allocation-free,
- *    no strings — and generation
- *    skips marked cells. Without it, driving back through your own tunnel
- *    re-fills it with solid rock. js/save.js RLE-encodes the array between
- *    sessions; the seam is exportMask() / importMask() and it round-trips
- *    byte-for-byte.
+ * 2. THE CARVE STORE IS WHAT MAKES TUNNELS REAL, AND IT IS SPARSE.
+ *    It used to be one flat byte per generation cell for the whole mine, which
+ *    was the right answer while a mine was a finite box (247 x 1745 = 421 KB for
+ *    the deepest one). A LEVEL MAP IS ENDLESS NOW — east, west and south — so
+ *    there is no box to size an array against, and an array sized for the reach
+ *    of a full tank would be mostly zeros forever.
+ *
+ *    So: A SPARSE MAP OF 32x32-CELL CHUNKS, one BIT per cell, keyed by
+ *    (level, chunkX, chunkY) and allocated only when something in that chunk is
+ *    actually dug. A chunk is 128 bytes and covers 672 x 672 world units.
+ *
+ *    THE HOT PATH IS STILL O(1) AND ALLOCATION-FREE. `material:destroyed` fires
+ *    up to ~150 times per step, and a cutter works one small rectangle of rock,
+ *    so consecutive marks land in the SAME chunk almost every time: markDestroyed
+ *    keeps a one-entry cache of the last chunk and its byte array, and a hit is
+ *    three integer compares, a shift, an or, and a byte write. A miss is one
+ *    Map.get on a packed numeric key — no string built, nothing allocated —
+ *    and only the very first mark in a chunk allocates (128 bytes).
+ *
+ *    Generation skips marked cells. Without it, driving back through your own
+ *    tunnel re-fills it with solid rock. js/save.js encodes the touched chunks
+ *    between sessions; the seam is exportCarve() / importCarve() and it
+ *    round-trips exactly. MEASURED cost: ~70 characters per touched chunk, which
+ *    is about 33 KB per hour of continuous novel driving.
  *
  * 3. THE POOL IS 7500 AND THE WINDOW IS A 2D RECTANGLE OF CELLS.
- *    The mine is 5200 world units across — far more than any screen shows and
- *    far more than the pool could hold — so the resident set is a RECTANGLE in
- *    BOTH axes, sized from the camera's view plus ADV.STREAM_MARGIN and clamped
- *    by SOLID_BUDGET. Everything outside it is freed with
+ *    The world is unbounded in three directions — far more than any screen shows
+ *    and far more than the pool could hold — so the resident set is a RECTANGLE
+ *    in BOTH axes, sized from the camera's view plus ADV.STREAM_MARGIN and
+ *    clamped by SOLID_BUDGET. Everything outside it is freed with
  *    particles.despawnOutsideRect(). Three things make that safe:
  *
  *      * THE CUTS LAND ON EXACT CELL BOUNDARIES. A row boundary was always
@@ -81,30 +88,34 @@
  * ---------------------------------------------------------------------------
  * THE GEOLOGY, IN THE ORDER THE GENERATOR ASKS THE QUESTIONS
  *
- *   THE SEAL        the band's four bedrock borders. A LEVEL IS ITS OWN MAP
- *                   (ARCHITECTURE.md §7): the active level is a bounded y-band of
- *                   this coordinate space, and its top rows, bottom rows and
- *                   side columns are spawned as bedrock by a test that runs
- *                   BEFORE the carve mask is consulted. That order is the whole
- *                   point — an old save's tunnel across a band boundary would
- *                   otherwise punch a player-shaped hole in the seal.
+ *   THE CEILING     THE ONE WALL IN THE GAME. A level map is endless east, west
+ *                   and south (ARCHITECTURE.md §7); the only rock a machine can
+ *                   ever be stopped by is the bedrock cap just NORTH of that
+ *                   level's lift. Its rows are spawned as bedrock by a test that
+ *                   runs BEFORE the carve store is consulted. That order is the
+ *                   whole point — an old save's tunnel through what is now the
+ *                   ceiling would otherwise punch a player-shaped hole in it.
  *   THE DOORS       the one piece of geology that is not geology: a chamber
- *                   carved at the band's TOP CENTRE (x = 0) with the lift's big
+ *                   carved at the map's TOP CENTRE (x = 0) with the lift's big
  *                   closed double doors in its back wall, worklights, and the
  *                   red level board beside them. It is INFRASTRUCTURE — carved
- *                   by the generator from the active band and never written into
- *                   the carve mask, so it exists on a level nobody has visited
- *                   and moves with the band on a ride.
- *   BEDROCK FLOOR   below the mine's stated depth. The bottom of a mine is
- *                   expressed as HARDNESS (26), not as an invisible wall.
+ *                   by the generator from the active level and never written into
+ *                   the carve store, so it exists on a level nobody has visited
+ *                   and moves with the map on a ride.
  *   MOTHERLODE      the money shot. A big natural cavern whose far WALL is
- *                   lined with a thick shell of the deepest ore in the mine.
- *                   Every mine has exactly one guaranteed one, plus a hashed
- *                   chance of more in its deep layers. The approach is
- *                   readable: HALO STRINGERS of the same ore thicken in the
+ *                   lined with a thick shell of the best ore on the level.
+ *                   Every level has exactly one guaranteed one below its lift,
+ *                   plus a hashed chance of more out in the field. The approach
+ *                   is readable: HALO STRINGERS of the same ore thicken in the
  *                   country rock as you close in, the background carries a
  *                   faint bloom of its colour through the rock, and the
  *                   scanner sees it long before the drill does.
+ *   ANCIENT DEBRIS  the rare find, and the only thing in the world that is an
+ *                   EVENT rather than a formation: a tight scatter of two to four
+ *                   deposits of the richest material in the game, on its own
+ *                   sparse grid at a rate js/mines.js states per LEVEL. It is
+ *                   deliberately NOT an ore-lottery weight — see that file's
+ *                   design note 4e for why a weight would be a slot machine.
  *   CAVERNS         open voids with spoil on the floor, sometimes mineralised.
  *                   Somewhere for the eye to go, and free metres of travel.
  *   OLD WORKINGS    abandoned timbered drifts and winzes. They reward exploring
@@ -118,15 +129,38 @@
  *                   the background render draws the same warped boundaries the
  *                   generator used — so a wall genuinely reads as strata.
  *
+ * ---------------------------------------------------------------------------
+ * A LEVEL IS ONE STRATUM, FOREVER, AND THAT IS THE PROGRESSION
+ *
+ *   The owner's rule: "the spawn percentage stays fixed in level 1 — well maybe
+ *   it gets a little better as you drill south. But in the end, for better hauls
+ *   you have to BUY lower levels in the lift and move on from there."
+ *
+ *   So a level map does NOT descend through the layer table. It is ONE stratum —
+ *   the one js/mines.js's levelSpawnOf() hands over — and it is that stratum
+ *   everywhere on the map, at every depth, to the south forever. Country rock,
+ *   hardness, heat and the ore lottery all come from that one record.
+ *
+ *   The only thing that changes within a map is a WHISPER: the ore weights drift
+ *   very slightly toward the money as you work south, and the pocket rate rises
+ *   with them. It is quantised into ORE_BUCKETS tables baked once per level, so
+ *   the generator never allocates and two visits to the same rock always agree.
+ *   js/mines.js owns the size of it (design note 4e); this file owns none of it.
+ *
+ *   THE LEVEL IS PART OF THE GENERATION KEY. genSeed folds the level index into
+ *   the mine seed, so level 2's map is a different world from level 1's rather
+ *   than a continuation of it — which is what makes "you cannot dig from one
+ *   level's map into another's" true by construction: the other level is not in
+ *   this coordinate space at all.
+ *
  * WHAT js/mines.js HAS TO SUPPLY, AND WHAT IS OPTIONAL
- *   Required (documented in mines.js): toDepth, name, fill, weights,
- *   pocketRate, cavernRate, hardnessScale, heat. `pocketRate` and `cavernRate`
- *   are per GENERATED BAND as mines.js states them, and perCell() converts.
- *   Optional extras this generator understands, all with sensible depth-derived
- *   defaults so a layer table that only has the required fields still produces
- *   a full arc from soft rich topsoil to barren deep rock with motherlodes in
- *   it:  beds:['sandstone','limestone']  bedPitch  seamRate  driftRate
- *        lodeRate  lode:'ancient'  vugChance
+ *   levelSpawnOf(mine, k) is the whole contract, and it fills in every optional
+ *   field itself, so a layer table that only has the required fields still
+ *   produces a full arc from soft rich topsoil to barren deep rock with
+ *   motherlodes in it. This file feature-detects it and falls back to reading a
+ *   layer table directly, which is what keeps it testable on its own.
+ *   `pocketRate` and `cavernRate` are per GENERATED BAND as mines.js states
+ *   them — BAND_HEIGHT tall and RATE_REF_W wide — and perCell() converts.
  *
  * NOTE ON hardnessScale: particles.js bakes a deposit's hp from the MATERIAL
  * TABLE at spawn and `SM.particles.data` is read-only, so a per-layer hardness
@@ -153,11 +187,24 @@ SM.advterrain = (function () {
   var A = SM.config.ADV;
   var C = SM.config;
 
-  /* --- the generation grid ------------------------------------------- */
-  // SP and the shaft width are SM.config.ADV's (shared, frozen). Everything
-  // below is derived from them so nothing has to be re-tuned if they move.
-  var SP = A.SPACING;                 // 21 — cell pitch, also the mask pitch
-  var HALF_W = A.MINE_HALF_WIDTH;     // 880
+  /* --- the generation grid -------------------------------------------
+   * SP is SM.config.ADV's (shared, frozen). Everything below is derived from it
+   * so nothing has to be re-tuned if it moves.
+   *
+   * THE GRID IS UNBOUNDED IN BOTH AXES NOW. cellXOf/cellYOf are Math.floor of a
+   * signed quantity and every hash is Math.imul-based, so a negative or a very
+   * large cell index is as ordinary as any other. There is no `cols`, no `rows`
+   * and no origin corner any more — cell (0, 0) sits at the mine's centre line
+   * on the surface row, and the world runs out from it in every direction.
+   *
+   * ADV.MINE_HALF_WIDTH IS RETIRED AS A BOUND. It survives in config.js (that
+   * table is frozen) and as RATE_REF_W below, which is the ONE thing it is still
+   * good for: every shipped `pocketRate` and `cavernRate` in js/mines.js was
+   * measured as "expected structures per band, where a band is BAND_HEIGHT tall
+   * and the whole mine wide", so keeping that width as a fixed reference is what
+   * makes those numbers go on meaning what they meant. */
+  var SP = A.SPACING;                 // 21 — cell pitch, also the carve pitch
+  var RATE_REF_W = 5200;              // the width mines.js quoted its rates at
 
   /* JITTER — how far a deposit may wander inside its own cell, as a fraction
    * of SP. Both axes MUST stay < 0.5 or a deposit crosses into the neighbouring
@@ -238,40 +285,40 @@ SM.advterrain = (function () {
   var TRIM_DOWN = 0.02;        // per-step shrink while over budget
   var TRIM_UP = 0.004;         // per-step recovery once back under
 
-  /* --- LEVELS AS MAPS: THE BAND, THE SEAL, THE DOORS -------------------
-   * ARCHITECTURE.md §7. Each level is ITS OWN MAP, and the map is realised as a
-   * bounded y-band of this one coordinate space: level k is geological layer k's
-   * depth range, the full field width for that level, and NOTHING ELSE IS
-   * REACHABLE. Absolute (seed, cellX, cellY) determinism, depth-driven geology
-   * and heat, the ONE whole-mine carve mask and the 2D streamer are all
-   * unchanged by that — a band is a clamp on the window and a border of bedrock,
-   * not a second coordinate system, which is exactly why old saves still load
-   * and why per-level tunnel persistence comes free (bands are disjoint in y).
+  /* --- LEVELS AS ENDLESS MAPS: THE CEILING, THE DOORS -------------------
+   * ARCHITECTURE.md §7. Each level is ITS OWN MAP. The map is UNBOUNDED east,
+   * west and south; the ONE boundary anywhere in the game is the bedrock ceiling
+   * just north of that level's lift. Fuel is what stops the player, not rock.
    *
-   * WIDTH GROWS WITH DEPTH, because size is part of what a level purchase buys.
-   * js/mines.js states `widthU` per band; these are the fallback ladder used
-   * while it does not, and the cap is the mine's own width — the mask, the
-   * generation grid and the lode/drift lattices are all keyed to HALF_W and a
-   * level may not be wider than the mine it is a slice of.
+   * A LEVEL IS NOT A Y-BAND ANY MORE, it is a whole coordinate space of its own,
+   * distinguished by genSeed (see setLevel). That is what makes the levels-as-maps
+   * contract true without any rock enforcing it: you cannot dig from level 1's map
+   * into level 2's because level 2 is not there — its geology is a different hash
+   * of the same coordinates, reachable only by riding the lift. It is also what
+   * lets the carve store be keyed on (level, chunkX, chunkY) and stay sparse.
+   *
+   * THE LIFT SITS AT THAT LEVEL'S CATALOGUE DEPTH, in ABSOLUTE y, and depth is
+   * reported absolutely everywhere — the HUD gauge, the depth ruler, the red board
+   * on the doors. So level 3's lift reads 300 m and a kilometre south of it reads
+   * 1300 m, which is the only reading under which those three agree with each
+   * other and with js/adv.js's depthM (see ARCHITECTURE.md §0).
    * ------------------------------------------------------------------ */
-  var LVL_W_BASE = 3600;       // full width of level 1, world units (360 m)
-  var LVL_W_STEP = 400;        // ...plus this per level down, capped at HALF_W*2
-  var LVL_W_MIN = 1400;        // a level narrower than this is not a map
 
-  /* THE SEAL IS COUNTED IN CELLS, NOT IN WORLD UNITS, and that is what makes it
-   * exact. A border expressed as "y < bandTop + 63" has to be tested against a
+  /* THE CEILING IS COUNTED IN CELLS, NOT IN WORLD UNITS, and that is what makes
+   * it exact. A border expressed as "y < top + 105" has to be tested against a
    * deposit's JITTERED position and lands mid-row; a border expressed as "the
-   * first three ROWS of the band" is an integer compare, is decided before any
+   * first five ROWS of the map" is an integer compare, is decided before any
    * position is computed, and coincides EXACTLY with the streaming clamp — the
-   * outermost resident rows and columns of a level ARE its seal. It is also what
-   * lets markDestroyed() refuse a seal cell in two integer compares.
+   * outermost resident row of a level IS its ceiling. It is also what lets
+   * markDestroyed() refuse a ceiling cell in one integer compare.
    *
-   * THREE CELLS (63 units) is what reads as a border rather than as a line at
-   * every camera scale this mode uses, and the cut-box clip in js/vehicle.js
-   * means it is never chewed, so it does not need to be thick enough to survive
-   * a tier-5 bit — see THE TWO SEAL TRUTHS in ARCHITECTURE.md §7. */
-  var SEAL_ROWS = 3;
-  var SEAL_COLS = 3;
+   * FIVE CELLS (105 units), up from the three the four-sided seal used. It is the
+   * only wall left in the world, so it has to read as a deliberate edge rather
+   * than as a line — five cells is about a third of the machine's own length and
+   * is unmistakable at every camera scale this mode uses. The cut box is clipped
+   * in js/vehicle.js so it is never chewed, and it does not need to be thick
+   * enough to survive a tier-5 bit — see THE SEAL TRUTHS in ARCHITECTURE.md §7. */
+  var SEAL_ROWS = 5;
 
   /* --- THE DOOR CHAMBER, AND WHY IT IS THIS SIZE -----------------------
    * The lift is BIG CLOSED DOORS at the band's top centre, in the back wall of
@@ -424,7 +471,6 @@ SM.advterrain = (function () {
    * that is never covered, and it is where a level indicator is bolted anyway. */
   var BOARD_GAP = 22;          // between the west jamb and the board's east edge
   var BOARD_RISE = 34;         // the board's top, below the chamber ceiling
-  var FLOOR_PAD_M = 60;        // metres of bedrock modelled below the bottom
 
   /* --- structure grids -----------------------------------------------
    * Every structure family owns a grid of cells; a cell either contains one
@@ -447,13 +493,12 @@ SM.advterrain = (function () {
   /* MOTHERLODES AND OLD WORKINGS ARE ON A 2D GRID, NOT A LADDER.
    * Both used to own one candidate per vertical block, placed anywhere across
    * the shaft — which was right when the shaft was 1760 wide, i.e. about one
-   * candidate wide. In a 5200-unit mine that same ladder puts a third as many
-   * formations in the same volume of rock and the mode's two best discoveries
-   * become three times rarer per metre driven. So both grids now have an X
-   * pitch, sized at the ORIGINAL shaft width: at HALF_W 880 there is exactly
-   * one candidate column and the shipped feel is unchanged, and a wider mine
-   * gets proportionally more of them. This is the same areal-density-invariance
-   * perCell() already gives pockets and caverns. */
+   * candidate wide. In an ENDLESS map that ladder is simply meaningless: there
+   * is no width to spread one candidate across. So both grids have an X pitch,
+   * sized at the ORIGINAL shaft width, and the field tiles outward forever at
+   * that density. This is the same areal-density-invariance perCell() gives
+   * pockets and caverns, and it is what makes driving east for ten minutes feel
+   * like the same mine rather than like running out of world. */
   var LODE_W = 1760;                 // one motherlode slot per 176 m across
   var LODE_H = 1500;                 // ...and per 150 m of depth
   var LODE_RX = [190, 330];
@@ -462,25 +507,38 @@ SM.advterrain = (function () {
   var HALO_T = 3.4;                  // stringers reach this far out (in t)
   var HALO_MAX = 0.22;               // stringer density at the shell wall
   var LODE_ANNOUNCE = 760;           // world units at which `mine:lode` fires
-  // The ANCIENT FORMATION is the reward for the bottom of a deep mine, and the
-  // brief asks for it in "the deepest mine". A layer table may name it outright
-  // (`lode:'ancient'`), but js/mines.js states only the fields its own header
-  // documents, so the deepest layer of any mine at least this deep gets it by
-  // default. Below that the motherlode is the best ore the layer already has,
-  // which keeps a shallow mine's headline formation in proportion to the mine.
-  var ANCIENT_DEPTH_M = 650;
-  /* The GUARANTEED motherlode stays within this of the MINE'S CENTRE LINE, which
-   * is also the line the doors are on. Depth is still the axis of progression, so
-   * "go all the way down and there is one waiting" has to survive the mine being
-   * 5200 units wide: a headline formation 2400 units off to one side is not a
-   * reward, it is a lottery. Rolled lodes are free to be anywhere.
+  /* EVERY LEVEL GETS ONE GUARANTEED MOTHERLODE, near its own lift, and that is a
+   * change forced by the geometry: the guarantee used to be "one per mine, in the
+   * lowest 20-140 m of its stated depth", which was a promise about a BOTTOM. An
+   * endless map has no bottom, so the promise is re-cut as one about the LIFT —
+   * drive south from where you arrive and there is one waiting.
    *
-   * IT IS AN ABSOLUTE POSITION AND IT STAYS ONE. The motherlode is not re-placed
-   * per level: it sits where the seed put it and simply LIVES on whichever band
-   * contains it, which is the level whose price bought the depth it is at. Keying
-   * it to the active band instead would regenerate the geology of every seed in
-   * the catalogue and make the same formation move when you rode past it. */
-  var LODE_GUARANTEED_X = 1150;
+   * It sits GLD_DEPTH_U below the ceiling (plus a hashed spread) and within
+   * GLD_X of the centre line the doors are on, because it is the payoff for
+   * committing to a direction and a headline formation 2400 units off to one side
+   * is not a reward, it is a lottery. Rolled lodes are free to be anywhere. */
+  var GLD_DEPTH_U = 1900;            // ~190 m south of the lift...
+  var GLD_SPREAD_U = 1500;           // ...plus up to this much again, hashed
+  var GLD_X = 1150;
+
+  /* ANCIENT DEBRIS — the rare find (js/mines.js design note 4e).
+   *
+   * ITS OWN STRUCTURE FAMILY, NOT AN ORE WEIGHT. A pocket picks one material for
+   * the whole blob, so an 'ancient' entry in the lottery means "one pocket in two
+   * thousand is forty deposits of the richest material in the game": a slot
+   * machine, not a discovery. A debris scatter is a handful of cells in a tight
+   * cluster — findable, scannable as its own contact, bounded in payout, and
+   * priced per LEVEL rather than per depth.
+   *
+   * The grid is coarse (220 m square) because the RATE is what makes it rare and
+   * a fine grid with a tiny probability wastes a gather on every row. Cluster
+   * radius is small on purpose: this is debris in the rock, not a seam, and the
+   * whole cluster must fit inside one bite of a good drill so finding it and
+   * taking it are the same moment. */
+  var DEB_W = 2200, DEB_H = 2200;
+  var DEB_R = [24, 40];              // cluster radius, world units
+  var DEB_FILL = [0.55, 0.90];       // fraction of the cells inside it that take
+  var DEB_MAXN = 4;                  // scratch slots per gathered row
 
   var DRIFT_W = 1760;                // one old-workings slot per 176 m across
   var DRIFT_H = 780;                 // ...and per 78 m of depth
@@ -498,6 +556,39 @@ SM.advterrain = (function () {
   var BED_WARP_F = 0.0021;
   var BED_SPECK = 0.055;             // nodules of a different bed inside a bed
 
+  /* --- THE SPARSE CARVE STORE ----------------------------------------
+   * One BIT per generation cell, in 32x32-cell chunks, allocated only when
+   * something inside one is actually dug. See constraint 2 in the header.
+   *
+   * WHY 32. A chunk covers 672 x 672 world units, which is about a third of a
+   * screen at this mode's zoom, so a machine working one spot touches ONE chunk
+   * for seconds at a time and markDestroyed()'s single-entry cache hits almost
+   * every call. It is also exactly 128 bytes, which keeps the per-chunk RLE the
+   * save codec writes short enough to be worth doing (~70 characters for a chunk
+   * with a tunnel through it).
+   *
+   * MAX_CHUNKS IS A CEILING ON A SESSION'S HISTORY, not on the world. A chunk is
+   * 451 584 square units and a machine cuts a corridor about 300 units wide, so
+   * an hour of driving at 200 u/s over ground it has NEVER seen before touches
+   * roughly 480 chunks. 4096 is therefore about eight and a half hours of
+   * genuinely novel driving in one mine, and real play backtracks constantly. If
+   * it is ever hit the store stops recording new chunks — tunnels stop
+   * persisting, nothing corrupts, and getDebug().chunkFull says so. */
+  var CHUNK_BITS = 5;
+  var CHUNK = 1 << CHUNK_BITS;            // 32 cells per side
+  var CHUNK_MASK = CHUNK - 1;
+  var CHUNK_BYTES = (CHUNK * CHUNK) >> 3; // 128
+  var MAX_CHUNKS = 4096;
+  /* Chunk coordinates are packed into ONE number so the map can be keyed on an
+   * integer instead of a built string — markDestroyed() must not allocate. The
+   * bias makes negatives non-negative and the shifts are done with multiplies
+   * because they exceed 32 bits; the whole key stays under 2^47, comfortably
+   * inside a double's exact integer range. +-2^20 chunks is +-704 million world
+   * units, which no tank in the workshop can reach. */
+  var CK_BIAS = 1 << 20;
+  var CK_SPAN = 1 << 21;
+  var CK_LEVEL = CK_SPAN * CK_SPAN;       // 2^42
+
   /* --- hash salts ----------------------------------------------------
    * Odd 32-bit constants. Every independent decision gets its own salt so two
    * unrelated questions asked about the same cell can never correlate.
@@ -509,6 +600,11 @@ SM.advterrain = (function () {
   var S_LODE = 0xd807aa98 | 0, S_LODEM = 0x12835b01 | 0;
   var S_DRIFT = 0x243185be | 0, S_SEAM = 0x550c7dc3 | 0, S_SEAMM = 0x72be5d74 | 0;
   var S_HALO = 0x80deb1fe | 0, S_FLOOR = 0x9bdc06a7 | 0;
+  /* THE LEVEL SALT. genSeed = h3(mineSeed, S_LEVEL, k) is what makes each level
+   * its own world rather than the same rock at a different depth — see the note
+   * by SEAL_ROWS for why that IS the levels-as-maps guarantee now. */
+  var S_LEVEL = 0xc67178f2 | 0;
+  var S_DEB = 0xa2bfe8a1 | 0, S_DEBC = 0x06ca6351 | 0;
 
   /* ================================================================== */
 
@@ -531,16 +627,22 @@ SM.advterrain = (function () {
   var mineDef = null;             // the SM.mines record, or null (default profile)
   var mineStateRef = null;        // the save record's per-mine object, or null
   var mineSeed = 1337 | 0;
+  /* THE GENERATION SEED OF THE ACTIVE LEVEL. Every hv() in this file goes
+   * through it, so switching level switches world. Set by setLevel(). */
+  var genSeed = 1337 | 0;
+  /* The catalogue's stated depth. Not a bound any more — nothing ends at it —
+   * but it is still what the level ladder's lift depths are cut out of, and it
+   * is the honest answer to "how deep is this mine" on the map card. */
   var mineDepthM = 400;
-  var floorY = 4000;              // bedrock starts here
   var layers = [];
   var deepestY = 0;
 
-  /* ----- the generation grid, resolved once per mine ------------------ */
-  var cols = 1, rows = 1;
-  var x0 = -HALF_W, y0 = 0;       // world position of cell (0,0)'s top-left
-  var mask = null;                // Uint8Array(cols*rows) — 1 = dug out
-  var carved = 0;                 // how many cells are marked
+  /* ----- the generation grid ------------------------------------------
+   * Unbounded. Cell (0, 0)'s top-left corner is (x0, y0); x0 is half a cell west
+   * of the centre line so column 0 is CENTRED on x = 0, which is the line the
+   * lift's doors and the guaranteed motherlode are both measured from. */
+  var x0 = -SP * 0.5, y0 = 0;
+  var carved = 0;                 // how many cells are marked, this mine
 
   /* ----- the streamed window -------------------------------------------
    * TWO RECTANGLES IN CELL SPACE, and the difference between them is the whole
@@ -580,15 +682,16 @@ SM.advterrain = (function () {
    * lvl* is the PLAYABLE VOID inside the seal, which is what getLevelBounds()
    * publishes and what js/vehicle.js and js/camera.js clamp against.
    * ------------------------------------------------------------------ */
-  var bands = [];                 // [{i, name, topM, botM, halfW}], live mine
+  var bands = [];                 // [{i, name, topM}], live mine
   var bandN = 0;                  // active level index, 1-based (0 = none)
-  var bandR0 = 0, bandR1 = 0;     // the band's rows, [R0, R1)
-  var bandC0 = 0, bandC1 = 0;     // ...and columns, [C0, C1)
-  var bandTopY = 0, bandBotY = 0; // the band's outer edges, on exact cell lines
-  var bandXL = 0, bandXR = 0;
-  var lvlTopY = 0, lvlBotY = 0;   // the void inside the seal
-  var lvlHalfW = 0;
-  var needFill = false;           // a band change owes us one full re-fill
+  var bandR0 = 0;                 // the map's first row — the ceiling starts here
+  var bandTopY = 0;               // ...as a world y, on an exact cell line
+  var lvlTopY = 0;                // the void below the ceiling: getLevelBounds()
+  var needFill = false;           // a level change owes us one full re-fill
+  /* THE ACTIVE LEVEL'S SPAWN RECORD (js/mines.js levelSpawnOf) resolved into the
+   * shape buildLayer() produces: ONE stratum for the whole endless map, plus the
+   * baked ore-weight buckets the southward whisper is quantised into. */
+  var lvl = null;
 
   /* THE DOORS. Geometry derived from the band in setBand(); `doorOpen` is the
    * only animated state in this file and it is driven by machine proximity in
@@ -639,8 +742,17 @@ SM.advterrain = (function () {
     return (n ^ (n >>> 16)) >>> 0;
   }
 
-  /** Hash -> 0..1, salted and tied to the mine seed. */
-  function hv(salt, a, b) { return h3(mineSeed ^ salt, a, b) / 4294967296; }
+  /**
+   * Hash -> 0..1, salted and tied to the ACTIVE LEVEL's generation seed.
+   *
+   * `genSeed`, not `mineSeed`, and that one word is the levels-as-maps contract:
+   * every structure, every jitter and every bed on level 2 is a different hash of
+   * the same coordinates than it is on level 1, so the two maps genuinely are two
+   * worlds rather than two windows onto one. Nothing enforces the separation
+   * because nothing has to — the other level is not in this coordinate space.
+   * setBand() is the only writer.
+   */
+  function hv(salt, a, b) { return h3(genSeed ^ salt, a, b) / 4294967296; }
 
   /** Smooth 1D value noise, 0..1. Used for every warp and every taper. */
   function noise1(t, salt) {
@@ -658,19 +770,14 @@ SM.advterrain = (function () {
 
   /* ======================================================================
    * CELL <-> WORLD
-   * The grid is anchored to the MINE. Cell (0,0)'s top-left corner is
-   * (x0, MINE_CEILING_Y), and cols is chosen so the grid is centred in the
-   * shaft with a sliver of clearance against each bedrock wall.
+   * The grid is anchored to the MINE and is UNBOUNDED in both axes. Column 0 is
+   * centred on x = 0 (the lift's line) and row 0 is the surface row; every index
+   * either side of those is as ordinary as any other.
    * =================================================================== */
 
   function buildGrid() {
-    cols = Math.floor((HALF_W * 2) / SP);
-    if (cols < 4) cols = 4;
-    x0 = -HALF_W + ((HALF_W * 2) - cols * SP) * 0.5;
+    x0 = -SP * 0.5;
     y0 = A.MINE_CEILING_Y;
-    var bottomM = mineDepthM + FLOOR_PAD_M;
-    rows = Math.ceil((bottomM / A.METERS_PER_UNIT) / SP) + 2;
-    if (rows < 8) rows = 8;
     // How many CELLS the pool can hold, which is what a 2D window is sized
     // against. Cells, not deposits: FILL_ESTIMATE is the conversion.
     cellBudget = A.SOLID_BUDGET / FILL_ESTIMATE;
@@ -705,72 +812,196 @@ SM.advterrain = (function () {
   function colOfX(x) { return Math.floor((x - x0) / SP); }
 
   /* ======================================================================
-   * THE CARVE MASK
+   * THE SPARSE CARVE STORE
+   * ---------------------------------------------------------------------
+   * PERSIST ONLY THE SEEN PATH. A level map is endless, so the old flat byte
+   * array — one byte per cell of a finite mine — has nothing to be sized
+   * against. What is finite is what the player has actually DUG, so that is what
+   * is stored: 32x32-cell chunks of one bit per cell, keyed on
+   * (level, chunkX, chunkY), allocated the first time anything inside one breaks
+   * and never allocated again.
+   *
+   * FOUR PARALLEL ARRAYS AND A Map, rather than a Map of objects: the arrays are
+   * what the save codec walks (in insertion order, which is stable), and the Map
+   * exists only to answer "do I already have this chunk" in O(1) without
+   * building a string. Chunks are never removed while a mine is loaded — a
+   * tunnel does not un-dig itself — so an index handed out here stays valid.
    * =================================================================== */
 
-  function allocMask() {
-    var n = cols * rows;
-    if (!mask || mask.length !== n) mask = new Uint8Array(n);
-    else mask.fill(0);
+  var chunkIx = null;             // Map<packedKey, index into the arrays below>
+  var chunkKey = null;            // Float64Array(MAX_CHUNKS) — the packed key
+  var chunkLv = null;             // Int32Array — level
+  var chunkCX = null, chunkCY = null;   // Int32Array — chunk coordinates
+  var chunkData = null;           // Array of Uint8Array(CHUNK_BYTES)
+  var chunkN = 0;
+  var chunkFull = false;          // the ceiling was hit; see MAX_CHUNKS
+
+  /* THE SINGLE-ENTRY CACHE. A cutter works one small rectangle of rock, so the
+   * next mark is in the same chunk as the last one almost every time. These four
+   * make that case three integer compares and no lookup at all. */
+  var ccLv = -1, ccCX = 0, ccCY = 0, ccData = null;
+
+  function allocCarve() {
+    if (!chunkKey) {
+      chunkIx = new Map();
+      chunkKey = new Float64Array(MAX_CHUNKS);
+      chunkLv = new Int32Array(MAX_CHUNKS);
+      chunkCX = new Int32Array(MAX_CHUNKS);
+      chunkCY = new Int32Array(MAX_CHUNKS);
+      chunkData = new Array(MAX_CHUNKS);
+    } else {
+      chunkIx.clear();
+    }
+    chunkN = 0;
+    chunkFull = false;
     carved = 0;
+    ccLv = -1; ccData = null;
+  }
+
+  /** Pack (level, chunkX, chunkY) into one exact integer. See CK_BIAS. */
+  function packKey(lv, cx, cy) {
+    return lv * CK_LEVEL + (cy + CK_BIAS) * CK_SPAN + (cx + CK_BIAS);
+  }
+
+  /**
+   * The chunk holding (level, cx, cy), creating it if `make`. -> Uint8Array or
+   * null. NOT on the hottest path — markDestroyed's cache is — but still
+   * allocation-free unless a chunk is genuinely new.
+   */
+  function chunkFor(lv, ccx, ccy, make) {
+    var k = packKey(lv, ccx, ccy);
+    var i = chunkIx.get(k);
+    if (i !== undefined) return chunkData[i];
+    if (!make) return null;
+    if (chunkN >= MAX_CHUNKS) { chunkFull = true; return null; }
+    i = chunkN++;
+    chunkKey[i] = k;
+    chunkLv[i] = lv; chunkCX[i] = ccx; chunkCY[i] = ccy;
+    chunkData[i] = new Uint8Array(CHUNK_BYTES);
+    chunkIx.set(k, i);
+    return chunkData[i];
   }
 
   /**
    * Mark the cell containing (x, y) as dug out.
    *
    * HOT PATH: `material:destroyed` fires up to ~150 times per step. Integer
-   * maths and one array write, no allocation, no strings, no events.
+   * maths, a cached chunk, one bit set. No allocation, no strings, no events.
    *
-   * IT REFUSES A SEAL CELL, and that is not belt-and-braces: the mask is the
-   * mine's whole history and it is saved, so one seal byte written by a tier-5
-   * bit that got a shot at the border would be a permanent hole in the border of
-   * a level — in a save file, in every future session. The generator already
-   * refuses to read the mask there (see generateRowStrip), so this is the second
-   * of the two locks, and it is the cheap one: four integer compares.
+   * IT REFUSES A CEILING CELL, and that is not belt-and-braces: the store is the
+   * mine's whole history and it is saved, so one ceiling bit written by a tier-5
+   * bit that got a shot at the border would be a permanent hole in the ONE wall
+   * in the game — in a save file, in every future session. The generator already
+   * refuses to read the store there (see generateRowStrip), so this is the second
+   * of the two locks, and it is the cheap one: one integer compare.
    */
   function markDestroyed(x, y) {
-    if (!active || !mask) return;
+    if (!active || !chunkIx) return;
     var cy = Math.floor((y - y0) / SP);
-    if (cy < bandR0 + SEAL_ROWS || cy >= bandR1 - SEAL_ROWS) return;
+    if (cy < bandR0 + SEAL_ROWS) return;
     var cx = Math.floor((x - ((cy & 1) ? SP * STAGGER : -SP * STAGGER) - x0) / SP);
-    if (cx < bandC0 + SEAL_COLS || cx >= bandC1 - SEAL_COLS) return;
-    var i = cy * cols + cx;
-    if (mask[i]) return;
-    mask[i] = 1;
+    var ccx = cx >> CHUNK_BITS, ccy = cy >> CHUNK_BITS;
+    /* THE FAR EDGE OF THE ADDRESSABLE WORLD. Beyond +-CK_BIAS chunks the packed
+     * key would wrap and one tunnel would be recorded on top of another, which is
+     * the one failure mode of a sparse store that is worse than not having one.
+     * So it FAILS SAFE: past that line nothing is recorded, tunnels stop
+     * persisting, and nothing anywhere is corrupted. It is 704 million world
+     * units — forty days of driving one direction at full speed — so this is a
+     * guarantee about arithmetic, not a gameplay limit. */
+    if (ccx <= -CK_BIAS || ccx >= CK_BIAS || ccy <= -CK_BIAS || ccy >= CK_BIAS) return;
+    var d;
+    if (ccLv === bandN && ccCX === ccx && ccCY === ccy) {
+      d = ccData;
+    } else {
+      d = chunkFor(bandN, ccx, ccy, true);
+      if (!d) return;
+      ccLv = bandN; ccCX = ccx; ccCY = ccy; ccData = d;
+    }
+    var bit = ((cy & CHUNK_MASK) << CHUNK_BITS) | (cx & CHUNK_MASK);
+    var byte = bit >> 3, m = 1 << (bit & 7);
+    if (d[byte] & m) return;
+    d[byte] |= m;
     carved++;
   }
 
-  function isCarved(x, y) {
-    if (!mask) return false;
-    var cy = cellYOf(y);
-    if (cy < 0 || cy >= rows) return false;
-    var cx = cellXOf(x, cy);
-    if (cx < 0 || cx >= cols) return false;
-    return mask[cy * cols + cx] === 1;
+  /** Is the cell (cx, cy) of the ACTIVE level dug out? Generation's question. */
+  function carvedCell(cx, cy) {
+    if (!chunkIx) return false;
+    var ccx = cx >> CHUNK_BITS, ccy = cy >> CHUNK_BITS;
+    var d;
+    if (ccLv === bandN && ccCX === ccx && ccCY === ccy) d = ccData;
+    else {
+      d = chunkFor(bandN, ccx, ccy, false);
+      if (!d) return false;
+      ccLv = bandN; ccCX = ccx; ccCY = ccy; ccData = d;
+    }
+    var bit = ((cy & CHUNK_MASK) << CHUNK_BITS) | (cx & CHUNK_MASK);
+    return (d[bit >> 3] & (1 << (bit & 7))) !== 0;
   }
 
-  function exportMask() { return mask; }
+  /** ...and the world-space form, for the scanner. */
+  function isCarved(x, y) {
+    if (!chunkIx) return false;
+    var cy = cellYOf(y);
+    return carvedCell(cellXOf(x, cy), cy);
+  }
 
-  /** Adopt a decoded mask. Refuses anything that is not exactly our shape. */
-  function importMask(u8) {
-    if (!mask || !u8 || !u8.length || u8.length !== mask.length) return false;
-    mask.set(u8);
+  /* THE SAVE SEAM. js/save.js owns the encoding and this module owns the store,
+   * exactly as it was for the flat mask — only the shape crossing the seam
+   * changed. The descriptor is REUSED and its typed arrays are the LIVE ones, so
+   * the encoder must read it and let it go. */
+  var carveOut = { count: 0, level: null, cx: null, cy: null, data: null,
+                   chunkCells: CHUNK, chunkBytes: CHUNK_BYTES };
+  function exportCarve() {
+    if (!chunkIx) return null;
+    carveOut.count = chunkN;
+    carveOut.level = chunkLv;
+    carveOut.cx = chunkCX;
+    carveOut.cy = chunkCY;
+    carveOut.data = chunkData;
+    return carveOut;
+  }
+
+  /**
+   * Adopt a decoded store. Refuses a chunk whose geometry is not ours rather
+   * than reshaping it — a mis-shaped chunk would be tunnels in the wrong place,
+   * which is worse than no tunnels (see js/save.js's codec note).
+   */
+  function importCarve(desc) {
+    if (!chunkIx || !desc || !(desc.count > 0)) return false;
+    if (desc.chunkCells && desc.chunkCells !== CHUNK) return false;
+    var n = desc.count, i, j, d, src;
+    if (n > MAX_CHUNKS) n = MAX_CHUNKS;
+    for (i = 0; i < n; i++) {
+      src = desc.data[i];
+      if (!src || src.length !== CHUNK_BYTES) continue;
+      d = chunkFor(desc.level[i] | 0, desc.cx[i] | 0, desc.cy[i] | 0, true);
+      if (!d) break;
+      d.set(src);
+    }
     carved = 0;
-    for (var i = 0; i < mask.length; i++) if (mask[i]) carved++;
+    for (i = 0; i < chunkN; i++) {
+      d = chunkData[i];
+      for (j = 0; j < CHUNK_BYTES; j++) carved += POPCOUNT[d[j]];
+    }
+    ccLv = -1; ccData = null;
     return true;
   }
 
-  var dimsOut = { cols: 0, rows: 0, spacing: 0, x0: 0, y0: 0, length: 0 };
-  /**
-   * Keyed on the ARRAY existing, not on a run being live: js/save.js validates
-   * a decoded mask's length against this, and it does that around load and save
-   * — both of which can happen with no run in progress.
-   */
+  /** Byte -> set bits. Built once; importCarve() is the only caller. */
+  var POPCOUNT = (function () {
+    var t = new Uint8Array(256);
+    for (var i = 0; i < 256; i++) t[i] = (i & 1) + t[i >> 1];
+    return t;
+  })();
+
+  var dimsOut = { spacing: 0, x0: 0, y0: 0, chunkCells: 0, chunkBytes: 0,
+                  chunks: 0, carved: 0 };
+  /** The store's geometry. js/save.js sanity-checks a decode against this. */
   function maskDims() {
-    if (!mask) return null;
-    dimsOut.cols = cols; dimsOut.rows = rows; dimsOut.spacing = SP;
-    dimsOut.x0 = x0; dimsOut.y0 = y0;
-    dimsOut.length = cols * rows;
+    dimsOut.spacing = SP; dimsOut.x0 = x0; dimsOut.y0 = y0;
+    dimsOut.chunkCells = CHUNK; dimsOut.chunkBytes = CHUNK_BYTES;
+    dimsOut.chunks = chunkN; dimsOut.carved = carved;
     return dimsOut;
   }
 
@@ -795,20 +1026,18 @@ SM.advterrain = (function () {
    * to the same band refilled from the side an hour later.
    * =================================================================== */
 
-  /** Clamp and record one band. Rejects a degenerate one rather than clamping. */
-  function pushBand(i, name, topM, botM, widthU) {
-    if (botM > mineDepthM) botM = mineDepthM;
-    if (!(botM > topM)) return;
-    var w = widthU > 0 ? widthU : (LVL_W_BASE + (i - 1) * LVL_W_STEP);
-    if (w > HALF_W * 2) w = HALF_W * 2;
-    if (w < LVL_W_MIN) w = LVL_W_MIN;
-    bands.push({ i: i, name: name || ('LEVEL ' + i),
-                 topM: topM, botM: botM, halfW: w * 0.5 });
+  /** Record one level. Rejects a nameless nothing rather than inventing one. */
+  function pushBand(i, name, topM) {
+    bands.push({ i: i, name: name || ('LEVEL ' + i), topM: topM });
   }
 
   /**
    * Resolve the whole ladder for the live mine, shallowest first. Called once by
    * beginMine(); a ride only ever calls setBand().
+   *
+   * A LEVEL IS NOW JUST A NAME AND A LIFT DEPTH. There is no width and no bottom
+   * to resolve — the map runs east, west and south forever — so this table is
+   * the shortest it has ever been.
    */
   function resolveBands(def) {
     bands.length = 0;
@@ -821,40 +1050,38 @@ SM.advterrain = (function () {
       for (i = 0; i < t.length; i++) {
         e = t[i];
         if (!e) continue;
-        pushBand(num(e.i, i + 1), e.name, num(e.depthTopM, 0),
-                 num(e.depthBotM, mineDepthM), num(e.widthU, 0));
+        pushBand(num(e.i, i + 1), e.name, num(e.depthTopM, 0));
       }
     } else {
-      /* NO BAND TABLE. One level per layer, cumulatively — which is the same cut
-       * js/mines.js makes, so a build with either half missing plays the same
-       * shape of world. */
+      /* NO LEVEL TABLE. One level per layer, at that layer's top — which is the
+       * same cut js/mines.js makes, so a build with either half missing plays
+       * the same shape of world. */
       var src = (def && def.layers && def.layers.length) ? def.layers : DEFAULT_LAYERS;
       var from = 0;
       for (i = 0; i < src.length; i++) {
-        var to = num(src[i].toDepth, mineDepthM);
-        if (i === src.length - 1 || to > mineDepthM) to = mineDepthM;
-        pushBand(bands.length + 1, src[i].name, from, to, 0);
-        from = to;
-        if (from >= mineDepthM) break;
+        pushBand(i + 1, src[i].name, from);
+        from = num(src[i].toDepth, from);
       }
     }
     // A mine with no usable table at all is still one whole level, not a crash.
-    if (!bands.length) {
-      pushBand(1, (def && def.name) || 'LEVEL 1', 0, mineDepthM, 0);
-    }
+    if (!bands.length) pushBand(1, (def && def.name) || 'LEVEL 1', 0);
   }
 
   /**
-   * ACTIVATE BAND L (1-based, clamped). Everything the rest of the file needs is
+   * ACTIVATE LEVEL L (1-based, clamped). Everything the rest of the file needs is
    * derived here and nowhere else.
    *
-   * THE BAND IS AN INTEGER CELL RECTANGLE FIRST and a world box second, and that
-   * order is the whole trick. Both ends of the row range come from cellYOf(), so
-   * consecutive bands are exactly disjoint — [R0, R1) then [R1, R2) — with no
-   * shared row and no gap, which is what makes the ONE whole-mine carve mask a
-   * per-level mask for free. The world edges are then read back off the lattice
-   * (rowTopY / colEdgeX) rather than from the metres, so the seal, the streaming
-   * clamp and the despawn cuts all land on the SAME lines.
+   * THE CEILING IS AN INTEGER CELL ROW FIRST and a world line second, and that
+   * order is the whole trick: the row comes from cellYOf() and the world line is
+   * read back off the lattice with rowTopY(), so the seal test, the streaming
+   * clamp and the despawn cuts all land on the SAME line.
+   *
+   * AND THIS IS WHERE A LEVEL BECOMES A WORLD. genSeed folds the level index into
+   * the mine seed before ANY geology is resolved, so buildLevel() below derives a
+   * different set of structures for every level from the same coordinates. That
+   * is the levels-as-maps guarantee: there is no rock between two levels because
+   * there is no space between them — they are the same space, hashed differently,
+   * and only the lift crosses.
    */
   function setBand(L) {
     var n = bands.length;
@@ -864,41 +1091,20 @@ SM.advterrain = (function () {
     if (i > n) i = n;
     var b = bands[i - 1];
     bandN = i;
+    genSeed = h3(mineSeed, S_LEVEL, i) | 0;
+    ccLv = -1; ccData = null;         // the carve cache is per level
 
     bandR0 = cellYOf(yOfDepth(b.topM));
-    bandR1 = cellYOf(yOfDepth(b.botM));
-    if (bandR0 < 0) bandR0 = 0;
-    if (bandR1 > rows) bandR1 = rows;
-    /* A band has to be able to HOLD the seal and a chamber. A layer table thin
-     * enough to fail this is a data bug, but a data bug must not produce an
-     * inverted rectangle here — every clamp downstream is derived from it. */
-    var minRows = SEAL_ROWS * 2 + Math.ceil((DOOR_RY * 2 + SP) / SP) + 2;
-    if (bandR1 - bandR0 < minRows) {
-      bandR1 = bandR0 + minRows;
-      if (bandR1 > rows) { bandR1 = rows; bandR0 = bandR1 - minRows; }
-      if (bandR0 < 0) bandR0 = 0;
-    }
-
-    var hw = b.halfW > HALF_W ? HALF_W : b.halfW;
-    bandC0 = colOfX(-hw);
-    bandC1 = colOfX(hw) + 1;
-    if (bandC0 < 0) bandC0 = 0;
-    if (bandC1 > cols) bandC1 = cols;
-
     bandTopY = rowTopY(bandR0);
-    bandBotY = rowTopY(bandR1);
-    bandXL = colEdgeX(bandC0);
-    bandXR = colEdgeX(bandC1);
-
-    // The playable void, INSIDE the seal. This is getLevelBounds().
+    // The playable void, BELOW the ceiling. This is getLevelBounds().topY.
     lvlTopY = rowTopY(bandR0 + SEAL_ROWS);
-    lvlBotY = rowTopY(bandR1 - SEAL_ROWS);
-    var wL = -colEdgeX(bandC0 + SEAL_COLS), wR = colEdgeX(bandC1 - SEAL_COLS);
-    lvlHalfW = wL < wR ? wL : wR;
 
-    /* THE DOORS, hung off the seal's inner face at the top of the band. The
-     * chamber's ceiling IS that face, so the excavation can never eat into the
-     * border it hangs from however the numbers above move. */
+    // The stratum, its ore buckets and its guaranteed lode — all per level.
+    buildLevel(i);
+
+    /* THE DOORS, hung off the ceiling's inner face. The chamber's roof IS that
+     * face, so the excavation can never eat into the border it hangs from
+     * however the numbers above move. */
     doorCeilY = lvlTopY;
     doorCY = doorCeilY + DOOR_RY;
     doorTopY = doorCeilY + DOOR_TOP;
@@ -950,23 +1156,48 @@ SM.advterrain = (function () {
     if (active && bandN !== prev) {
       flushAll();
       needFill = true;
+      /* A DIFFERENT WORLD DESERVES A FRESH SET OF ANNOUNCEMENTS. `annIds` holds
+       * the motherlodes `mine:lode` has already fired for, and a ride makes every
+       * one of them unreachable — the new level's lodes are hashed off a different
+       * genSeed and are new formations, so a ride that kept the old list would
+       * silently spend the twelve slots on rock nobody can visit any more. */
+      annN = 0;
     }
     lastLayer = -1;                    // the stratum is re-announced on arrival
     return getLevelBounds();
   }
 
-  /* THE PLAYABLE BOX, REUSED. js/vehicle.js clamps its position and CLIPS ITS
+  /* THE PLAYABLE EXTENT, REUSED. js/vehicle.js clamps its position and CLIPS ITS
    * CUT BOX to this, and js/camera.js frames it; nothing else in the codebase
-   * should ever spell a level's extent out. Null while no band is active, which
+   * should ever spell a level's extent out. Null while no level is active, which
    * is a state both callers must handle — a zeroed box would pin the machine at
-   * the origin, which is worse than no clamp at all. */
-  var lvlOut = { level: 0, topY: 0, botY: 0, halfW: 0 };
+   * the origin, which is worse than no clamp at all.
+   *
+   * >> THREE OF THE FOUR NUMBERS ARE INFINITY NOW, AND THAT IS THE POINT.
+   * A level map is endless east, west and south, so `botY` and `halfW` are
+   * literally Infinity rather than "a very big number". Infinity is the honest
+   * value AND the safe one: every clamp in the codebase is written as a compare
+   * (`if (x > b.halfW)`, `if (y > b.botY)`), and a compare against Infinity is
+   * simply false, so any consumer this change did not visit degrades to "no
+   * clamp on that side" instead of to a wrong clamp. The two that WERE visited
+   * (js/vehicle.js, js/camera.js) have had their dead sides removed outright, as
+   * the amendment asked — this is the belt to that pair of braces.
+   *
+   * The one thing that is NOT Infinity is `topY`: the bedrock ceiling north of
+   * the lift is the only boundary left in the game, and it is absolute.
+   *
+   * `openX` / `openBot` are the readable form of the same fact, for anything new
+   * that would rather branch on a flag than on an arithmetic special case. */
+  var lvlOut = { level: 0, topY: 0, botY: Infinity, halfW: Infinity,
+                 openX: true, openBot: true };
   function getLevelBounds() {
     if (!bandN) return null;
     lvlOut.level = bandN;
     lvlOut.topY = lvlTopY;
-    lvlOut.botY = lvlBotY;
-    lvlOut.halfW = lvlHalfW;
+    lvlOut.botY = Infinity;
+    lvlOut.halfW = Infinity;
+    lvlOut.openX = true;
+    lvlOut.openBot = true;
     return lvlOut;
   }
 
@@ -1203,16 +1434,16 @@ SM.advterrain = (function () {
       beds: ['limestone', 'sandstone', 'stone'],
       weights: { silver: 5, copper: 3, gold: 2 },
       pocketRate: 0.55, cavernRate: 0.20, seamRate: 0.24, driftRate: 0.16,
-      lodeRate: 0.14, hardnessScale: 1.15, heat: 0.15 },
+      lodeRate: 0.018, hardnessScale: 1.15, heat: 0.15 },
     { toDepth: 460, name: 'GRANITE', fill: 'granite', beds: ['granite', 'stone'],
       weights: { gold: 5, platinum: 2, uranium: 2, silver: 2 },
       pocketRate: 0.32, cavernRate: 0.11, seamRate: 0.14, driftRate: 0.07,
-      lodeRate: 0.26, hardnessScale: 1.3, heat: 0.35 },
+      lodeRate: 0.030, hardnessScale: 1.3, heat: 0.35 },
     { toDepth: 1e9, name: 'THE DEEP', fill: 'obsidian',
       beds: ['obsidian', 'granite', 'bedrock'],
       weights: { platinum: 4, uranium: 4, gold: 2 },
       pocketRate: 0.18, cavernRate: 0.08, seamRate: 0.06, driftRate: 0.02,
-      lodeRate: 0.42, lode: 'ancient', hardnessScale: 1.5, heat: 0.7 }
+      lodeRate: 0.045, lode: 'ancient', hardnessScale: 1.5, heat: 0.7 }
   ];
 
   /** {a:6, b:2} -> flat weighted table. Unknown ids resolve to stone. */
@@ -1294,63 +1525,210 @@ SM.advterrain = (function () {
 
   /**
    * mines.js states pocketRate and cavernRate as "expected per generated
-   * band", where a band is BAND_REF tall and the full shaft wide. Convert to a
+   * band", where a band is BAND_REF tall and RATE_REF_W wide. Convert to a
    * probability per structure cell of the given size.
+   *
+   * RATE_REF_W IS A UNIT, NOT A BOUND — it is the width those rates were
+   * measured at, kept fixed so an endless map generates at the same areal
+   * density the finite one did. See the note by SP.
    */
   function perCell(rate, cw, ch, dflt) {
     var r = num(rate, dflt);
     if (!(r > 0)) return 0;
-    var cellsPerBand = ((HALF_W * 2) / cw) * (BAND_REF / ch);
+    var cellsPerBand = (RATE_REF_W / cw) * (BAND_REF / ch);
     if (!(cellsPerBand > 0)) return 0;
     var p = r / cellsPerBand;
     return p > 0.85 ? 0.85 : p;
   }
 
+  /**
+   * Resolve ONE stratum into the record the generator uses. `k` is 1-based and
+   * only reaches the arithmetic through `f`, the "how deep is this level in the
+   * ladder" fraction every optional rate defaults off — which is what gives an
+   * under-specified layer table the soft-rich-to-hard-barren arc for free.
+   *
+   * `sp` is js/mines.js's levelSpawnOf() record when it exists; `s` is the raw
+   * layer object, which is all this file ever had before and is still the
+   * fallback that keeps it testable on its own.
+   */
+  function buildLayer(k, n, s, sp) {
+    var f = (n <= 1) ? 1 : (k - 1) / (n - 1);
+    var L = {};
+    L.idx = k - 1;
+    L.name = (sp && sp.name) || s.name || ('LAYER ' + k);
+    L.fill = matIdx((sp && sp.fill) || s.fill, 'stone');
+    L.beds = buildBeds({ beds: (sp && sp.beds) || s.beds,
+                         fill: (sp && sp.fill) || s.fill,
+                         hardnessScale: sp ? sp.hardnessScale : s.hardnessScale }, L);
+    L.pocketP = perCell(pick(sp, s, 'pocketRate'), POCKET_W, POCKET_H, 0.9 - 0.7 * f);
+    L.cavernP = perCell(pick(sp, s, 'cavernRate'), CAVERN_W, CAVERN_H, 0.06 + 0.10 * f);
+    L.seamP = num(pick(sp, s, 'seamRate'), 0.38 - 0.26 * f);
+    L.driftP = num(pick(sp, s, 'driftRate'), 0.42 - 0.36 * f);
+    /* THE MOTHERLODE RATE, AND WHY THE DEFAULT MOVED.
+     *
+     * It was `f < 0.55 ? 0 : (f-0.55)/0.45 * 0.42`, which put 0.42 on the deepest
+     * LAYER of every mine — one motherlode per 6.3 million square units. That was
+     * right when the deepest layer was the last two hundred metres of a finite
+     * mine and the whole point was for the bottom to be spectacular.
+     *
+     * A level is an ENDLESS MAP now, so 0.42 means that density forever, and
+     * MEASURED it is not a landmark, it is scenery: a lode paints about 2 100
+     * cells of its own mineral between its shell and its halo, so at 0.42 the
+     * emerald motherlodes of Old Creek's level 3 were 35.6% of all the ore on the
+     * level against a stated table share of 4.7%, and doubled what a hold out of
+     * it was worth against the price the level is sold at.
+     *
+     * The new ladder targets one ROLLED lode per ~90 million square units, which
+     * is about one every four expeditions at this mode's window width, and puts
+     * them at roughly a tenth of a level's ore. Every level also has one
+     * GUARANTEED lode a couple of hundred metres south of its own lift, which is
+     * the one every player finds, so "rare" here never means "never". */
+    L.lodeP = num(pick(sp, s, 'lodeRate'), f < 0.4 ? 0 : (f - 0.4) / 0.6 * 0.045);
+    L.bedPitch = num((sp && sp.bedPitch) || s.bedPitch,
+                     BED_PITCH * (0.78 + h3(mineSeed ^ S_BED, k, 5) / 4294967296 * 0.55));
+    L.hardnessScale = num(sp ? sp.hardnessScale : s.hardnessScale, 1);
+    L.heat = num(sp ? sp.heat : s.heat, 0);
+    L.vug = num(pick(sp, s, 'vugChance'), 0.16 - 0.10 * f);
+    /* THE ANCIENT DEBRIS RATE, per structure cell. Its grid is coarse, so this
+     * is a small probability on a rare gather rather than a rare probability on
+     * a common one. */
+    L.debP = perCell(sp ? sp.debrisRate : 0, DEB_W, DEB_H, 0);
+    L.debMat = matIdx((sp && sp.debrisMat) || 'ancient', 'starcore');
+    L.debCells = num(sp ? sp.debrisCells : 0, 3);
+    return L;
+  }
+
+  /** mines.js's value if it stated one (>= 0), else the layer's, else undefined. */
+  function pick(sp, s, key) {
+    if (sp && typeof sp[key] === 'number' && sp[key] >= 0) return sp[key];
+    return s ? s[key] : undefined;
+  }
+
+  /**
+   * Resolve the whole ladder once per mine. Every entry is a LEVEL's stratum
+   * now, not a depth range: `toY` is gone because a level does not end.
+   */
   function buildLayers(def) {
     layers.length = 0;
     var src = (def && def.layers && def.layers.length) ? def.layers : DEFAULT_LAYERS;
     var n = src.length;
     for (var i = 0; i < n; i++) {
-      var s = src[i] || {};
-      // Relative depth of this layer, 0 = shallowest .. 1 = deepest. Every
-      // optional rate defaults off this, which is what gives an under-specified
-      // layer table the arc described in the header for free.
-      var f = (n <= 1) ? 1 : i / (n - 1);
-      var L = {};
-      L.idx = i;
-      L.name = s.name || ('LAYER ' + (i + 1));
-      L.toDepth = num(s.toDepth, 1e9);
-      L.toY = yOfDepth(L.toDepth);
-      L.fill = matIdx(s.fill, 'stone');
-      L.beds = buildBeds(s, L);
-      L.ores = buildWeights(s.weights);
-      L.pocketP = perCell(s.pocketRate, POCKET_W, POCKET_H, 0.9 - 0.7 * f);
-      L.cavernP = perCell(s.cavernRate, CAVERN_W, CAVERN_H, 0.06 + 0.10 * f);
-      L.seamP = num(s.seamRate, 0.38 - 0.26 * f);
-      L.driftP = num(s.driftRate, 0.42 - 0.36 * f);
-      L.lodeP = num(s.lodeRate, f < 0.55 ? 0 : (f - 0.55) / 0.45 * 0.42);
-      L.lodeMat = s.lode ? matIdx(s.lode, 'ancient')
-        : ((i === n - 1 && mineDepthM >= ANCIENT_DEPTH_M)
-            ? matIdx('ancient', 'starcore')
-            : richestOre(L.ores));
-      L.bedPitch = num(s.bedPitch, BED_PITCH * (0.78 + hv(S_BED, i, 5) * 0.55));
-      L.hardnessScale = num(s.hardnessScale, 1);
-      L.heat = num(s.heat, 0);
-      L.vug = num(s.vugChance, 0.16 - 0.10 * f);
-      layers.push(L);
+      var sp = null;
+      if (SM.mines && SM.mines.levelSpawnOf && def) {
+        try { sp = SM.mines.levelSpawnOf(def, i + 1); } catch (e) { sp = null; }
+      }
+      layers.push(buildLayer(i + 1, n, src[i] || {}, sp));
     }
-    // The deepest layer always runs to the bottom of the world, whatever it
-    // declared: below it there is only bedrock, and that is floorY's job.
-    layers[layers.length - 1].toY = 1e12;
   }
 
+  /* THE WHOLE MAP IS ONE STRATUM. These two used to walk a depth ladder; there
+   * is no ladder inside a level any more (js/mines.js design note 4e), so they
+   * answer the ACTIVE level's layer at every y and only fall back to the depth
+   * lookup when nothing is active — which is what keeps getLayers()/layerAtY()
+   * meaningful for a caller asking between runs. */
   function layerIndexAtY(y) {
-    for (var i = 0; i < layers.length; i++) if (y < layers[i].toY) return i;
-    return layers.length - 1;
+    if (bandN) return bandN - 1 < layers.length ? bandN - 1 : layers.length - 1;
+    return 0;
   }
   function layerAtY(y) {
     if (!layers.length) return null;
+    if (lvl) return lvl;
     return layers[layerIndexAtY(y)];
+  }
+
+  /* ======================================================================
+   * THE SOUTHWARD WHISPER — baked, never computed per cell
+   * ---------------------------------------------------------------------
+   * js/mines.js owns HOW MUCH the ore table drifts as the player works south
+   * (design note 4e); this owns making that free to ask about. The drift is
+   * quantised into ORE_BUCKETS weighted tables built once per level, so
+   * cellMaterialAt() and probeAll() both resolve a structure's table with one
+   * multiply, one floor and an array index — no allocation, and byte-identical
+   * whichever direction the streamer arrives from.
+   *
+   * TWO VISITS TO THE SAME ROCK MUST AGREE, which is why the bucket is a
+   * function of the structure's own y and nothing else. It is deliberately NOT a
+   * function of the machine's depth: that would make the same pocket contain
+   * different ore depending on where you were standing when it streamed in.
+   * =================================================================== */
+  var ORE_BUCKETS = 12;
+  var oreTab = [];                // ORE_BUCKETS weighted tables, richest last
+  var oreDens = new Float32Array(ORE_BUCKETS);   // ...and the density multiplier
+  var driftCapM = 1000;           // metres south at which the whisper plateaus
+  var driftW = {};                // scratch, reused by buildLevel only
+
+  /** 0..1 along the whisper, from a world y. Clamped, so a bucket is always valid. */
+  function driftT(y) {
+    if (!(driftCapM > 0)) return 0;
+    var m = (y - lvlTopY) * A.METERS_PER_UNIT;
+    if (!(m > 0)) return 0;
+    var t = m / driftCapM;
+    return t > 1 ? 1 : t;
+  }
+  function bucketOf(y) {
+    var b = Math.floor(driftT(y) * ORE_BUCKETS);
+    if (b < 0) b = 0;
+    if (b >= ORE_BUCKETS) b = ORE_BUCKETS - 1;
+    return b;
+  }
+  /** The ore lottery in force at world y. Never null once a level is active. */
+  function oresAt(y) { return oreTab[bucketOf(y)] || (lvl ? lvl.ores : null); }
+  /** ...and the ore-density multiplier there, for pocket and seam rates. */
+  function densAt(y) { return oreDens[bucketOf(y)] || 1; }
+
+  /**
+   * ACTIVATE ONE LEVEL'S GEOLOGY. Called from setBand() before anything reads a
+   * structure, and it is the only place `lvl`, the buckets and the guaranteed
+   * motherlode are written.
+   */
+  function buildLevel(k) {
+    lvl = layers.length ? layers[(k - 1 < layers.length) ? k - 1 : layers.length - 1]
+                        : null;
+    oreTab.length = 0;
+
+    var sp = null;
+    if (SM.mines && SM.mines.levelSpawnOf && mineDef) {
+      try { sp = SM.mines.levelSpawnOf(mineDef, k); } catch (e) { sp = null; }
+    }
+    var dr = (SM.mines && SM.mines.getSouthDrift) ? SM.mines.getSouthDrift() : null;
+    var cap = dr ? num(dr.cap, 0) : 0;
+    var densK = dr ? num(dr.density, 0) : 0;
+    driftCapM = (dr && dr.fullM > 0) ? dr.fullM : 1;
+
+    var i, g;
+    for (i = 0; i < ORE_BUCKETS; i++) {
+      /* The bucket's REPRESENTATIVE g is its midpoint, so the quantisation error
+       * is half a bucket either way rather than a whole one at the top. */
+      g = cap * ((i + 0.5) / ORE_BUCKETS);
+      if (sp && SM.mines.driftedWeights) {
+        SM.mines.driftedWeights(sp, g, driftW);
+        oreTab.push(buildWeights(driftW));
+      } else {
+        // No spawn table (a stub catalogue, or the default profile): the layer's
+        // own weights, undrifted. The world still works; it just never whispers.
+        oreTab.push(buildWeights(rawWeightsOfLevel(k)));
+      }
+      oreDens[i] = 1 + densK * g;
+    }
+    if (lvl) lvl.ores = oreTab[0];
+
+    /* THE LEVEL'S HEADLINE FORMATION. `lode` names it when js/mines.js has an
+     * opinion; otherwise it is the best ore the level's own table carries. */
+    if (lvl) {
+      lvl.lodeMat = (sp && sp.lode) ? matIdx(sp.lode, 'silver')
+                                    : richestOre(oreTab[ORE_BUCKETS - 1]);
+    }
+    buildGuaranteedLode();
+  }
+
+  /** The undrifted weights of level k, straight off the layer table. */
+  function rawWeightsOfLevel(k) {
+    var src = (mineDef && mineDef.layers && mineDef.layers.length)
+      ? mineDef.layers : DEFAULT_LAYERS;
+    var j = k - 1;
+    if (j < 0) j = 0;
+    if (j >= src.length) j = src.length - 1;
+    return src[j] ? src[j].weights : null;
   }
 
   /* ======================================================================
@@ -1369,12 +1747,12 @@ SM.advterrain = (function () {
    * pocket means the ore was taken out a century ago, which is the truth we
    * want, and it also stops a drift being blocked by geology it predates.
    * =================================================================== */
-  var K_LODE = 0, K_CAVERN = 1, K_POCKET = 2;
+  var K_LODE = 0, K_CAVERN = 1, K_POCKET = 2, K_DEBRIS = 3;
 
   // Sized for the widest strip a 2D window generates (a full window-wide row),
-  // with headroom: a 5200-unit mine's shallow layers can put a dozen pockets
-  // and a couple of caverns across one row, and a dropped blob would be a
-  // formation the scanner reports and the rock does not contain.
+  // with headroom: a rich shallow level can put a dozen pockets and a couple of
+  // caverns across one row, and a dropped blob would be a formation the scanner
+  // reports and the rock does not contain.
   var BLOB_MAX = 64;
   var bbX = new Float32Array(BLOB_MAX);
   var bbY = new Float32Array(BLOB_MAX);
@@ -1438,62 +1816,47 @@ SM.advterrain = (function () {
    * natural cavern, and across the cavern wall is an enormous glittering
    * mineral vein" and not as "a bigger ore pocket".
    *
-   * Every mine gets exactly ONE guaranteed lode, placed deterministically in
-   * the lowest 20-140 m of its stated depth — the reward for going all the way
-   * down is never a coin flip. Deep layers then roll for extra ones on the
-   * LODE_H grid, so a big mine can hold several and a shallow one holds only
-   * the guaranteed one.
+   * EVERY LEVEL gets exactly ONE guaranteed lode, placed deterministically a
+   * couple of hundred metres SOUTH OF ITS OWN LIFT — the reward for committing to
+   * a direction is never a coin flip. The rest of the map then rolls for more on
+   * the LODE_W x LODE_H lattice, which tiles outward forever, so a level that is
+   * worked hard keeps producing them at a steady areal density.
    * ------------------------------------------------------------------ */
 
   /** Fill the lode scratch slots for grid cell (i, j). -> true if one exists. */
   var lodeX = 0, lodeY = 0, lodeRX = 0, lodeRY = 0, lodeMat = 0, lodeShell = 0, lodeId = 0;
 
   function lodeOfCell(i, j) {
+    if (!lvl || lvl.lodeP <= 0) return false;
     var yc = (j + 0.5) * LODE_H + (hv(S_LODE, i * 71 + 1, j) - 0.5) * LODE_H * 0.7;
-    var L = layerAtY(yc);
-    if (!L || L.lodeP <= 0) return false;
-    if (hv(S_LODE, i * 71 + 2, j) >= L.lodeP) return false;
-    return describeLode(i, j, yc, L, 1.0, false);
+    if (yc < lvlTopY) return false;         // north of the ceiling: no world there
+    if (hv(S_LODE, i * 71 + 2, j) >= lvl.lodeP) return false;
+    return describeLode(i, j, yc, 1.0, false);
   }
 
   /**
    * Resolve one motherlode into the scratch slots.
-   * `centred` is the guaranteed lode: it is placed near the MINE'S centre line
-   * rather than anywhere across the width (see LODE_GUARANTEED_X), because it is
-   * the payoff for DEPTH. That line is x = 0, which is also where the doors are —
-   * see the note on LODE_GUARANTEED_X for why it is an absolute position and why
-   * re-keying it per level would be a regeneration rather than a relocation.
+   * `centred` is the guaranteed lode: it is placed near the LEVEL'S CENTRE LINE
+   * (see GLD_X), which is also the line the doors are on, because it is the
+   * payoff for driving south rather than for wandering. Rolled lodes are anchored
+   * to their own lattice cell and are free to be anywhere at all — there are no
+   * walls to pull them inside any more, which is two clamps and a reject that
+   * this function no longer needs.
    */
-  function describeLode(i, j, yc, L, scale, centred) {
-    if (!L) return false;
-    lodeId = h3(mineSeed ^ S_LODE, i * 71 + 7, j) | 0;
+  function describeLode(i, j, yc, scale, centred) {
+    if (!lvl) return false;
+    lodeId = h3(genSeed ^ S_LODE, i * 71 + 7, j) | 0;
     lodeRX = lerp(LODE_RX[0], LODE_RX[1], hv(S_LODE, i * 71 + 3, j)) * scale;
     lodeRY = lerp(LODE_RY[0], LODE_RY[1], hv(S_LODE, i * 71 + 4, j)) * scale;
-    // Keep the whole chamber inside the shaft, shell included.
-    var inset = lodeRX * Math.sqrt(LODE_SHELL[1]) + 30;
     var u = hv(S_LODE, i * 71 + 5, j);
-    if (centred) {
-      var span = HALF_W - inset;
-      if (span > LODE_GUARANTEED_X) span = LODE_GUARANTEED_X;
-      if (span < 0) span = 0;
-      lodeX = (u * 2 - 1) * span;
-    } else {
-      /* Anchored to the lode grid cell, then pulled inside the walls. The
-       * REJECT comes first and matters: the i-range a caller scans is padded by
-       * the halo reach, so without it every cell beyond the wall would resolve
-       * to a lode clamped ONTO the wall and a wide mine would grow a stack of
-       * them along both edges. A cell whose anchor is outside the mine has no
-       * lode; a cell whose anchor is inside keeps it, hugging the wall if it
-       * must. */
-      lodeX = (i + u) * LODE_W;
-      if (lodeX < -HALF_W || lodeX > HALF_W) return false;
-      var lim = HALF_W - inset;
-      if (lim < 0) lim = 0;
-      if (lodeX > lim) lodeX = lim; else if (lodeX < -lim) lodeX = -lim;
-    }
+    lodeX = centred ? (u * 2 - 1) * GLD_X : (i + u) * LODE_W;
     lodeY = yc;
     lodeShell = lerp(LODE_SHELL[0], LODE_SHELL[1], hv(S_LODE, i * 71 + 6, j));
-    lodeMat = L.lodeMat;
+    /* THE MATERIAL COMES FROM THE LEVEL, NOT THE DEPTH. A level is one stratum
+     * everywhere on its map, so its headline formation is the same mineral at the
+     * lift as it is a kilometre south — the whisper moves the ORE LOTTERY, never
+     * what the mine is famous for. */
+    lodeMat = lvl.lodeMat;
     return true;
   }
 
@@ -1504,20 +1867,18 @@ SM.advterrain = (function () {
   function cellI0(xLo, w, pad) { return Math.floor((xLo - pad) / w); }
   function cellI1(xHi, w, pad) { return Math.floor((xHi + pad) / w); }
 
-  /** The guaranteed motherlode of this mine. Cached; depends only on the seed. */
+  /** The guaranteed motherlode of the ACTIVE LEVEL. Rebuilt by buildLevel(). */
   var gldValid = false, gldX = 0, gldY = 0, gldRX = 0, gldRY = 0,
       gldMat = 0, gldShell = 0, gldId = 0;
 
   function buildGuaranteedLode() {
     gldValid = false;
-    if (!layers.length) return;
-    var bottom = yOfDepth(mineDepthM);
-    var up = 200 + hv(S_LODE, 991, 1) * 1200;      // 20-140 m above the floor
-    var yc = bottom - up;
-    if (yc < yOfDepth(20)) yc = yOfDepth(20);
-    var L = layerAtY(yc);
-    // A little bigger than a rolled one: this is the mine's headline formation.
-    if (!describeLode(0, 991, yc, L, 1.18, true)) return;
+    if (!lvl) return;
+    /* SOUTH OF THIS LEVEL'S LIFT, not above the mine's floor — see GLD_DEPTH_U.
+     * The old placement was measured up from a bottom that no longer exists. */
+    var yc = lvlTopY + GLD_DEPTH_U + hv(S_LODE, 991, 1) * GLD_SPREAD_U;
+    // A little bigger than a rolled one: this is the level's headline formation.
+    if (!describeLode(0, 991, yc, 1.18, true)) return;
     gldValid = true;
     gldX = lodeX; gldY = lodeY; gldRX = lodeRX; gldRY = lodeRY;
     gldMat = lodeMat; gldShell = lodeShell; gldId = lodeId;
@@ -1565,14 +1926,14 @@ SM.advterrain = (function () {
   }
 
   /* ----- caverns ------------------------------------------------------
-   * A STRUCTURE BELONGS TO THE LAYER ITS CENTRE IS IN, not to the layer of the
-   * row we happen to be filling. That is not a detail: probeAll() (the
-   * scanner) asks about structures without any row context at all, so if the
-   * two disagreed the scanner would report formations that do not exist, and
-   * miss ones that do, everywhere near a layer boundary. Both paths resolve the
-   * layer the same way — from the structure's own hashed centre.
+   * A STRUCTURE'S ORE COMES FROM ITS OWN CENTRE, not from the row we happen to
+   * be filling. That is not a detail: probeAll() (the scanner) asks about
+   * structures without any row context at all, so if the two disagreed the
+   * scanner would report formations that do not exist, and miss ones that do.
+   * Both paths resolve the lottery the same way — oresAt(the structure's y).
    * ------------------------------------------------------------------ */
   function gatherCaverns(ry, gxLo, gxHi) {
+    if (!lvl || lvl.cavernP <= 0) return;
     var i0 = cellI0(gxLo, CAVERN_W, CAVERN_MAX_R + CAVERN_W);
     var i1 = cellI1(gxHi, CAVERN_W, CAVERN_MAX_R + CAVERN_W);
     var j0 = Math.floor((ry - CAVERN_MAX_R - SP) / CAVERN_H);
@@ -1580,9 +1941,8 @@ SM.advterrain = (function () {
     for (var j = j0; j <= j1; j++) {
       for (var i = i0; i <= i1; i++) {
         var cyw = j * CAVERN_H + hv(S_CAV, i * 31 + 4, j) * CAVERN_H;
-        var L = layerAtY(cyw);
-        if (!L || L.cavernP <= 0) continue;
-        if (hv(S_CAV, i, j) >= L.cavernP) continue;
+        if (cyw < lvlTopY) continue;
+        if (hv(S_CAV, i, j) >= lvl.cavernP) continue;
         var rx = lerp(CAVERN_MIN_R, CAVERN_MAX_R, hv(S_CAV, i * 31 + 1, j));
         var ryd = rx * lerp(0.44, 0.86, hv(S_CAV, i * 31 + 2, j));
         var cxw = i * CAVERN_W + hv(S_CAV, i * 31 + 3, j) * CAVERN_W;
@@ -1592,14 +1952,22 @@ SM.advterrain = (function () {
           : 1;
         var dy = ry - cyw; if (dy < 0) dy = -dy;
         if (dy > ryd * Math.sqrt(shell) + SP) continue;
-        var m = mineral && L.ores ? pickWeighted(L.ores, hv(S_CAVM, i + 13, j)) : -1;
-        pushBlob(cxw, cyw, rx, ryd, m, shell, K_CAVERN, h3(mineSeed ^ S_CAV, i, j) | 0);
+        var w = oresAt(cyw);
+        var m = mineral && w ? pickWeighted(w, hv(S_CAVM, i + 13, j)) : -1;
+        pushBlob(cxw, cyw, rx, ryd, m, shell, K_CAVERN, h3(genSeed ^ S_CAV, i, j) | 0);
       }
     }
   }
 
-  /* ----- ore pockets -------------------------------------------------- */
+  /* ----- ore pockets --------------------------------------------------
+   * THE POCKET RATE CARRIES THE DENSITY HALF OF THE SOUTHWARD WHISPER, which is
+   * why the probability is read per structure rather than once per gather: two
+   * pockets a few hundred metres apart legitimately roll against different
+   * numbers, and each must roll against the one at ITS OWN y or the same pocket
+   * would exist or not depending on which row streamed it in.
+   * ------------------------------------------------------------------ */
   function gatherPockets(ry, gxLo, gxHi) {
+    if (!lvl || lvl.pocketP <= 0) return;
     var i0 = cellI0(gxLo, POCKET_W, POCKET_BIG_R + POCKET_W);
     var i1 = cellI1(gxHi, POCKET_W, POCKET_BIG_R + POCKET_W);
     var j0 = Math.floor((ry - POCKET_BIG_R - SP) / POCKET_H);
@@ -1607,9 +1975,10 @@ SM.advterrain = (function () {
     for (var j = j0; j <= j1; j++) {
       for (var i = i0; i <= i1; i++) {
         var cyw = j * POCKET_H + hv(S_POCK, i * 17 + 5, j) * POCKET_H;
-        var L = layerAtY(cyw);
-        if (!L || L.pocketP <= 0) continue;
-        if (hv(S_POCK, i, j) >= L.pocketP) continue;
+        if (cyw < lvlTopY) continue;
+        var p = lvl.pocketP * densAt(cyw);
+        if (p > 0.85) p = 0.85;
+        if (hv(S_POCK, i, j) >= p) continue;
         var big = hv(S_POCK, i * 17 + 1, j) < POCKET_BIG;
         var rx = big
           ? lerp(POCKET_MAX_R, POCKET_BIG_R, hv(S_POCK, i * 17 + 2, j))
@@ -1621,9 +1990,44 @@ SM.advterrain = (function () {
         // A minority of pockets are VUGS — hollow, not ore. They are what stops
         // "a blob in the wall" from always meaning "money", so breaking into
         // one is a real (small) disappointment rather than a free reward.
-        var vug = hv(S_POCKM, i, j) < L.vug;
-        var m = vug ? -1 : pickWeighted(L.ores, hv(S_POCKM, i + 5, j));
-        pushBlob(cxw, cyw, rx, ryd, m, 1, K_POCKET, h3(mineSeed ^ S_POCK, i, j) | 0);
+        var vug = hv(S_POCKM, i, j) < lvl.vug;
+        var m = vug ? -1 : pickWeighted(oresAt(cyw), hv(S_POCKM, i + 5, j));
+        pushBlob(cxw, cyw, rx, ryd, m, 1, K_POCKET, h3(genSeed ^ S_POCK, i, j) | 0);
+      }
+    }
+  }
+
+  /* ----- ANCIENT DEBRIS ------------------------------------------------
+   * The rare find, and the only thing in the world that is an EVENT.
+   *
+   * A tight scatter of the richest material in the game on its own coarse
+   * lattice, at a rate js/mines.js states PER LEVEL (design note 4e). It is
+   * pushed as a K_POCKET blob with its own material so that every downstream
+   * path — the shell/lens test in cellMaterialAt(), the scanner's contact
+   * merging, the renderer's lode bloom — treats it as the ore body it is,
+   * without a single special case anywhere but here.
+   *
+   * `fill` is what makes it DEBRIS rather than a lens: the per-cell rim hash is
+   * used to punch most of the blob back out to country rock, so what is left is
+   * a handful of glittering fragments in the wall rather than a solid nugget.
+   * ------------------------------------------------------------------ */
+  function gatherDebris(ry, gxLo, gxHi) {
+    if (!lvl || lvl.debP <= 0) return;
+    var i0 = cellI0(gxLo, DEB_W, DEB_R[1] + DEB_W);
+    var i1 = cellI1(gxHi, DEB_W, DEB_R[1] + DEB_W);
+    var j0 = Math.floor((ry - DEB_R[1] - SP) / DEB_H);
+    var j1 = Math.floor((ry + DEB_R[1] + SP) / DEB_H);
+    for (var j = j0; j <= j1; j++) {
+      for (var i = i0; i <= i1; i++) {
+        var cyw = j * DEB_H + hv(S_DEB, i * 37 + 3, j) * DEB_H;
+        if (cyw < lvlTopY) continue;
+        if (hv(S_DEB, i, j) >= lvl.debP) continue;
+        var r = lerp(DEB_R[0], DEB_R[1], hv(S_DEB, i * 37 + 1, j));
+        var cxw = i * DEB_W + hv(S_DEB, i * 37 + 2, j) * DEB_W;
+        var dy = ry - cyw; if (dy < 0) dy = -dy;
+        if (dy > r + SP) continue;
+        pushBlob(cxw, cyw, r, r, lvl.debMat, 1, K_DEBRIS,
+                 h3(genSeed ^ S_DEBC, i, j) | 0);
       }
     }
   }
@@ -1644,21 +2048,16 @@ SM.advterrain = (function () {
   var dfX = 0, dfY = 0, dfW = 0, dfH = 0, dfId = 0;
 
   function driftOfCell(i, j) {
+    if (!lvl || lvl.driftP <= 0) return false;
     var yc = j * DRIFT_H + hv(S_DRIFT, i * 53 + 2, j) * DRIFT_H;
-    var L = layerAtY(yc);
-    if (!L || L.driftP <= 0) return false;
-    if (hv(S_DRIFT, i * 53 + 1, j) >= L.driftP) return false;
+    if (yc < lvlTopY) return false;         // north of the ceiling: no world there
+    if (hv(S_DRIFT, i * 53 + 1, j) >= lvl.driftP) return false;
     var w = lerp(DRIFT_MIN_W, DRIFT_MAX_W, hv(S_DRIFT, i * 53 + 4, j));
-    // Anchored to the cell, rejected if the cell is not in this mine, then
-    // pulled inside the walls — see the note in describeLode().
-    var cx = (i + hv(S_DRIFT, i * 53 + 5, j)) * DRIFT_W;
-    if (cx < -HALF_W || cx > HALF_W) return false;
-    var lim = HALF_W - w * 0.5 - 20;
-    if (lim < 0) lim = 0;
-    if (cx > lim) cx = lim; else if (cx < -lim) cx = -lim;
-    dfX = cx; dfY = yc; dfW = w;
+    // Anchored to the cell. There are no walls to pull it inside any more.
+    dfX = (i + hv(S_DRIFT, i * 53 + 5, j)) * DRIFT_W;
+    dfY = yc; dfW = w;
     dfH = SP * lerp(1.7, 3.1, hv(S_DRIFT, i * 53 + 3, j));
-    dfId = h3(mineSeed ^ S_DRIFT, i * 53 + 9, j) | 0;
+    dfId = h3(genSeed ^ S_DRIFT, i * 53 + 9, j) | 0;
     return true;
   }
 
@@ -1706,13 +2105,19 @@ SM.advterrain = (function () {
    * ------------------------------------------------------------------ */
   function prepareSeam(ry) {
     seamOn = false;
+    if (!lvl || lvl.seamP <= 0) return;
     var si = Math.floor(ry / SEAM_PITCH);
     for (var k = -1; k <= 1; k++) {
       var j = si + k;
       var cyc = (j + 0.18 + hv(S_SEAM, j, 101) * 0.64) * SEAM_PITCH;
-      var L = layerAtY(cyc);
-      if (!L || L.seamP <= 0 || !L.ores) continue;
-      if (hv(S_SEAM, j, L.idx) >= L.seamP) continue;
+      if (cyc < lvlTopY) continue;
+      var w = oresAt(cyc);
+      if (!w) continue;
+      // Seams carry the density half of the whisper too — a level worked south
+      // has more ore beds in it as well as better ones.
+      var p = lvl.seamP * densAt(cyc);
+      if (p > 0.9) p = 0.9;
+      if (hv(S_SEAM, j, lvl.idx) >= p) continue;
       var half = SP * lerp(0.7, 2.3, hv(S_SEAM, j, 202));
       if (ry < cyc - half - SEAM_WARP - SP) continue;
       if (ry > cyc + half + SEAM_WARP + SP) continue;
@@ -1720,7 +2125,7 @@ SM.advterrain = (function () {
       seamJ = j;
       seamCy = cyc;
       seamHalf = half;
-      seamMat = pickWeighted(L.ores, hv(S_SEAMM, j, L.idx));
+      seamMat = pickWeighted(w, hv(S_SEAMM, j, lvl.idx));
       seamPinch = lerp(0.30, 0.64, hv(S_SEAM, j, 303));
       return;
     }
@@ -1728,14 +2133,19 @@ SM.advterrain = (function () {
 
   /**
    * Gather the structures that can touch row `cy` between world x `gxLo` and
-   * `gxHi`. The x range is the STRIP being filled, not the mine: a column strip
+   * `gxHi`. The x range is the STRIP being filled, not the world: a column strip
    * asks about 21 units of rock and a row strip about the width of the window,
-   * and the cost of the gather tracks that instead of the mine's width.
+   * and the cost of the gather tracks that. In an endless map that is not an
+   * optimisation any more, it is the only thing that makes the gather finite.
    */
   function prepareRow(cy, ry, L, gxLo, gxHi) {
     bbN = 0;
     gxA = gxLo; gxB = gxHi;
     gatherLodes(ry, gxLo, gxHi);
+    /* DEBRIS OUTRANKS EVERYTHING BUT A MOTHERLODE. A scatter inside a coal
+     * pocket has to read as the find it is, not as coal that happens to have
+     * been rolled second. */
+    gatherDebris(ry, gxLo, gxHi);
     gatherCaverns(ry, gxLo, gxHi);
     gatherPockets(ry, gxLo, gxHi);
     gatherDrifts(ry, gxLo, gxHi);
@@ -1761,14 +2171,13 @@ SM.advterrain = (function () {
     if (py < doorCY + DOOR_RY && py > doorCeilY &&
         px > -DOOR_HW && px < DOOR_HW && inDoorVoid(px, py)) return -1;
 
-    /* --- the floor of the mine --------------------------------------- */
-    if (py > floorY) {
-      // A ragged top surface so the floor does not read as a drawn line.
-      if (py < floorY + SP * 1.5 && hv(S_FLOOR, cx, cy) < 0.35) return M_GRANITE;
-      return M_BEDROCK;
-    }
+    /* THERE IS NO FLOOR. The mine used to end in bedrock at its stated depth and
+     * this is where that was expressed; a level map runs south without limit now
+     * (ARCHITECTURE.md §7), and the ONLY bedrock in the world is the ceiling —
+     * which is tested one level up, in generateRowStrip(), because it has to beat
+     * the carve store. Nothing replaces this branch. */
 
-    /* --- blobs: motherlode, then cavern, then pocket ------------------ */
+    /* --- blobs: motherlode, debris, cavern, then pocket --------------- */
     for (i = 0; i < bbN; i++) {
       dx = (px - bbX[i]) / bbRX[i];
       dy = (py - bbY[i]) / bbRY[i];
@@ -1782,6 +2191,18 @@ SM.advterrain = (function () {
          * back into rock instead of stopping dead. */
         var e = (t - 1) / (sh - 1);
         if (e > 0.5 && hv(S_RIM, cx ^ bbId[i], cy) < (e - 0.5) / 0.5) continue;
+        return bbMat[i];
+      }
+
+      /* ANCIENT DEBRIS IS A SCATTER, NOT A LENS. Most of the blob is punched
+       * back out to country rock, so what the player breaks into is a handful of
+       * fragments glittering in the wall — which is what "debris" means and what
+       * keeps the payout of one find bounded and legible. The fill fraction is
+       * hashed per cluster, so no two look alike. */
+      if (bbKind[i] === K_DEBRIS) {
+        var fill = lerp(DEB_FILL[0], DEB_FILL[1],
+                        (bbId[i] >>> 8 & 1023) / 1023);
+        if (hv(S_DEB, cx ^ bbId[i], cy) >= fill * (1 - t * 0.55)) continue;
         return bbMat[i];
       }
 
@@ -2193,20 +2614,21 @@ SM.advterrain = (function () {
     winL = cx - hw; winR = cx + hw;
     winTop = cy - hh; winBot = cy + hh;
 
-    /* 4: THE LEVEL IS THE WORLD. Clamp to the active band on all four sides —
-     * this file used to have no world-y bound at all, because there was only ever
-     * one continuous field. Clamping (rather than sliding the window back inside)
-     * is right twice over: it never generates rock the level does not have, and it
-     * can only ever REDUCE the resident count, so it cannot cost budget. The
-     * machine stays inside its own terrain regardless, because the machine is
-     * inside the band by construction (js/vehicle.js's clamp) and the unclamped
-     * window always contains the machine (WINDOW_BIAS). */
-    if (bandN) {
-      if (winTop < bandTopY) winTop = bandTopY;
-      if (winBot > bandBotY) winBot = bandBotY;
-      if (winL < bandXL) winL = bandXL;
-      if (winR > bandXR) winR = bandXR;
-    }
+    /* 4: THE ONE EDGE OF THE WORLD. A level map is unbounded east, west and
+     * south, so there is exactly ONE clamp left here and it is the ceiling. This
+     * block used to close all four sides; three of them are gone with the walls.
+     *
+     * Clamping (rather than sliding the window back inside) is right twice over:
+     * it never generates rock north of the ceiling, and it can only ever REDUCE
+     * the resident count, so it cannot cost budget. The machine stays inside its
+     * own terrain regardless, because the machine is below the ceiling by
+     * construction (js/vehicle.js's clamp) and the unclamped window always
+     * contains the machine (WINDOW_BIAS).
+     *
+     * NOTHING ELSE BOUNDS THE WINDOW BUT THE POOL AND THE HASH, which is exactly
+     * the discipline the header describes and is now doing the whole job in BOTH
+     * axes rather than only in x. */
+    if (bandN && winTop < bandTopY) winTop = bandTopY;
 
     if (winR - winL > peakWinW) peakWinW = winR - winL;
     if (winBot - winTop > peakWinH) peakWinH = winBot - winTop;
@@ -2315,27 +2737,25 @@ SM.advterrain = (function () {
    * afford the strip, which is the graceful failure: streaming pauses for a step
    * or two while the debris in flight is collected or despawned.
    *
-   * EVERYTHING OUTSIDE THE ACTIVE BAND IS SKIPPED, which is what makes a level a
-   * map rather than a region: cells beyond [bandR0, bandR1) x [bandC0, bandC1) are
-   * not generated at all, so no drill tier can reach anything there because there
-   * is nothing there to reach.
+   * ONLY THE NORTH IS SKIPPED. There is nothing east, west or south of a level
+   * map — it simply continues — so the only cells this refuses are the ones ABOVE
+   * the ceiling, which no window should ever ask for anyway (computeWindow clamps
+   * there too) and which cost nothing to refuse if one does.
    *
-   * AND THE SEAL BEATS THE MASK. The border rows and columns spawn bedrock BEFORE
-   * the `mask[]` consult below, and that order is the one measured truth this
-   * whole feature hangs off (ARCHITECTURE.md §7): the mask is a byte per cell of
-   * everything the player has ever dug, saved with the company, and a v1.8 save
-   * whose tunnel crossed what is now a band boundary would otherwise punch a
-   * player-shaped hole straight through the border — a hole that persists in the
-   * save file forever. Sealing over such a tunnel is accepted and deliberate; a
-   * seal with holes in it is not a seal. (Precedent, same shape, same reason: the
-   * sub-floor bedrock strip that used to live here.)
+   * AND THE CEILING BEATS THE CARVE STORE. The border rows spawn bedrock BEFORE
+   * the carvedCell() consult below, and that order is the one measured truth this
+   * whole feature hangs off (ARCHITECTURE.md §7): the store is the mine's whole
+   * history, saved with the company, and a tunnel that reached what is now the
+   * ceiling would otherwise punch a player-shaped hole straight through the one
+   * wall in the game — a hole that persists in the save file forever. Sealing over
+   * such a tunnel is accepted and deliberate; a seal with holes in it is not a
+   * seal. (Precedent, same shape, same reason: the sub-floor bedrock strip that
+   * used to live in cellMaterialAt().)
    */
   function generateRowStrip(cy, c0, c1) {
-    if (c0 < bandC0) c0 = bandC0;
-    if (c1 > bandC1) c1 = bandC1;
     if (c1 <= c0) return true;
     if (!canAfford(c1 - c0)) return false;
-    if (cy < bandR0 || cy >= bandR1) return true;  // not this level's rock
+    if (cy < bandR0) return true;                  // north of the world's roof
 
     var yMid = rowMidY(cy);
     var stag = rowStagger(cy);
@@ -2343,29 +2763,24 @@ SM.advterrain = (function () {
 
     if (yMid > deepestY) deepestY = yMid;
 
-    /* THE BORDER. A whole row of it top and bottom; SEAL_COLS of every other row
-     * at each side. Both are integer cell tests decided before a single position
-     * is computed — see the SEAL note in the tunables. */
-    var sealRow = (cy < bandR0 + SEAL_ROWS) || (cy >= bandR1 - SEAL_ROWS);
-    var sealL = bandC0 + SEAL_COLS, sealR = bandC1 - SEAL_COLS;
+    /* THE CEILING. SEAL_ROWS whole rows of bedrock at the top of the map, decided
+     * by an integer cell test before a single position is computed — see the
+     * CEILING note in the tunables. */
+    var sealRow = (cy < bandR0 + SEAL_ROWS);
     var brad = Math.min(11, SM.materials.get(M_BEDROCK).radius[0] * RAD_GAIN);
 
-    var L = null;
-    if (!sealRow) {
-      L = layers.length ? layers[layerIndexAtY(yMid)] : null;
-      prepareRow(cy, yMid, L, colEdgeX(c0), colEdgeX(c1));
-    }
+    var L = lvl;
+    if (!sealRow) prepareRow(cy, yMid, L, colEdgeX(c0), colEdgeX(c1));
 
-    var base = cy * cols;
     for (cx = c0; cx < c1; cx++) {
       px = x0 + (cx + 0.5) * SP + stag + (hv(S_JX, cx, cy) * 2 - 1) * SP * JITTER_X;
       py = yMid + (hv(S_JY, cx, cy) * 2 - 1) * SP * JITTER;
 
-      if (sealRow || cx < sealL || cx >= sealR) {
+      if (sealRow) {
         SM.particles.spawnSolid(px, py, M_BEDROCK, brad);
         continue;
       }
-      if (mask[base + cx]) continue;               // already dug out
+      if (carvedCell(cx, cy)) continue;            // already dug out
 
       var m = cellMaterialAt(cx, cy, px, py, L);
       if (m < 0) continue;
@@ -2388,7 +2803,6 @@ SM.advterrain = (function () {
    * about the same as two full row strips.
    */
   function generateColStrip(cx, r0, r1) {
-    if (cx < bandC0 || cx >= bandC1) return true;
     if (r1 <= r0) return true;
     if (!canAfford(r1 - r0)) return false;
     for (var cy = r0; cy < r1; cy++) generateRowStrip(cy, cx, cx + 1);
@@ -2443,18 +2857,15 @@ SM.advterrain = (function () {
     wantC1 = colOfX(winR) + 1;
     wantR0 = cellYOf(winTop);
     wantR1 = cellYOf(winBot) + 1;
-    /* THE BAND IS THE HARD EDGE, in cells, so the outermost resident row and
-     * column of a level are exactly its seal — no off-by-one strip of unsealed
-     * rock at an edge, and no strip of seal the streamer believes it is missing
-     * and re-asks for every step. computeWindow() has already clamped the world
-     * box; this is the same clamp on the lattice, and it is the one the fill loop
-     * and trimTo() actually walk. */
-    if (bandN) {
-      if (wantC0 < bandC0) wantC0 = bandC0;
-      if (wantC1 > bandC1) wantC1 = bandC1;
-      if (wantR0 < bandR0) wantR0 = bandR0;
-      if (wantR1 > bandR1) wantR1 = bandR1;
-    }
+    /* THE CEILING IS THE HARD EDGE, in cells, so the outermost resident row of a
+     * level is exactly its seal — no off-by-one strip of unsealed rock at the top,
+     * and no strip of seal the streamer believes it is missing and re-asks for
+     * every step. computeWindow() has already clamped the world box; this is the
+     * same clamp on the lattice, and it is the one the fill loop and trimTo()
+     * actually walk. THE OTHER THREE SIDES HAVE NO CLAMP because there is nothing
+     * to clamp against — the pool and the hash bound them, and they do it in both
+     * axes now (see WIN_MAX_W / WIN_MAX_H and trimTo). */
+    if (bandN && wantR0 < bandR0) wantR0 = bandR0;
     if (wantC1 <= wantC0) wantC1 = wantC0 + 1;
     if (wantR1 <= wantR0) wantR1 = wantR0 + 1;
 
@@ -2591,17 +3002,18 @@ SM.advterrain = (function () {
     mineStateRef = mineState || null;
     mineSeed = (def && typeof def.seed === 'number') ? (def.seed | 0) : 1337;
     mineDepthM = (def && def.depth > 0) ? def.depth : 400;
-    floorY = yOfDepth(mineDepthM);
 
     buildGrid();
-    allocMask();
+    allocCarve();
     buildLayers(def);
-    buildGuaranteedLode();
     buildTiles();
-    /* BEFORE the first fill: the band, its seal and its doors are part of the
+    /* BEFORE the first fill: the level, its ceiling and its doors are part of the
      * geology this mine generates, not something painted on afterwards. The level
      * js/adv.js is entering on is asked for, never assumed — and a build where it
-     * cannot answer starts on level 1, which is the one every company owns. */
+     * cannot answer starts on level 1, which is the one every company owns.
+     *
+     * setBand() is also what sets genSeed and builds the ore buckets and the
+     * guaranteed lode, so nothing above it may resolve a structure. */
     loaded = true;                     // resolveBands/setBand need the geometry
     resolveBands(def);
     var L0 = 1;
@@ -2612,19 +3024,18 @@ SM.advterrain = (function () {
     setBand(L0);
     needFill = false;
 
-    /* Restore the tunnels. Two possible providers, because the mask lives in
-     * save.js's record but is this module's array: prefer an already-decoded
-     * Uint8Array, fall back to asking save.js to decode its RLE string. A
-     * corrupt mask costs the player their tunnels and nothing else. */
+    /* RESTORE THE TUNNELS — every level's, in one go. The store is keyed on
+     * (level, chunkX, chunkY), so a company's whole history in this mine comes
+     * back at once and riding to a level it has worked before finds its own
+     * workings there. A corrupt store costs the player their tunnels and nothing
+     * else: js/save.js's decoder returns null rather than guessing. */
     if (mineState) {
-      var m = mineState.mask;
-      if (m && m.length && typeof m !== 'string') {
-        importMask(m);
-      } else if (typeof m === 'string' && m.length &&
-                 SM.save && SM.save.decodeMask) {
-        var u8 = null;
-        try { u8 = SM.save.decodeMask(m, cols * rows); } catch (e) { u8 = null; }
-        if (u8) importMask(u8);
+      var cv = mineState.carve;
+      if (cv && typeof cv === 'string' && cv.length &&
+          SM.save && SM.save.decodeCarve) {
+        var desc = null;
+        try { desc = SM.save.decodeCarve(cv); } catch (e) { desc = null; }
+        if (desc) importCarve(desc);
       }
       // Piles left underground last visit.
       if (mineState.piles && mineState.piles.length) {
@@ -2655,9 +3066,9 @@ SM.advterrain = (function () {
   }
 
   /**
-   * End the RUN and hand the mask back for saving. Also writes the still-buried
-   * piles into the mine's save record if it has one, so dropped cargo survives
-   * a session and not just a band recycle.
+   * End the RUN and hand the carve store back for saving. Also writes the
+   * still-buried piles into the mine's save record if it has one, so dropped
+   * cargo survives a session and not just a window recycle.
    *
    * Deliberately does NOT unload the geology — see the two-flag note at the top.
    * The extraction card, the world map and the workshop all render over a live
@@ -2666,8 +3077,8 @@ SM.advterrain = (function () {
    */
   function endMine() {
     var out = '';
-    if (mask && SM.save && SM.save.encodeMask) {
-      try { out = SM.save.encodeMask(mask) || ''; } catch (e) { out = ''; }
+    if (chunkIx && SM.save && SM.save.encodeCarve) {
+      try { out = SM.save.encodeCarve(exportCarve()) || ''; } catch (e) { out = ''; }
     }
     if (mineStateRef) {
       try {
@@ -2702,7 +3113,10 @@ SM.advterrain = (function () {
      * and getLevelBounds() answers null rather than a zero box. */
     bands.length = 0;
     bandN = 0;
-    bandR0 = bandR1 = bandC0 = bandC1 = 0;
+    bandR0 = 0;
+    lvl = null;
+    oreTab.length = 0;
+    gldValid = false;
     needFill = false;
     doorArt = null;
     doorOpen = 0;
@@ -2877,11 +3291,12 @@ SM.advterrain = (function () {
     var d = Math.sqrt(dx * dx + dy * dy);
     if (d > range) return;
     /* A formation the player has already mined out should stop answering — and so
-     * should one the door chamber's excavation removed, or one on the far side of
-     * the seal. The band test is the important one now: an instrument that points
-     * at ore under the floor of a level you cannot dig through is an instrument
-     * lying about the only rule the mode has. */
-    if (y < lvlTopY || y > lvlBotY || x < -lvlHalfW || x > lvlHalfW) return;
+     * should one the door chamber's excavation removed, or one north of the
+     * ceiling. That last test is the only one of the old four left: an instrument
+     * that points at ore behind the one wall in the game is an instrument lying
+     * about the only rule the mode has. East, west and south there is nothing to
+     * lie about, because everything the scanner can see is reachable. */
+    if (y < lvlTopY) return;
     if (isCarved(x, y)) return;
     if (inDoorVoid(x, y)) return;
     addContact(out, x, y, m, d, contactStrength(m, rx, ry, d, range),
@@ -2912,69 +3327,97 @@ SM.advterrain = (function () {
       tryContact(out, gldX, gldY, gldMat, gldRX * 1.35, gldRY * 1.35, px, py, range);
     }
 
-    /* --- pockets and mineralised caverns ------------------------------ */
-    var pi0 = Math.floor((px - range) / POCKET_W), pi1 = Math.floor((px + range) / POCKET_W);
-    var pj0 = Math.floor((py - range) / POCKET_H), pj1 = Math.floor((py + range) / POCKET_H);
-    for (j = pj0; j <= pj1; j++) {
-      for (i = pi0; i <= pi1; i++) {
-        var cyw = j * POCKET_H + hv(S_POCK, i * 17 + 5, j) * POCKET_H;
-        L = layerAtY(cyw);
-        if (!L || L.pocketP <= 0) continue;
-        if (hv(S_POCK, i, j) >= L.pocketP) continue;
-        if (hv(S_POCKM, i, j) < L.vug) continue;             // hollow, no ore
-        var big = hv(S_POCK, i * 17 + 1, j) < POCKET_BIG;
-        var rx = big
-          ? lerp(POCKET_MAX_R, POCKET_BIG_R, hv(S_POCK, i * 17 + 2, j))
-          : lerp(POCKET_MIN_R, POCKET_MAX_R, hv(S_POCK, i * 17 + 2, j));
-        var ryd = rx * lerp(0.48, 0.95, hv(S_POCK, i * 17 + 3, j));
-        var cxw = i * POCKET_W + hv(S_POCK, i * 17 + 4, j) * POCKET_W;
-        tryContact(out, cxw, cyw, pickWeighted(L.ores, hv(S_POCKM, i + 5, j)),
-                   rx, ryd, px, py, range);
+    /* --- ANCIENT DEBRIS ------------------------------------------------
+     * FIRST after the motherlodes, and its own pass rather than a special case
+     * inside the pocket walk, because it is the only contact in the game the
+     * player is genuinely hunting. It reports at 1.6x its real radius: a scatter
+     * is small, and a signature the instrument can barely see is a signature the
+     * player will never chase. addContact() ranks by material value after that,
+     * and ancient is the dearest thing in the table, so a find is ALWAYS the
+     * headline arrow for as long as it is in range. */
+    L = lvl;
+    if (L && L.debP > 0) {
+      var di0 = Math.floor((px - range) / DEB_W), di1 = Math.floor((px + range) / DEB_W);
+      var dj0 = Math.floor((py - range) / DEB_H), dj1 = Math.floor((py + range) / DEB_H);
+      for (j = dj0; j <= dj1; j++) {
+        for (i = di0; i <= di1; i++) {
+          if (hv(S_DEB, i, j) >= L.debP) continue;
+          var dyw = j * DEB_H + hv(S_DEB, i * 37 + 3, j) * DEB_H;
+          var dr = lerp(DEB_R[0], DEB_R[1], hv(S_DEB, i * 37 + 1, j));
+          var dxw = i * DEB_W + hv(S_DEB, i * 37 + 2, j) * DEB_W;
+          tryContact(out, dxw, dyw, L.debMat, dr * 1.6, dr * 1.6, px, py, range);
+        }
       }
     }
-    var ci0 = Math.floor((px - range) / CAVERN_W), ci1 = Math.floor((px + range) / CAVERN_W);
-    var cj0 = Math.floor((py - range) / CAVERN_H), cj1 = Math.floor((py + range) / CAVERN_H);
-    for (j = cj0; j <= cj1; j++) {
-      for (i = ci0; i <= ci1; i++) {
-        if (hv(S_CAVM, i, j) >= CAVERN_MINERAL) continue;
-        var ccy = j * CAVERN_H + hv(S_CAV, i * 31 + 4, j) * CAVERN_H;
-        L = layerAtY(ccy);
-        if (!L || L.cavernP <= 0 || !L.ores) continue;
-        if (hv(S_CAV, i, j) >= L.cavernP) continue;
-        var crx = lerp(CAVERN_MIN_R, CAVERN_MAX_R, hv(S_CAV, i * 31 + 1, j));
-        var cry = crx * lerp(0.44, 0.86, hv(S_CAV, i * 31 + 2, j));
-        var ccx = i * CAVERN_W + hv(S_CAV, i * 31 + 3, j) * CAVERN_W;
-        tryContact(out, ccx, ccy, pickWeighted(L.ores, hv(S_CAVM, i + 13, j)),
-                   crx, cry, px, py, range);
+
+    /* --- pockets and mineralised caverns ------------------------------ */
+    if (L && L.pocketP > 0) {
+      var pi0 = Math.floor((px - range) / POCKET_W), pi1 = Math.floor((px + range) / POCKET_W);
+      var pj0 = Math.floor((py - range) / POCKET_H), pj1 = Math.floor((py + range) / POCKET_H);
+      for (j = pj0; j <= pj1; j++) {
+        for (i = pi0; i <= pi1; i++) {
+          var cyw = j * POCKET_H + hv(S_POCK, i * 17 + 5, j) * POCKET_H;
+          var pp = L.pocketP * densAt(cyw);
+          if (pp > 0.85) pp = 0.85;
+          if (hv(S_POCK, i, j) >= pp) continue;
+          if (hv(S_POCKM, i, j) < L.vug) continue;           // hollow, no ore
+          var big = hv(S_POCK, i * 17 + 1, j) < POCKET_BIG;
+          var rx = big
+            ? lerp(POCKET_MAX_R, POCKET_BIG_R, hv(S_POCK, i * 17 + 2, j))
+            : lerp(POCKET_MIN_R, POCKET_MAX_R, hv(S_POCK, i * 17 + 2, j));
+          var ryd = rx * lerp(0.48, 0.95, hv(S_POCK, i * 17 + 3, j));
+          var cxw = i * POCKET_W + hv(S_POCK, i * 17 + 4, j) * POCKET_W;
+          tryContact(out, cxw, cyw, pickWeighted(oresAt(cyw), hv(S_POCKM, i + 5, j)),
+                     rx, ryd, px, py, range);
+        }
+      }
+    }
+    if (L && L.cavernP > 0) {
+      var ci0 = Math.floor((px - range) / CAVERN_W), ci1 = Math.floor((px + range) / CAVERN_W);
+      var cj0 = Math.floor((py - range) / CAVERN_H), cj1 = Math.floor((py + range) / CAVERN_H);
+      for (j = cj0; j <= cj1; j++) {
+        for (i = ci0; i <= ci1; i++) {
+          if (hv(S_CAVM, i, j) >= CAVERN_MINERAL) continue;
+          var ccy = j * CAVERN_H + hv(S_CAV, i * 31 + 4, j) * CAVERN_H;
+          if (hv(S_CAV, i, j) >= L.cavernP) continue;
+          var crx = lerp(CAVERN_MIN_R, CAVERN_MAX_R, hv(S_CAV, i * 31 + 1, j));
+          var cry = crx * lerp(0.44, 0.86, hv(S_CAV, i * 31 + 2, j));
+          var ccx = i * CAVERN_W + hv(S_CAV, i * 31 + 3, j) * CAVERN_W;
+          tryContact(out, ccx, ccy, pickWeighted(oresAt(ccy), hv(S_CAVM, i + 13, j)),
+                     crx, cry, px, py, range);
+        }
       }
     }
 
     /* --- seams: report the nearest point on the bed, not its centre --- */
-    var s0 = Math.floor((py - range) / SEAM_PITCH), s1 = Math.floor((py + range) / SEAM_PITCH);
-    for (j = s0; j <= s1; j++) {
-      var scy = (j + 0.18 + hv(S_SEAM, j, 101) * 0.64) * SEAM_PITCH;
-      L = layerAtY(scy);
-      if (!L || L.seamP <= 0 || !L.ores) continue;
-      if (hv(S_SEAM, j, L.idx) >= L.seamP) continue;
-      var half = SP * lerp(0.7, 2.3, hv(S_SEAM, j, 202));
-      var pinch = lerp(0.30, 0.64, hv(S_SEAM, j, 303));
-      // Walk a few sample x positions across the range: a seam is long, so the
-      // contact should be the part of it nearest the machine.
-      var bestD = 1e12, bestX = 0, bestY = 0, bestSw = 0;
-      for (var k = -3; k <= 3; k++) {
-        var sx = px + k * (range / 3);
-        if (sx < -HALF_W || sx > HALF_W) continue;
-        var pres = noise1(sx * SEAM_LENS_F + j * 3.77, S_SEAMM);
-        if (pres <= pinch) continue;
-        var sw = (pres - pinch) / (1 - pinch);
-        var sy = scy + noise1s(sx * SEAM_WARP_F + j * 7.31, S_SEAM) * SEAM_WARP;
-        var dx = sx - px, dy = sy - py;
-        var d2 = dx * dx + dy * dy;
-        if (d2 < bestD) { bestD = d2; bestX = sx; bestY = sy; bestSw = sw; }
-      }
-      if (bestD < 1e12) {
-        tryContact(out, bestX, bestY, pickWeighted(L.ores, hv(S_SEAMM, j, L.idx)),
-                   half * bestSw * 5, half * bestSw, px, py, range);
+    if (L && L.seamP > 0) {
+      var s0 = Math.floor((py - range) / SEAM_PITCH), s1 = Math.floor((py + range) / SEAM_PITCH);
+      for (j = s0; j <= s1; j++) {
+        var scy = (j + 0.18 + hv(S_SEAM, j, 101) * 0.64) * SEAM_PITCH;
+        var sp2 = L.seamP * densAt(scy);
+        if (sp2 > 0.9) sp2 = 0.9;
+        if (hv(S_SEAM, j, L.idx) >= sp2) continue;
+        var half = SP * lerp(0.7, 2.3, hv(S_SEAM, j, 202));
+        var pinch = lerp(0.30, 0.64, hv(S_SEAM, j, 303));
+        // Walk a few sample x positions across the range: a seam is long, so the
+        // contact should be the part of it nearest the machine. There are no
+        // walls to reject a sample against any more — the bed simply continues.
+        var bestD = 1e12, bestX = 0, bestY = 0, bestSw = 0;
+        for (var k = -3; k <= 3; k++) {
+          var sx = px + k * (range / 3);
+          var pres = noise1(sx * SEAM_LENS_F + j * 3.77, S_SEAMM);
+          if (pres <= pinch) continue;
+          var sw = (pres - pinch) / (1 - pinch);
+          var sy = scy + noise1s(sx * SEAM_WARP_F + j * 7.31, S_SEAM) * SEAM_WARP;
+          var dx = sx - px, dy = sy - py;
+          var d2 = dx * dx + dy * dy;
+          if (d2 < bestD) { bestD = d2; bestX = sx; bestY = sy; bestSw = sw; }
+        }
+        if (bestD < 1e12) {
+          tryContact(out, bestX, bestY,
+                     pickWeighted(oresAt(scy), hv(S_SEAMM, j, L.idx)),
+                     half * bestSw * 5, half * bestSw, px, py, range);
+        }
       }
     }
 
@@ -3075,16 +3518,21 @@ SM.advterrain = (function () {
     var samples = Math.ceil(w / step);
     if (samples < 4) samples = 4;
     if (samples > 80) { samples = 80; step = w / 80; }
+    /* ONE STRATUM, THE WHOLE MAP. This used to walk the layer table and paint
+     * each layer's band between its own top and bottom; a level map is one
+     * stratum at every depth now (see the header), so there is one pass and it
+     * covers the whole visible rock. The bed lines inside it are unchanged — they
+     * are what makes a wall read as strata rather than as a flat fill, and they
+     * still reconstruct exactly the curve bedMaterial() used. */
     var lines = 0;
-    for (var li = 0; li < layers.length && lines < 90; li++) {
-      var L = layers[li];
-      var top = li === 0 ? A.MINE_CEILING_Y : layers[li - 1].toY;
-      var bot = L.toY;
-      if (bot < vTop || top > vBot) continue;
-      var a = Math.max(top, vTop), b = Math.min(bot, vBot);
+    var pass = lvl ? [lvl] : layers;
+    for (var li = 0; li < pass.length && lines < 90; li++) {
+      var L = pass[li];
+      var a = vTop, b = vBot;
+      if (!(b > a)) continue;
 
-      // The layer's own tone, so a boundary between layers is visible even
-      // where no deposit happens to sit on it.
+      // The stratum's own tone, so the rock reads as rock even where no deposit
+      // happens to sit.
       ctx.fillStyle = tintOf(L.fill, 0.42);
       ctx.fillRect(vLeft, a, w, b - a);
 
@@ -3864,48 +4312,37 @@ SM.advterrain = (function () {
     var vTop = v.minY - 40, vBot = v.maxY + 40;
     var wallL = v.minX - 60, wallR = v.maxX + 60;
 
-    /* --- BEDROCK ON ALL FOUR SIDES, THEN THE LEVEL'S ROCK INSIDE IT ------
-     * The single strongest statement this file makes: a level is a BOX. Above the
-     * band, below it and beyond its width there is nothing but bedrock, painted
-     * with the same wall pattern the mine's own edges always used, and the rock
-     * pattern with the strata in it exists only inside the band. Stand anywhere on
-     * a level and drive to any edge and the answer is the same — this is the whole
-     * world, and the only way out is the doors.
+    /* --- ONE BEDROCK CAP, THEN ROCK ALL THE WAY DOWN --------------------
+     * The single strongest statement this file makes used to be "a level is a
+     * BOX". It is the opposite now: a level is ENDLESS in every direction but
+     * one, and the one bedrock cap over the lift is the whole of the world's
+     * edge. Everything east, west and south of the view is more rock, and the
+     * rock pattern with the strata in it now covers the entire view below the
+     * cap. Drive as far as fuel allows and the answer is the same — this goes on,
+     * and the only way OUT is the doors.
      *
-     * IT IS ALSO THE CHEAP WAY ROUND. This function used to paint bedrock across
-     * the WHOLE view and then paint the mine's rock on top of ~85% of it: two
-     * full-screen REPEATING-PATTERN fills per frame, where a pattern costs far
-     * more per pixel than a solid because every pixel does a modulo address and a
-     * texture fetch. Measured at 14.4 ms/frame — stubbing this function alone took
-     * the mode from 36 fps to 74, while particles.render sat at 0.92 ms either
-     * way. (Whichever draw call forces the rasterisation flush gets billed for it,
-     * which is why per-function timings first pointed at particles.render.
-     * Bisecting by stubbing whole stages is the measurement that holds up.)
-     *
-     * So bedrock is painted ONLY where the level's own fill will not cover it —
-     * now four edges rather than two — and every fill is clipped to the VIEW, not
-     * to the band: at 5200 units wide, filling the band would hand the rasteriser
-     * two and a half screens of pattern per frame to throw away.
+     * THE CHEAP-WAY-ROUND ARGUMENT SURVIVES INTACT, and gets cheaper. This
+     * function once painted bedrock across the WHOLE view and then painted the
+     * mine's rock on top of ~85% of it: two full-screen REPEATING-PATTERN fills
+     * per frame, where a pattern costs far more per pixel than a solid because
+     * every pixel does a modulo address and a texture fetch. Measured at 14.4
+     * ms/frame — stubbing this function alone took the mode from 36 fps to 74,
+     * while particles.render sat at 0.92 ms either way. So bedrock is painted
+     * ONLY above the ceiling, which on almost every frame of a run is nothing at
+     * all, and there is now exactly ONE pattern fill per frame instead of two.
      * ---------------------------------------------------------------- */
     var bT = bandN ? bandTopY : A.MINE_CEILING_Y;
-    var bB = bandN ? bandBotY : 1e9;
-    var bL = bandN ? bandXL : -HALF_W;
-    var bR = bandN ? bandXR : HALF_W;
 
-    var rockL = wallL > bL ? wallL : bL;
-    var rockR = wallR < bR ? wallR : bR;
+    var rockL = wallL;
+    var rockR = wallR;
     var rockT = vTop > bT ? vTop : bT;
-    var rockB = vBot < bB ? vBot : bB;
+    var rockB = vBot;
 
-    ctx.fillStyle = wallPattern || '#3a3540';
-    // The cap over the level, full view width — the roof of the world.
-    if (rockT > vTop) ctx.fillRect(wallL, vTop, wallR - wallL, rockT - vTop);
-    // ...and its floor.
-    if (rockB < vBot) ctx.fillRect(wallL, rockB, wallR - wallL, vBot - rockB);
-    // The two slivers flanking it, for the band's own height only.
-    if (rockB > rockT) {
-      if (wallL < bL) ctx.fillRect(wallL, rockT, bL - wallL, rockB - rockT);
-      if (wallR > bR) ctx.fillRect(bR, rockT, wallR - bR, rockB - rockT);
+    // The cap over the level, full view width — the roof of the world, and the
+    // only bedrock a camera can frame.
+    if (rockT > vTop) {
+      ctx.fillStyle = wallPattern || '#3a3540';
+      ctx.fillRect(wallL, vTop, wallR - wallL, rockT - vTop);
     }
 
     if (rockB > rockT && rockR > rockL) {
@@ -3924,37 +4361,16 @@ SM.advterrain = (function () {
       // old workings, so they have to paint over both.
       drawDoors(ctx, rockL, rockT, rockR, rockB);
 
-      /* Ambient occlusion on all four inner faces of the box — only where a face
-       * is actually on screen. This is what makes the seal read as thickness
-       * rather than as a change of texture. */
-      var g4;
-      if (rockL < bL + 70) {
-        g4 = ctx.createLinearGradient(bL, 0, bL + 70, 0);
-        g4.addColorStop(0, 'rgba(0,0,0,0.6)');
-        g4.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g4;
-        ctx.fillRect(bL, rockT, 70, rockB - rockT);
-      }
-      if (rockR > bR - 70) {
-        g4 = ctx.createLinearGradient(bR, 0, bR - 70, 0);
-        g4.addColorStop(0, 'rgba(0,0,0,0.6)');
-        g4.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g4;
-        ctx.fillRect(bR - 70, rockT, 70, rockB - rockT);
-      }
+      /* Ambient occlusion under the cap — only when the cap is on screen. This is
+       * what makes the ceiling read as THICKNESS rather than as a change of
+       * texture, and it is the last of four such gradients: the other three had
+       * faces to hang off and no longer do. */
       if (rockT < bT + 70) {
-        g4 = ctx.createLinearGradient(0, bT, 0, bT + 70);
+        var g4 = ctx.createLinearGradient(0, bT, 0, bT + 70);
         g4.addColorStop(0, 'rgba(0,0,0,0.6)');
         g4.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = g4;
         ctx.fillRect(rockL, bT, rockR - rockL, 70);
-      }
-      if (rockB > bB - 70) {
-        g4 = ctx.createLinearGradient(0, bB, 0, bB - 70);
-        g4.addColorStop(0, 'rgba(0,0,0,0.6)');
-        g4.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g4;
-        ctx.fillRect(rockL, bB - 70, rockR - rockL, 70);
       }
 
       ctx.restore();
@@ -3967,12 +4383,13 @@ SM.advterrain = (function () {
      * hazard paint is what tells the player so BEFORE they spend a tank of fuel
      * finding out. A word and a stripe, not a subtle change of rock.
      *
-     * Both faces get the stripe; only the floor gets the word, because a level's
-     * roof is not somewhere anyone tries to go and two labels on one screen at the
-     * top of a thin band would read as a UI, not as a place. */
+     * AND NOW IT GETS THE WORD. There used to be two of these — a floor and a
+     * roof — and only the floor was labelled, because a roof was not somewhere
+     * anyone tried to go. The roof is the only edge in the world now, so it takes
+     * the label the floor left behind: a machine that drives north until it stops
+     * is owed an explanation, and this is it. */
     if (bandN && rockR > rockL) {
-      hazardFace(ctx, lvlBotY, 1, rockL, rockR, vTop, vBot, 'BEDROCK');
-      hazardFace(ctx, lvlTopY, -1, rockL, rockR, vTop, vBot, '');
+      hazardFace(ctx, lvlTopY, -1, rockL, rockR, vTop, vBot, 'BEDROCK');
     }
 
     /* --- depth ruler, in metres --------------------------------------
@@ -3985,7 +4402,6 @@ SM.advterrain = (function () {
     var first = Math.ceil((rockT - A.MINE_CEILING_Y) / stepU) * stepU;
     var last = rockB - A.MINE_CEILING_Y;
     var labelX = v.minX + 14;
-    if (labelX < bL + 14) labelX = bL + 14;
     ctx.lineWidth = 1;
     ctx.font = '13px ui-monospace, Menlo, Consolas, monospace';
     ctx.textAlign = 'left';
@@ -4004,23 +4420,24 @@ SM.advterrain = (function () {
       }
     }
 
-    /* --- the level's edge trim, on all four sides --------------------- */
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(255,196,64,0.22)';
-    ctx.beginPath();
-    if (wallL < bL + 4) { ctx.moveTo(bL, rockT); ctx.lineTo(bL, rockB); }
-    if (wallR > bR - 4) { ctx.moveTo(bR, rockT); ctx.lineTo(bR, rockB); }
-    if (vTop < bT + 4) { ctx.moveTo(rockL, bT); ctx.lineTo(rockR, bT); }
-    if (vBot > bB - 4) { ctx.moveTo(rockL, bB); ctx.lineTo(rockR, bB); }
-    ctx.stroke();
+    /* --- the world's one edge, trimmed -------------------------------- */
+    if (vTop < bT + 4) {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255,196,64,0.22)';
+      ctx.beginPath();
+      ctx.moveTo(rockL, bT); ctx.lineTo(rockR, bT);
+      ctx.stroke();
+    }
   }
 
   /**
-   * One hazard-painted face of the level's box. `dir` is +1 for a floor (the paint
-   * goes DOWN from the line, into the rock) and -1 for a roof.
+   * THE ONE HAZARD-PAINTED FACE IN THE WORLD. `dir` is -1 for a roof (the paint
+   * goes UP from the line, into the rock); +1 for a floor is kept because the
+   * function is written for a face and not for a ceiling, and a one-sided
+   * function would be a worse thing to inherit than an unused branch.
    *
-   * Stepped across the VIEW rather than the band: at 5200 units wide, hatching a
-   * whole face is 130 strokes of which a handful are ever on screen.
+   * Stepped across the VIEW rather than the world, which is not an optimisation
+   * any more — an endless face has no width to hatch.
    */
   function hazardFace(ctx, y, dir, rockL, rockR, vTop, vBot, label) {
     if (y < vTop - 200 || y > vBot + 200) return;
@@ -4057,16 +4474,19 @@ SM.advterrain = (function () {
    * the game depends on it.
    * =================================================================== */
   var dbg = {
-    cols: 0, rows: 0, carved: 0, maskBytes: 0,
+    carved: 0, chunks: 0, chunkBytes: 0, chunkFull: false,
     winL: 0, winR: 0, winTop: 0, winBot: 0, winW: 0, winH: 0,
     haveC0: 0, haveC1: 0, haveR0: 0, haveR1: 0, cells: 0,
     peakWinW: 0, peakWinH: 0, peakLiveW: 0, peakLiveH: 0,
     trim: 1, cellBudget: 0, peakSolid: 0, lowFree: 0, solid: 0, free: 0,
     piles: 0, pilesUp: 0, deepestM: 0, layer: '',
-    level: 0, levels: 0, levelName: '',
-    bandR0: 0, bandR1: 0, bandC0: 0, bandC1: 0,
-    bandTopM: 0, bandBotM: 0, bandHalfW: 0,
-    lvlTopY: 0, lvlBotY: 0, lvlHalfW: 0,
+    level: 0, levels: 0, levelName: '', genSeed: 0,
+    bandR0: 0, bandTopM: 0,
+    lvlTopY: 0,
+    /* THE WORLD IS OPEN ON THREE SIDES. Reported as booleans, not as Infinity,
+     * because a scripted test reads this through JSON and JSON has no Infinity —
+     * it would arrive as null and an assertion would quietly pass. */
+    openX: false, openBot: false,
     doorX: 0, doorY: 0, doorOpen: 0, needFill: false,
     doorTopY: 0, doorSillY: 0, inLift: false, headMix: 0,
     /* The alpha the doorway is actually laid over the machine at, and the
@@ -4076,8 +4496,10 @@ SM.advterrain = (function () {
   };
   function getDebug() {
     var st = SM.particles.getStats();
-    dbg.cols = cols; dbg.rows = rows; dbg.carved = carved;
-    dbg.maskBytes = mask ? mask.length : 0;
+    dbg.carved = carved;
+    dbg.chunks = chunkN;
+    dbg.chunkBytes = chunkN * CHUNK_BYTES;
+    dbg.chunkFull = chunkFull;
     dbg.winL = winL; dbg.winR = winR;
     dbg.winTop = winTop; dbg.winBot = winBot;
     dbg.winW = winR - winL; dbg.winH = winBot - winTop;
@@ -4098,19 +4520,18 @@ SM.advterrain = (function () {
     for (var i = 0; i < plN; i++) if (plUp[i]) up++;
     dbg.pilesUp = up;
     dbg.deepestM = depthOfY(deepestY);
-    dbg.layer = (lastLayer >= 0 && layers[lastLayer]) ? layers[lastLayer].name : '';
-    /* THE ACTIVE LEVEL, as cells AND as world units, because the seal test lives
-     * in cell space and every clamp downstream lives in world units — a test that
-     * cannot see both cannot prove the two agree. */
+    dbg.layer = lvl ? lvl.name : '';
+    /* THE ACTIVE LEVEL, as a cell row AND as world units, because the ceiling
+     * test lives in cell space and the clamp downstream lives in world units — a
+     * test that cannot see both cannot prove the two agree. */
     dbg.level = bandN;
     dbg.levels = bands.length;
     dbg.levelName = (bandN && bands[bandN - 1]) ? bands[bandN - 1].name : '';
-    dbg.bandR0 = bandR0; dbg.bandR1 = bandR1;
-    dbg.bandC0 = bandC0; dbg.bandC1 = bandC1;
+    dbg.genSeed = genSeed;
+    dbg.bandR0 = bandR0;
     dbg.bandTopM = depthOfY(bandTopY);
-    dbg.bandBotM = depthOfY(bandBotY);
-    dbg.bandHalfW = bandN ? (bandXR - bandXL) * 0.5 : 0;
-    dbg.lvlTopY = lvlTopY; dbg.lvlBotY = lvlBotY; dbg.lvlHalfW = lvlHalfW;
+    dbg.lvlTopY = lvlTopY;
+    dbg.openX = !!bandN; dbg.openBot = !!bandN;
     dbg.doorX = 0; dbg.doorY = doorY; dbg.doorOpen = doorOpen;
     dbg.needFill = needFill;
     dbg.doorTopY = doorTopY; dbg.doorSillY = doorSillY;
@@ -4133,26 +4554,93 @@ SM.advterrain = (function () {
    */
   function cellMaterial(cx, cy) {
     if (!loaded) return -2;
-    if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) return -2;
     /* THE SAME TWO ANSWERS generateRowStrip() gives, in the same order, or this
      * would not be a probe of the generator — it would be a probe of a different
-     * generator that happens to share a name. -2 for a cell the active level does
-     * not contain, bedrock for its border, and only then the mask. */
+     * generator that happens to share a name. -2 for a cell north of the ceiling,
+     * bedrock for the ceiling itself, and only then the carve store. There is no
+     * "outside the map" any more in x or to the south. */
     if (bandN) {
-      if (cy < bandR0 || cy >= bandR1 || cx < bandC0 || cx >= bandC1) return -2;
-      if (cy < bandR0 + SEAL_ROWS || cy >= bandR1 - SEAL_ROWS ||
-          cx < bandC0 + SEAL_COLS || cx >= bandC1 - SEAL_COLS) return M_BEDROCK;
+      if (cy < bandR0) return -2;
+      if (cy < bandR0 + SEAL_ROWS) return M_BEDROCK;
     }
-    if (mask[cy * cols + cx]) return -1;
+    if (carvedCell(cx, cy)) return -1;
     var yMid = rowMidY(cy);
     var stag = rowStagger(cy);
     var px = x0 + (cx + 0.5) * SP + stag + (hv(S_JX, cx, cy) * 2 - 1) * SP * JITTER_X;
     var py = yMid + (hv(S_JY, cx, cy) * 2 - 1) * SP * JITTER;
-    var L = layers.length ? layers[layerIndexAtY(yMid)] : null;
     // The SAME gather range a one-column strip uses, so this asks the generator
     // exactly what generateColStrip() would have asked it.
-    prepareRow(cy, yMid, L, colEdgeX(cx), colEdgeX(cx + 1));
-    return cellMaterialAt(cx, cy, px, py, L);
+    prepareRow(cy, yMid, lvl, colEdgeX(cx), colEdgeX(cx + 1));
+    return cellMaterialAt(cx, cy, px, py, lvl);
+  }
+
+  /**
+   * WHAT THIS LEVEL ACTUALLY SPAWNS, counted rather than argued about.
+   *
+   * Walks a rectangle of cells through the real generator (cellMaterial, so the
+   * ceiling and the carve store are honoured exactly as they are in play) and
+   * returns a tally keyed by material id, plus the ORE-ONLY percentages that
+   * js/mines.js's spawn tables are stated in. Exported for the balance harness;
+   * nothing in the game calls it, and it allocates freely because it is a tool.
+   *
+   *   depthM   how far below THIS LEVEL'S LIFT to sample, in metres
+   *   spanM    how tall a slice, in metres (the whisper varies across it)
+   *   halfW    how far east and west of the lift line, in world units
+   */
+  var SAMPLE_STRIP = 114;     // cells (~2400 units) — see the note below
+  function sampleSpawn(depthM, spanM, halfW) {
+    var out = { cells: 0, empty: 0, solid: 0, oreCells: 0, areaU2: 0,
+                counts: {}, orePct: {}, allPct: {} };
+    if (!loaded || !bandN) return out;
+    var yTop = lvlTopY + num(depthM, 0) / A.METERS_PER_UNIT;
+    var yBot = yTop + num(spanM, 100) / A.METERS_PER_UNIT;
+    var hw = num(halfW, 1200);
+    var r0 = cellYOf(yTop), r1 = cellYOf(yBot);
+    if (r0 < bandR0 + SEAL_ROWS) r0 = bandR0 + SEAL_ROWS;
+    var c0 = colOfX(-hw), c1 = colOfX(hw);
+    var cy, cx, m, mm, id, s0, s1, yMid, stag, px, py;
+
+    /* ROW-MAJOR, IN STRIPS THE WIDTH OF A PLAY WINDOW, and both halves of that
+     * matter. Row-major so the gather is paid once per row instead of once per
+     * cell (the difference between a second and a minute over a big slab). And
+     * in STRIPS because the blob lists are capped at BLOB_MAX: a gather asked
+     * about twenty thousand units of rock at once would saturate them and this
+     * would report a world the generator does not build. SAMPLE_STRIP is about
+     * the width the streamer actually asks for, so what is counted here is
+     * exactly what is spawned in play. */
+    for (s0 = c0; s0 <= c1; s0 += SAMPLE_STRIP) {
+      s1 = s0 + SAMPLE_STRIP;
+      if (s1 > c1 + 1) s1 = c1 + 1;
+      for (cy = r0; cy <= r1; cy++) {
+        yMid = rowMidY(cy);
+        stag = rowStagger(cy);
+        prepareRow(cy, yMid, lvl, colEdgeX(s0), colEdgeX(s1));
+        for (cx = s0; cx < s1; cx++) {
+          out.cells++;
+          if (carvedCell(cx, cy)) { out.empty++; continue; }
+          px = x0 + (cx + 0.5) * SP + stag + (hv(S_JX, cx, cy) * 2 - 1) * SP * JITTER_X;
+          py = yMid + (hv(S_JY, cx, cy) * 2 - 1) * SP * JITTER;
+          m = cellMaterialAt(cx, cy, px, py, lvl);
+          if (m < 0) { out.empty++; continue; }
+          out.solid++;
+          mm = SM.materials.get(m);
+          id = mm.id;
+          out.counts[id] = (out.counts[id] || 0) + 1;
+          if (mm.ore) out.oreCells++;
+        }
+      }
+    }
+    out.areaU2 = out.cells * SP * SP;
+    for (id in out.counts) {
+      if (!out.counts.hasOwnProperty(id)) continue;
+      out.allPct[id] = out.solid > 0
+        ? Math.round(out.counts[id] / out.solid * 1e5) / 1e3 : 0;
+      if (SM.materials.getById(id).ore) {
+        out.orePct[id] = out.oreCells > 0
+          ? Math.round(out.counts[id] / out.oreCells * 1e5) / 1e3 : 0;
+      }
+    }
+    return out;
   }
 
   var mlOut = { x: 0, y: 0, rx: 0, ry: 0, matIndex: 0, depthM: 0 };
@@ -4176,8 +4664,11 @@ SM.advterrain = (function () {
 
     markDestroyed: markDestroyed,
     isCarved: isCarved,
-    exportMask: exportMask,
-    importMask: importMask,
+    /* THE SAVE SEAM, sparse. js/save.js encodes the descriptor exportCarve()
+     * hands back and decodes into the same shape for importCarve(). The old
+     * exportMask/importMask pair is gone with the flat array it described. */
+    exportCarve: exportCarve,
+    importCarve: importCarve,
     maskDims: maskDims,
 
     depthOfY: depthOfY,
@@ -4192,10 +4683,12 @@ SM.advterrain = (function () {
     getLayers: function () { return layers; },
     /** The material ids this generator places. js/mines.js prices these. */
     getMaterialIds: function () { return MAT_IDS; },
-    /** Depth in metres of the bedrock floor of the live mine. */
-    getFloorDepthM: function () { return depthOfY(floorY); },
+    /** The stratum the active level is made of, for the HUD and the harness. */
+    getLevelLayer: function () { return lvl; },
     /** How many cells the player has dug out of this mine, ever. */
     getCarvedCount: function () { return carved; },
+    /** How many carve chunks are resident. Multiply by 128 for the bytes. */
+    getCarveChunkCount: function () { return chunkN; },
     /** The mine's guaranteed motherlode, or null. REUSED object. */
     getMotherlode: function () {
       if (!gldValid) return null;
@@ -4272,6 +4765,8 @@ SM.advterrain = (function () {
     resetPeaks: resetPeaks,
     /** Grid geometry + the generator's answer for one cell. Tests only. */
     cellMaterial: cellMaterial,
+    /** Counted spawn percentages for the active level. Balance harness only. */
+    sampleSpawn: sampleSpawn,
     cellOfPoint: function (x, y, out) {
       var o = out || {};
       o.cy = cellYOf(y);

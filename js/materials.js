@@ -541,15 +541,31 @@ SM.materials = (function () {
       shape: 'shard', ore: true
     },
     {
-      // THE MONEY SHOT. One expedition's worth of cash per deposit, and the
-      // generator only ever puts it in the shell of a natural cavern in the
-      // deepest layer of the deepest mine — you do not stumble into a speck
-      // of this, you break through a wall and find it lining the far side.
-      // Biggest radius band, brightest colours, loudest break style in the
-      // table, all in service of one moment being unmistakable.
-      id: 'ancient', name: 'Ancient Formation',
+      // THE MONEY SHOT, AND THE ONLY MATERIAL IN THE TABLE THAT IS AN EVENT.
+      //
+      // Renamed from 'Ancient Formation' to ANCIENT DEBRIS, because what the
+      // generator places is no longer a formation: js/advterrain.js scatters it
+      // as a tight cluster of two to four deposits (see DEB_* there), priced per
+      // LEVEL in js/mines.js's design note 4e at roughly one find per twenty-five
+      // starter expeditions on Old Creek's level 1. The ID IS UNCHANGED — it is
+      // written into save files, the ECON table and six mines' layer weights —
+      // and only `name` moved, which is display text.
+      //
+      // `value` is raised 900 -> 2000 so that it AGREES WITH THE LEDGER.
+      // js/mines.js prices ancient at $2 000 per cargo unit at 1 unit a deposit,
+      // and this field is what js/advterrain.js's contactStrength() and
+      // particles.js's `material:destroyed` payload both reason about. At 900 the
+      // scanner ranked a find below its real worth and the destruction event
+      // under-reported it by more than half. (js/scanner.js ranks by
+      // SM.mines.depositValueIndex() and was already right; this makes the two
+      // agree instead of merely not conflicting.)
+      //
+      // Everything else is left exactly as it was, and it is all in service of
+      // one moment being unmistakable: the biggest radius band, the brightest
+      // colours and the loudest break style in the table.
+      id: 'ancient', name: 'Ancient Debris',
       colors: ['#fff0b8', '#9a6a10', '#ffffff'],
-      hardness: 9.5, value: 900,
+      hardness: 9.5, value: 2000,
       radius: [8.6, 11.0], density: 1.70,
       restitution: 0.55, friction: 0.70,
       debrisCount: 8, breakStyle: 'shatter', glow: true, sparkle: 1.0,

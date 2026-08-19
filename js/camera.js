@@ -15,8 +15,9 @@
  * gone. Zoom PUNCH still lands, because that is impact feedback, not framing.
  *
  * What the constant cannot do alone is fit a phone, so recomputeScale() runs a
- * portrait fit (reduce-only) and a per-level fill floor on top of it. See the
- * tunables note.
+ * portrait fit (reduce-only) on top of it, against an ABSOLUTE working width.
+ * The per-level fill floor that used to sit beside it is gone with the walls it
+ * framed — a level map is endless east and west now. See the tunables note.
  *
  * NO SLOW MOTION: main.js has no timescale hook. Big moments are sold with
  * punch + shake + effects.screenFlash instead.
@@ -187,67 +188,73 @@ SM.camera = (function () {
    *    snapping it. It is expressed as a fraction of the visible half-height
    *    for the same reason the classic one is: framing that survives a resize.
    *
-   * 3. recomputeScale() IS SOLVED AGAINST THE WRONG WIDTH. Both of its clamps
-   *    are written against LANE_HALF_WIDTH (640) and the shaft is
-   *    ADV.MINE_HALF_WIDTH (880), so they fight it in opposite directions:
-   *      * the lane-FILL floor would allow 300 units of bedrock either side of
-   *        a 1280 lane — measured against a 1760 shaft it is simply too small a
-   *        view, so it is re-solved against the shaft;
+   * 3. recomputeScale() HAS NO WIDTH TO SOLVE AGAINST ANY MORE, and that is a
+   *    simplification rather than a loss. It used to carry two clamps written
+   *    against LANE_HALF_WIDTH (640) which fought the shaft in opposite
+   *    directions. Both are gone:
    *      * the lane-FIT ceiling ("never so zoomed in that the lane runs off the
-   *        sides") is actively wrong underground. The shaft is MEANT to run off
-   *        the sides — you are in a tunnel, not a lane — and forcing 1760 units
-   *        across a 390 px phone would zoom to 0.21, put the machine on screen
-   *        at eight pixels and multiply the streamed area by twenty. So the
-   *        adventure branch does not apply it at all.
+   *        sides") was always wrong underground — the world is MEANT to run off
+   *        the sides, you are in a tunnel, not a lane — and forcing it across a
+   *        390 px phone would zoom to 0.21, put the machine on screen at eight
+   *        pixels and multiply the streamed area by twenty. The adventure branch
+   *        never applied it.
+   *      * the lane-FILL floor stopped bedrock showing beside the walls. There
+   *        are no walls: a level map is endless east and west (ARCHITECTURE.md
+   *        §7), so what that clamp enforced is true by construction.
+   *    What is left is ADV_FIT_WIDTH and an absolute floor — an ABSOLUTE working
+   *    width, in world units, which is what the rule was always protecting.
    * ================================================================== */
 
-  // Bedrock we will tolerate beside the shaft before refusing to widen further.
-  var ADV_WALL_VISIBLE = 260;
-  // The fraction of the shaft's full width that must fit across the viewport.
-  // 0.45 of 1760 is ~790 units: enough of the shaft to steer in and to see a
-  // seam beside you, without shrinking the machine to a chip on a phone.
-  /* WORKING WIDTH, IN WORLD UNITS — not a fraction of the mine.
- * This was `0.45 of the shaft`, which only worked while the shaft was narrower
- * than a screen. Once the mine is wider than the viewport, a fraction-of-mine
- * fit means every extra metre of MINE_HALF_WIDTH zooms the player further out to
- * frame walls that are nowhere near them: at 2600 half-width it drove desktop
- * scale from 0.72 down to 0.615 and portrait to 0.167.
- * What the rule was actually protecting is "enough ground across the screen to
- * drive and aim", which is an absolute distance. 792 is exactly 0.45 x the old
- * 1760-wide shaft, so every device frames the game precisely as it did before. */
-var ADV_FIT_WIDTH = 792;
+  /* WORKING WIDTH, IN WORLD UNITS — the whole of the framing solve, and the one
+   * number every device is framed by.
+   *
+   * It was once "0.45 of the shaft's width", which only worked while the shaft
+   * was narrower than a screen: a fraction-of-the-world fit means every extra
+   * metre of world zooms the player further out to frame walls nowhere near
+   * them, and at 2600 half-width it drove desktop scale from 0.72 to 0.615 and
+   * portrait to 0.167. On a world that is now endless in both directions the
+   * fraction is not merely wrong, it has no value at all.
+   *
+   * What the rule was always protecting is "enough ground across the screen to
+   * drive and aim", which is an ABSOLUTE distance. 792 is exactly 0.45 x the
+   * original 1760-wide shaft, so every device frames the game precisely as it
+   * always did. */
+  var ADV_FIT_WIDTH = 792;
   // ...and a hard floor, so a freak viewport cannot zoom out into abstraction.
   // At 0.30 the starting machine is still ~45 px wide.
   var ADV_MIN_SCALE = 0.30;
   // Lead, as a fraction of the visible half-height, at full drive speed.
   var ADV_LEAD_FRAC = 0.20;
   var ADV_LEAD_LERP = 2.0;
-  /* HOW MUCH BEDROCK MAY SHOW BEYOND EACH OF THE LEVEL'S FOUR EDGES. Keeping the
-   * camera inside these means the border reads as the edge of the world rather
-   * than as a place the view falls off — and showing SOME of it is the point: a
-   * level whose ceiling and floor you have both seen is a level you understand the
-   * shape of.
+  /* HOW MUCH BEDROCK MAY SHOW BEYOND THE LEVEL'S ONE EDGE. Keeping the camera
+   * inside this means the ceiling reads as the edge of the world rather than as a
+   * place the view falls off — and showing SOME of it is the point: a level whose
+   * roof you have seen is a level you understand the shape of.
    *
-   * THE VERTICAL PEEK IS BIGGER THAN THE LATERAL ONE, and it is inherited: this
-   * was ADV_SKY_PEEK, the daylight allowance over the mine mouth, at 420. A level
-   * band can be as little as 1350 units tall against a ~1250-unit view, so the
-   * generous vertical figure is what lets the camera actually reach the roof and
-   * the floor of a thin band instead of stopping a screen short of each. */
-  var ADV_WALL_PEEK = 150;
+   * THERE USED TO BE TWO OF THESE and they covered four edges. A level map is
+   * endless east, west and south now, so there is nothing to peek past in three
+   * directions and ADV_WALL_PEEK is gone with them. The surviving figure is
+   * inherited from ADV_SKY_PEEK, the daylight allowance over the old mine mouth,
+   * and it is generous on purpose: the machine spends the start and the end of
+   * every run parked under the ceiling, and a camera that stopped a screen short
+   * of it would frame the lift against nothing. */
   var ADV_EDGE_PEEK = 420;
-  /* How far off the view centre the machine may ever be pushed by the peeks above,
-   * as a fraction of the visible half-width. A level is bounded on all four sides
-   * and the machine drives right up to those bounds, so the edge clamps and the
-   * follow are in direct conflict at every wall — see the note in
-   * updateAdvFollow() for the measurement and for why this one wins. */
+  /* How far off the view centre the machine may ever be pushed by the peek above,
+   * as a fraction of the visible half-extent. The machine drives right up to the
+   * ceiling, so the edge clamp and the follow are in direct conflict there — see
+   * the note in updateAdvFollow() for the measurement and for why this one wins. */
   var ADV_WALL_OFFSET = 0.34;
 
-  /* THE ACTIVE LEVEL'S BOX, or null (classic, or a world module older than this
-   * file). REUSED by js/advterrain.js — read it, never stash a field of it. */
+  /* THE ACTIVE LEVEL'S EXTENT, or null (a world module older than this file).
+   * REUSED by js/advterrain.js — read it, never stash a field of it.
+   *
+   * `botY` and `halfW` are Infinity: the map is endless east, west and south
+   * (ARCHITECTURE.md §7), so the only finite edge is the ceiling and that is what
+   * the guard tests. */
   function advBounds() {
     if (SM.advterrain && SM.advterrain.getLevelBounds) {
       var b = SM.advterrain.getLevelBounds();
-      if (b && b.botY > b.topY && b.halfW > 0) return b;
+      if (b && isFinite(b.topY)) return b;
     }
     return null;
   }
@@ -424,23 +431,16 @@ var ADV_FIT_WIDTH = 792;
     var fit = vpW / ADV_FIT_WIDTH;
     if (scale > fit) scale = fit;
 
-    /* LEVEL-fill floor: never show more bedrock than ADV_WALL_VISIBLE either side.
-     * This only means anything when the WALLS ARE ACTUALLY ON SCREEN, so it is
-     * conditional on that. On a level wider than the viewport there is no wall in
-     * shot to frame, and applying it anyway would force a zoom IN on a wide screen
-     * to fill the view with rock that already fills it.
+    /* THE LEVEL-FILL FLOOR IS GONE, and it is worth saying why rather than
+     * leaving a reader to notice the gap. It existed to stop the view showing
+     * more than ADV_WALL_VISIBLE of bedrock beside a level's side walls by zooming
+     * IN until the rock filled the screen. A level map has no side walls any more
+     * — there is always rock out to the horizon in both directions — so the rule
+     * it enforced is now true by construction and the clamp could only ever fire
+     * on a viewport so wide that it would fight ADV_FIT_WIDTH.
      *
-     * PER LEVEL, because width is part of what a level purchase buys: level 1 is
-     * 3600 units across and the deepest is 5200, so a fixed MINE_HALF_WIDTH here
-     * would frame the shallow levels against walls 800 units outside them. */
-    var lb = advBounds();
-    var half = lb ? lb.halfW : A.MINE_HALF_WIDTH;
-    var visHalfX = (vpW * 0.5) / scale;
-    if (visHalfX > half) {
-      var minScale = vpW / (half * 2 + ADV_WALL_VISIBLE * 2);
-      if (scale < minScale) scale = minScale;
-    }
-
+     * ADV_WALL_VISIBLE went with it. What is left is the portrait fit above and
+     * the absolute floor below, which is the whole of the framing solve. */
     if (scale < ADV_MIN_SCALE) scale = ADV_MIN_SCALE;
     if (scale < 0.05) scale = 0.05;
   }
@@ -506,7 +506,6 @@ var ADV_FIT_WIDTH = 792;
     var vyv = SM.vehicle.getVelY ? SM.vehicle.getVelY() : 0;
     var sp = Math.sqrt(vxv * vxv + vyv * vyv);
 
-    var halfW = (vpW * 0.5) / scale;
     var halfH = (vpH * 0.5) / scale;
 
     var lx = 0, ly = 0;
@@ -523,69 +522,34 @@ var ADV_FIT_WIDTH = 792;
     advLeadX += (lx - advLeadX) * k;
     advLeadY += (ly - advLeadY) * k;
 
-    var vx0 = SM.vehicle.getX();
-    advTargetX = vx0 + advLeadX;
+    advTargetX = SM.vehicle.getX() + advLeadX;
     advTargetY = SM.vehicle.getY() + advLeadY;
 
-    /* Keep bedrock off the sides. When the view is wider than the LEVEL plus its
-     * peek there is nothing to slide, so centre it. Per level, because a level's
-     * width is part of what it cost — see recomputeScale(). */
+    /* THERE IS NOTHING TO CLAMP X AGAINST ANY MORE. This used to keep bedrock off
+     * the sides by pinning the view inside the mine's half-width, and then a
+     * second clamp (ADV_WALL_OFFSET) existed purely to stop the first one fighting
+     * the follow when the machine drove up to a wall — measured at 1440x900, the
+     * bare wall clamp put the hull 69% off centre and it got worse the further
+     * west you drove.
+     *
+     * A level map is endless east and west, so there is never bedrock at the sides
+     * to keep off screen and the whole pair is gone. The camera simply follows.
+     * That is one fewer thing the framing can get wrong, and it is why driving a
+     * thousand units east now feels the same as driving a hundred.
+     *
+     * ...AND THE LEVEL'S ROOF, WHICH IS THE ONE BOUND LEFT. -y is up, so the roof
+     * is a lower bound on the target. A camera that slid past it would frame a
+     * screen of bedrock and answer the one question the seal exists to answer —
+     * "is there anything up there?" — with a picture that says maybe.
+     *
+     * BOUND FIRST, THEN THE FOLLOW GUARANTEE, in that order: the machine parks
+     * under the ceiling at the start and end of every run, and it sliding off the
+     * top of the screen is a playability failure where visible bedrock is a
+     * cosmetic one. */
     var lb = advBounds();
-    var slack = (lb ? lb.halfW : A.MINE_HALF_WIDTH) + ADV_WALL_PEEK - halfW;
-    if (slack < 0) slack = 0;
-    if (advTargetX > slack) advTargetX = slack;
-    else if (advTargetX < -slack) advTargetX = -slack;
-
-    /* ...BUT THE WALL CLAMP MAY NOT FIGHT THE FOLLOW, and this is what the
-     * ELEVATOR AT THE WEST EDGE made non-optional.
-     *
-     * The clamp above is written as "how far off the MINE'S CENTRE may the view
-     * slide", which was harmless while everything the player did happened near
-     * x = 0. The lift is now a column at x = -2280 and the run starts, ends and
-     * boards there, so the machine lives against the west bedrock — and it CAN
-     * reach it: the hull clamp in vehicle.js stops the starter rig at x = -2470.4,
-     * which is 130 units off the wall.
-     *
-     * MEASURED at 1440x900 (halfW 900, so slack = 1850) with the hull there:
-     * the bare wall clamp pins the view at x = -1850 and puts the hull 496 px left
-     * of a 720 px half-width — 69% off centre, drifting towards the edge of the
-     * screen, and driving further west only made it worse because the camera had
-     * stopped moving.
-     *
-     * So that clamp is now a PREFERENCE and this is the guarantee: the view centre
-     * may never be more than ADV_WALL_OFFSET of a half-width from the machine. At
-     * 0.34 the same case measures 245 px, i.e. the hull is always inside the middle
-     * two thirds of the view, at the cost of 194 units of bedrock on screen instead
-     * of 150. Applied SECOND, deliberately: visible bedrock is a cosmetic cost, a
-     * machine sliding off the side is a playability one.
-     *
-     * It is a no-op almost everywhere — including parked at the lift on desktop
-     * (measured 224 px, inside the 245 bound) and everywhere at all on a 390-wide
-     * portrait, where halfW is 396 and the wall clamp is already gentler than this
-     * one. It exists for the case above. */
-    var maxOff = halfW * ADV_WALL_OFFSET;
-    if (advTargetX < vx0 - maxOff) advTargetX = vx0 - maxOff;
-    else if (advTargetX > vx0 + maxOff) advTargetX = vx0 + maxOff;
-
-    /* ...and the level's ROOF and FLOOR. -y is up, so the roof is a lower bound on
-     * the target and the floor an upper one. There was no floor bound before this
-     * wave, because there was no floor: the world ran on down to the mine's own
-     * bedrock and the camera simply followed. A level has a bottom now, and a
-     * camera that slid past it would frame two screens of bedrock and answer the
-     * one question the seal exists to answer — "is there anything under here?" —
-     * with a picture that says maybe.
-     *
-     * BOUNDS FIRST, THEN THE FOLLOW GUARANTEE, in that order and for the same
-     * reason the lateral pair are in that order: on a band shorter than the
-     * viewport the two vertical bounds cross, and the machine sliding off the
-     * bottom of the screen is a playability failure where visible bedrock is a
-     * cosmetic one. R1's ADV_WALL_OFFSET argument, one axis over. */
     var top = (lb ? lb.topY : A.MINE_CEILING_Y) - ADV_EDGE_PEEK + halfH;
     if (advTargetY < top) advTargetY = top;
     if (lb) {
-      var bot = lb.botY + ADV_EDGE_PEEK - halfH;
-      if (bot < top) bot = top;          // band shorter than the view: centre it
-      if (advTargetY > bot) advTargetY = bot;
       var maxOffY = halfH * ADV_WALL_OFFSET;
       var vy0 = SM.vehicle.getY();
       if (advTargetY < vy0 - maxOffY) advTargetY = vy0 - maxOffY;
