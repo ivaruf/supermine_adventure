@@ -517,8 +517,11 @@ SM.advterrain = (function () {
    * GLD_X of the centre line the doors are on, because it is the payoff for
    * committing to a direction and a headline formation 2400 units off to one side
    * is not a reward, it is a lottery. Rolled lodes are free to be anywhere. */
-  var GLD_DEPTH_U = 1900;            // ~190 m south of the lift...
-  var GLD_SPREAD_U = 1500;           // ...plus up to this much again, hashed
+  var GLD_DEPTH_U = 3200;            // ~320 m south of the lift... (was 1900:
+                                     // at ~200 m the headline lode was a doorstep
+                                     // find — the owner hit silver "way too
+                                     // quickly". It should cost a committed drive.)
+  var GLD_SPREAD_U = 2400;           // ...plus up to this much again, hashed
   var GLD_X = 1150;
 
   /* ANCIENT DEBRIS — the rare find (js/mines.js design note 4e).
@@ -604,6 +607,10 @@ SM.advterrain = (function () {
    * its own world rather than the same rock at a different depth — see the note
    * by SEAL_ROWS for why that IS the levels-as-maps guarantee now. */
   var S_LEVEL = 0xc67178f2 | 0;
+  /* THE COMPANY SALT. Folds js/save.js's per-company worldSeed into mineSeed in
+   * beginMine(), so two companies dig two different Old Creeks. 0 = legacy
+   * record = no fold, which is what keeps every pre-existing tunnel valid. */
+  var S_WORLD = 0x51ed5eed | 0;
   var S_DEB = 0xa2bfe8a1 | 0, S_DEBC = 0x06ca6351 | 0;
 
   /* ================================================================== */
@@ -1656,6 +1663,44 @@ SM.advterrain = (function () {
   var oreDens = new Float32Array(ORE_BUCKETS);   // ...and the density multiplier
   var driftCapM = 1000;           // metres south at which the whisper plateaus
   var driftW = {};                // scratch, reused by buildLevel only
+  var rawW = {};                  // scratch copy for the undrifted branch — the
+                                  // layer's own weights object must never be
+                                  // mutated (rawWeightsOfLevel returns it live)
+
+  /* ----- THE DOORSTEP RULE ---------------------------------------------
+   * The level's premium ore does not sit at the lift's feet. The ore lottery's
+   * headline entries (value >= NEARLIFT_FRAC of the table's best) fade in over
+   * the first NEARLIFT_M south of the lift, from NEARLIFT_FLOOR at the door row
+   * to full strength past the ramp. Owner-reported: with silver at 2.25% of ore
+   * and whole pockets rolling one material, "almost literally the first chunk I
+   * drilled was silver" — and the scanner headlines the best contact in range,
+   * so any doorstep silver WILL be found. The cheap ore is untouched, the
+   * pocket rate is untouched, and the deep game never sees this at all.
+   * Ancient debris is deliberately exempt: it is the designed jackpot, and its
+   * own per-level rarity already prices a doorstep miracle.
+   * ------------------------------------------------------------------ */
+  var NEARLIFT_M = 260;           // metres south over which premium ore fades in
+  var NEARLIFT_FLOOR = 0.06;      // premium weight multiplier at the door row
+  var NEARLIFT_FRAC = 0.8;        // premium = value >= this frac of the table max
+
+  function nearLiftDamp(obj, mSouth) {
+    if (!obj || mSouth >= NEARLIFT_M) return obj;
+    var id, v, maxV = 0;
+    for (id in obj) {
+      if (!obj.hasOwnProperty(id)) continue;
+      v = SM.materials.get(matIdx(id, 'stone')).value || 0;
+      if (v > maxV) maxV = v;
+    }
+    if (!(maxV > 0)) return obj;
+    var t = mSouth > 0 ? mSouth / NEARLIFT_M : 0;
+    var f = NEARLIFT_FLOOR + (1 - NEARLIFT_FLOOR) * t;
+    for (id in obj) {
+      if (!obj.hasOwnProperty(id)) continue;
+      v = SM.materials.get(matIdx(id, 'stone')).value || 0;
+      if (v >= maxV * NEARLIFT_FRAC) obj[id] *= f;
+    }
+    return obj;
+  }
 
   /** 0..1 along the whisper, from a world y. Clamped, so a bucket is always valid. */
   function driftT(y) {
@@ -1695,18 +1740,31 @@ SM.advterrain = (function () {
     var densK = dr ? num(dr.density, 0) : 0;
     driftCapM = (dr && dr.fullM > 0) ? dr.fullM : 1;
 
-    var i, g;
+    var i, g, mS, id;
     for (i = 0; i < ORE_BUCKETS; i++) {
       /* The bucket's REPRESENTATIVE g is its midpoint, so the quantisation error
        * is half a bucket either way rather than a whole one at the top. */
       g = cap * ((i + 0.5) / ORE_BUCKETS);
+      /* The same midpoint in METRES, for the doorstep rule — the buckets are
+       * already keyed by south distance, so near-lift damping is free here.
+       * GUARD: with a degenerate drift range (stub catalogue -> driftCapM 1) the
+       * last bucket represents the entire endless south, and damping it would
+       * suppress premium ore forever. No resolution, no rule. */
+      mS = (driftCapM >= NEARLIFT_M)
+        ? driftCapM * ((i + 0.5) / ORE_BUCKETS)
+        : NEARLIFT_M;
       if (sp && SM.mines.driftedWeights) {
         SM.mines.driftedWeights(sp, g, driftW);
-        oreTab.push(buildWeights(driftW));
+        oreTab.push(buildWeights(nearLiftDamp(driftW, mS)));
       } else {
         // No spawn table (a stub catalogue, or the default profile): the layer's
         // own weights, undrifted. The world still works; it just never whispers.
-        oreTab.push(buildWeights(rawWeightsOfLevel(k)));
+        // Copied into scratch first — the layer's object is live, and the
+        // doorstep rule must not be baked into it permanently.
+        var raw = rawWeightsOfLevel(k);
+        for (id in rawW) { if (rawW.hasOwnProperty(id)) delete rawW[id]; }
+        if (raw) for (id in raw) { if (raw.hasOwnProperty(id)) rawW[id] = raw[id]; }
+        oreTab.push(buildWeights(nearLiftDamp(rawW, mS)));
       }
       oreDens[i] = 1 + densK * g;
     }
@@ -3001,6 +3059,14 @@ SM.advterrain = (function () {
     mineDef = def || null;
     mineStateRef = mineState || null;
     mineSeed = (def && typeof def.seed === 'number') ? (def.seed | 0) : 1337;
+    /* EVERY COMPANY DIGS ITS OWN WORLD. The catalogue seed alone made every new
+     * game byte-identical — same geology, same guaranteed lode in the same spot.
+     * Folding in the company's worldSeed varies all of it per company while
+     * keeping it eternal per company (the carve store is diffs against this).
+     * A legacy record answers 0 and takes the pure catalogue seed, so old
+     * tunnels keep matching the rock they were dug through. */
+    var ws = (SM.save && SM.save.getWorldSeed) ? (SM.save.getWorldSeed() | 0) : 0;
+    if (ws) mineSeed = h3(mineSeed, ws, S_WORLD) | 0;
     mineDepthM = (def && def.depth > 0) ? def.depth : 400;
 
     buildGrid();

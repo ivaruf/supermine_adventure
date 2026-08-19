@@ -61,7 +61,7 @@ SM.ui = (function () {
    * config.js because config.js is frozen, and ui.js is the only module that
    * ever displays it. Replaced at runtime by whatever the SERVICE WORKER
    * reports — this is only the fallback for a file:// or first-visit load. */
-  var GAME_VERSION    = 'v2.5.0';
+  var GAME_VERSION    = 'v2.6.0';
 
   var C = SM.config;
 

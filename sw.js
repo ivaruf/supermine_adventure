@@ -104,7 +104,17 @@
 //         by a one-time notice in the lift, in the same voice as the level gate.
 //         No save format change and no asset list change; the bump is what gets
 //         a cached client the new flow.
-const VERSION = 'v2.5.0';
+// v2.6.0  EVERY COMPANY DIGS ITS OWN WORLD. New records roll a worldSeed that
+//         advterrain folds into every mine's catalogue seed, so a new game is no
+//         longer byte-identical to the last one; legacy records read 0 and keep
+//         the exact geology their tunnels were dug against. And the guaranteed
+//         headline lode moves deeper (~320-560 m south of the lift, was
+//         ~190-340 m), AND the ore lottery gets a DOORSTEP RULE: a level's
+//         premium ore (silver on L1) fades in over the first ~260 m south, so
+//         the first pockets a new company cracks are coal and copper, not the
+//         mineral the whole early game is priced around finding later. One
+//         additive save field; no asset list change.
+const VERSION = 'v2.6.0';
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 

@@ -619,7 +619,7 @@ SM.save = (function () {
   }
 
   var RECORD_KEYS = ['v', 'company', 'day', 'cash', 'integrity', 'rig',
-                     'mines', 'seen', 'stats'];
+                     'mines', 'seen', 'stats', 'worldSeed'];
   /* `mask` is listed and never read: it is v1's flat carve mask, and leaving it
    * in the known set is what stops a migrated record filling getDroppedKeys()
    * with a key that was dropped on purpose. `carve` is v2's sparse store. */
@@ -776,7 +776,11 @@ SM.save = (function () {
         hauled: Math.floor(num(o.stats ? o.stats.hauled : 0, 0, 0, MAX_CASH)),
         bestHaul: Math.floor(num(o.stats ? o.stats.bestHaul : 0, 0, 0, MAX_CASH)),
         runs: Math.floor(num(o.stats ? o.stats.runs : 0, 0, 0, 1e7))
-      }
+      },
+      /* Missing on every record written before it existed -> 0, the legacy
+       * world: those companies keep the exact geology their tunnels were dug
+       * against. See freshRecord() for why 0 is reserved. */
+      worldSeed: Math.floor(num(o.worldSeed, 0, 0, 0x7fffffff))
     };
     if (o.stats && typeof o.stats === 'object') {
       auditKeys(o.stats, ['hauled', 'bestHaul', 'runs'], 'record.stats');
@@ -817,7 +821,14 @@ SM.save = (function () {
       rig: (SM.rig && SM.rig.getState) ? SM.rig.getState() : {},
       mines: {},
       seen: {},
-      stats: { hauled: 0, bestHaul: 0, runs: 0 }
+      stats: { hauled: 0, bestHaul: 0, runs: 0 },
+      /* THE COMPANY'S OWN WORLD. Rolled once, here, and never again: advterrain
+       * folds it into every mine's catalogue seed, so two companies dig two
+       * different Old Creeks while each company's own geology stays eternal
+       * (tunnels are diffs against regenerable rock — the seed IS the rock).
+       * Zero is reserved to mean "legacy record, pure catalogue seed", which is
+       * why a fresh roll may never produce it. */
+      worldSeed: ((Math.random() * 0x7fffffff) | 0) || 1
     };
     /* The starter mine's rights come with the company. */
     var starter = (SM.mines && SM.mines.getStarterId) ? SM.mines.getStarterId() : null;
@@ -1259,6 +1270,8 @@ SM.save = (function () {
     mineState: mineState,
     isOwned: isOwned,
     setOwned: setOwned,
+    /** The loaded company's world seed; 0 = legacy record (pure catalogue seed). */
+    getWorldSeed: function () { return record ? (record.worldSeed | 0) : 0; },
     /* THE CARVE CODEC. See the design note at the top of this file for the wire
      * format; the seam is SM.advterrain.exportCarve() / importCarve(). */
     encodeCarve: encodeCarve,
