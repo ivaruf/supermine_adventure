@@ -184,6 +184,11 @@ SM.advhud = (function () {
    * fact that the rung was revealed and hands the box over exactly once; these
    * three hold it on screen until the player leaves the cage. 0 = no box. */
   var liftUnlock = 0;
+  /* THE WORKSHOP ROUND TRIP. True from the frame the workshop opens over a live
+   * run until the frame the lift panel is back. It exists for exactly one
+   * reason — see hideLift() — and it must be cleared on the way back in, or the
+   * unlock notice becomes immortal. */
+  var shopTrip = false;
   var liftUnlockName = '';
   var liftUnlockPrice = 0;
 
@@ -536,6 +541,25 @@ SM.advhud = (function () {
     els.doorActs = el('div', 'sm-ah-door-acts', els.lift);
     els.doorSell = doorButton(els.doorActs, 'sm-ah-door-sell', 'SELL', onDoorSell);
     els.doorFuel = doorButton(els.doorActs, 'sm-ah-door-fuel', 'REFUEL', onDoorRefuel);
+    /* --- ...AND THE WORKSHOP -------------------------------------------
+     * OWNER: "workshop needs to be a button on the lift menu."
+     *
+     * IT BELONGS IN THIS ROW AND NOT IN THE FOOT. The three plates here are the
+     * three things the surface is FOR — bank the load, fill the tank, fit a
+     * better machine — and every one of them is a purchase made against the
+     * money on screen. The foot is navigation: back to the rock, or out. Putting
+     * a shop verb next to LEAVE would file it as a way of ending the run, which
+     * is exactly the trip it exists to save.
+     *
+     * IT COSTS NO HEIGHT. The row is a two-column grid and a third child would
+     * otherwise WRAP onto a second row, taking its height out of the level
+     * ladder — which on a landscape phone has 50px to give (see the measurement
+     * in style-adventure.css §12). Three columns instead of two is a change of
+     * width, and width is the thing this panel has spare.
+     *
+     * It is never disabled. An empty wallet is a thing you find out by looking
+     * at the prices, and the workshop is also where the machine is INSPECTED. */
+    els.doorShop = doorButton(els.doorActs, 'sm-ah-door-shop', 'WORKSHOP', onDoorShop);
 
     /* --- THE UNLOCK NOTICE ----------------------------------------------
      * THE PROGRESSION GATE'S ONE PIECE OF TEACHING (js/adv.js's note above
@@ -1183,10 +1207,54 @@ SM.advhud = (function () {
     setText('doutv', els.doorOut.smVal,
             at >= 1 ? ('L' + fmt(at) + '  ' + liftLabel(hereL, at)) : 'BACK TO THE ROCK');
 
+    /* THE WORKSHOP PLATE CARRIES A PRICE TOO, so the row reads as three money
+     * decisions rather than two and a door. The number is the CHEAPEST thing on
+     * sale — "is there anything in here I can act on" is the question a player
+     * standing in a lift is asking, and the cheapest price is the only single
+     * number that answers it. It is not filtered by what they can afford: a shop
+     * that hides its prices when you are broke is a shop you stop visiting. */
+    if (els.doorShop) setText('dshopv', els.doorShop.smVal, cheapestPart());
+
     /* LEAVE is the one plate whose VALUE line changes, because the confirm has to
      * be visible somewhere and the label is not allowed to move. */
     setText('dmapv', els.doorMap.smVal, mapArmed > 0 ? 'CONFIRM' : 'TO THE MAP');
     setClass('dmaparm', els.doorMap, 'sm-ah-door-armed', mapArmed > 0);
+  }
+
+  /**
+   * The lowest next-tier price across the eight part categories, as the
+   * workshop plate's value line. 'ALL FITTED' when the machine is maxed out.
+   *
+   * Eight nextCost() calls, on the SLOW tick (8 Hz) and only while the lift
+   * panel is up — this is not on any hot path. `canFit` is respected so a plate
+   * cannot advertise an engine the tracks will refuse.
+   */
+  function cheapestPart() {
+    var R = SM.rig;
+    if (!R || !R.PART_KEYS || !R.nextCost) return 'FIT PARTS';
+    var best = -1;
+    for (var i = 0; i < R.PART_KEYS.length; i++) {
+      var k = R.PART_KEYS[i];
+      if (R.canFit && !R.canFit(k)) continue;
+      var c = num(R.nextCost(k), -1);
+      if (c < 0) continue;
+      if (best < 0 || c < best) best = c;
+    }
+    return best < 0 ? 'ALL FITTED' : ('FROM $' + fmt(best));
+  }
+
+  /**
+   * OPEN THE WORKSHOP WITHOUT ENDING THE RUN. adv.js owns whether that is legal
+   * (it insists the machine is actually in the cage and not mid-manoeuvre); all
+   * this does is ask, and say so if the answer is no.
+   */
+  function onDoorShop() {
+    var a = A();
+    if (!a || !a.openGarage) return;
+    if (SM.sound && SM.sound.play) SM.sound.play('ui');
+    if (!a.openGarage()) {
+      alertKind('shop', 'NOT YET', 'Wait for the lift to finish docking', 1.8);
+    }
   }
 
   function showLift() {
@@ -1207,8 +1275,15 @@ SM.advhud = (function () {
     /* ONE PANEL SESSION PER UNLOCK. The box has been read (or waved away, which
      * is the player's right); coming back into the cage must not re-teach it.
      * adv.js has already persisted the reveal, so the ROW stays either way —
-     * only the teaching goes. */
-    if (liftUnlock) { liftUnlock = 0; liftSig = ''; }
+     * only the teaching goes.
+     *
+     * ...EXCEPT ACROSS A WORKSHOP TRIP, which is not the player leaving the
+     * cage. The panel goes down because the whole HUD does, and adv.js has
+     * ALREADY handed the notice over and cleared it at the source — so dropping
+     * it here would destroy the progression gate's one piece of teaching,
+     * permanently, for that rung, for the crime of tapping WORKSHOP while it was
+     * on screen. `shopTrip` is that one exception and nothing else sets it. */
+    if (liftUnlock && !shopTrip) { liftUnlock = 0; liftSig = ''; }
   }
 
   function refreshLift() {
@@ -1572,6 +1647,49 @@ SM.advhud = (function () {
         alertKind('layer', String(p.name).toUpperCase(),
                   Math.round(num(p.depthM, 0)) + ' m  ·  new stratum', 2.2);
       });
+      /* --- "TOO HARD FOR THIS DRILL" -------------------------------------
+       * The one thing in the mine that a player cannot work out by looking at
+       * it. Sparks and a dead stop say "something is wrong"; only a caption can
+       * say WHICH rock, WHY, and that there is a fix and where it is sold.
+       *
+       * IT IS A BANNER AND NOT A PANEL, deliberately. The machine is still
+       * driveable — the correct response is usually to steer around the thing —
+       * so anything modal would be taking the wheel away to tell the player they
+       * still have it. This is the same short amber banner as a low tank.
+       *
+       * THE RATE LIMIT IS THE EMITTER'S, NOT OURS. vehicle.js fires
+       * `drill:toohard` once per contact episode and never twice for the same
+       * material inside its quiet period (see ADV_TOOHARD_SAY there), so the
+       * banner, the clank and the bounce sparks cannot disagree about how often
+       * the game mentions this. alertKind()'s own 1.2 s floor stays as a net.
+       *
+       * Building strings here is fine and would not be in a hot handler: this
+       * fires on the order of once every several seconds at worst, against
+       * `material:destroyed`'s ~150 per step.
+       *
+       * TWO WALLS, TWO SENTENCES. A cap refusal is an invitation to spend money.
+       * The level SEAL is not — no drill in the shop cuts it, the lift is the
+       * only way through — so telling the player to upgrade there would be
+       * selling them something that does not exist. vehicle.js flags which. */
+      SM.events.on('drill:toohard', function (p) {
+        if (!p) return;
+        var d = displayOf(p.matIndex, null);
+        var name = (d.name || 'THIS ROCK').toUpperCase();
+        if (p.seal) {
+          alertKind('seal', name + ' — THE LEVEL ENDS HERE',
+                    'The lift is the only way between levels', 2.6);
+          return;
+        }
+        var h = num(p.hardness, 0), cap = num(p.cap, 0);
+        /* The sub carries the two numbers because "too hard" on its own is a
+         * verdict and these are the evidence — and because they are what the
+         * workshop's drill card is quoting when the player gets there. Kept
+         * short enough to hold ONE line on a phone; see the compact banner rule
+         * in style-adventure.css for the width it has to live inside. */
+        alertKind('toohard', name + ' — TOO HARD FOR THIS DRILL',
+                  'Hardness ' + h.toFixed(1) + ' · bit cuts ' + cap.toFixed(1)
+                  + ' · upgrade in the workshop', 2.8);
+      });
       /* NO SCANNER BANNERS. `scan:contact` and `mine:lode` used to raise the
        * alert banner, and between them they fired often enough to sit over the
        * hold more or less permanently in ore-rich ground — so the instrument was
@@ -1640,9 +1758,22 @@ SM.advhud = (function () {
 
   function onState(p) {
     var st = (p && p.state) || (SM.adv && SM.adv.getState ? SM.adv.getState() : 'off');
+    /* THE WORKSHOP OVER A LIVE RUN IS A ROUND TRIP, not an exit. Latched BEFORE
+     * hide() runs, because hide() is what would otherwise eat the unlock notice
+     * on the way down (see hideLift()). Cleared as the panel comes back up. */
+    if (st === 'garage' && SM.adv && SM.adv.isShopHold && SM.adv.isShopHold()) {
+      shopTrip = true;
+    }
     if (st === 'mine') {
       show();
       if (SM.joystick && SM.joystick.show) SM.joystick.show();
+      /* COMING BACK FROM THE WORKSHOP, THE PANEL HAS TO COME BACK WITH US. The
+       * player left it up; they did not dismiss it, and dropping them back into
+       * a cage with no menu would be a soft lock with a machine they cannot see.
+       * show() -> reset() already clears liftDismissed and the signature, so all
+       * this has to do is stop suppressing the notice; the next slow tick
+       * (<=125 ms) finds isInLift() still true and raises the panel. */
+      shopTrip = false;
     } else {
       hide();
       if (SM.joystick && SM.joystick.hide) SM.joystick.hide();

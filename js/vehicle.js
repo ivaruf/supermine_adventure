@@ -49,7 +49,15 @@
  *                                    clock is js/adv.js's; the path is ours.
  *
  * Events emitted
- *   drill:blocked  {matIndex, hardness}   the bit met rock it cannot cut
+ *   drill:blocked  {x, y, matIndex, hardness, cap, seal}
+ *                  HEARTBEAT. The bit is against rock it cannot cut, still.
+ *                  Re-fires every ADV_STALL_SAY for as long as the grind lasts.
+ *   drill:toohard  {x, y, matIndex, hardness, cap, seal}
+ *                  THE ANNOUNCEMENT. One per contact EPISODE, and never twice
+ *                  for the same material inside ADV_TOOHARD_SAY. This is the
+ *                  one the HUD captions, the clank rides on and the bounce
+ *                  sparks come out of — see advStallFeedback().
+ * Both payloads are REUSED objects. Read what you need inside the handler.
  * ========================================================================== */
 
 var SM = SM || {};
@@ -337,27 +345,68 @@ SM.vehicle = (function () {
   var ADV_LURCH_KICK = 95;       // world units/sec added along the facing
   var ADV_LURCH_COOL = 0.4;      // minimum seconds between lurches
 
-  // --- the hardness gate ----------------------------------------------
-  // Rock above SM.rig.getHardnessCap() cannot be cut at all. particles.js
-  // damages every solid in a rect with no way to filter, so the box is
-  // PRE-SCANNED and the whole cut is refused when the bit is up against
-  // uncuttable material — which is also the only honest reading of "the drill
-  // cannot bite". Two triggers, because one alone is wrong in one direction:
-  //   * anything over the cap inside the CORE box (the bit itself) blocks
-  //     immediately — that is the bit sitting on the wall;
-  //   * over the cap across ADV_BLOCK_FRAC of the wider box blocks too, so a
-  //     wall stops you before its face has quite reached the core.
-  // A single hard pebble embedded in soft ground therefore does NOT lock the
-  // machine up: you cut past it and it stays behind as a stone.
-  // The fraction test counts only what is IN THE PATH — ahead of the bit along
-  // the facing — not the whole box. Measured against a real bedrock floor: the
-  // box straddling the boundary is mostly ordinary rock, so a whole-box fraction
-  // came out under the threshold, the gate never fired, and the cutter chewed
-  // hardness-26 bedrock at about 1.2 s a deposit while the hull slowly died.
-  // Classifying per deposit is rotation-correct even though the BOX cannot be:
-  // the box stays axis-aligned for particles.js, and a dot product decides what
-  // is in front of us.
+  /* --- the hardness gate ------------------------------------------------
+   * THE CAP IS A REFUSAL, NOT A SLOW GRIND. Rock above SM.rig.getHardnessCap()
+   * takes ZERO damage from this machine — not a little, not slowly, none. It is
+   * a wall until the drill is upgraded, and the workshop sells the fix.
+   *
+   * THAT REQUIRED TWO SEPARATE MECHANISMS, because a cut is a RECT and
+   * uncuttable material is a per-DEPOSIT fact. Both are below:
+   *
+   *   1. THE STALL, when a wall is in the way. The box is pre-scanned and the
+   *      whole cut is refused — the machine grinds to a halt, throws sparks and
+   *      says so. That is the gate you feel, and its two triggers are described
+   *      under ADV_BLOCK_FRAC.
+   *   2. THE BOX NEVER REACHES PAST THE FIRST THING IT CANNOT CUT.
+   *      A stall is the wall case; it is NOT every case. A vein at the shoulder
+   *      of the box, or a single hard nodule two deposit-widths off the axis, is
+   *      under the fraction threshold and does not stall — and until this was
+   *      added, particles.damageSolidInRect() then chipped it anyway, because it
+   *      damages every SOLID in the rect and has no way to skip a material.
+   *      MEASURED on the shipped build, tier-0 bit (cap 8.5) against one silver
+   *      deposit (hardness 9.0) embedded in stone: driving into it took the
+   *      deposit from 9.0 hp to 4.07 in under two seconds — 55% of a deposit
+   *      that can never break. Worse, it LOOKED like progress: particles.js
+   *      switches a damaged deposit to the brightest shade row, so the silver
+   *      visibly cracked and then refused to yield, which is the one reading the
+   *      mode must never give.
+   *      So the pre-scan also measures how far the damage rect may reach on each
+   *      of its four sides before it meets something over the cap, and trims it
+   *      to that. The drill cuts everything it can reach up to the first thing it
+   *      cannot, and the uncuttable deposit is never handed to particles.js.
+   *      WHEN NOTHING IS OVER THE CAP THE TRIM IS INERT — all four extents stay
+   *      at infinity and the rect is the rect it always was, side for side. That is
+   *      deliberate: the overwhelming majority of cutting in this game is below
+   *      the cap and must behave exactly as it did.
+   *      The hull's janitor box (ADV_HULL_GRIND) gets the same treatment through
+   *      its own scan — 16% of drill power is still power, and a deposit no
+   *      drill can bite must not be worn away by the chassis brushing past it.
+   *
+   * Two stall triggers, because one alone is wrong in one direction:
+   *   * anything over the cap inside the CORE box (the bit itself) blocks
+   *     immediately — that is the bit sitting on the wall;
+   *   * over the cap across ADV_BLOCK_FRAC of the wider box blocks too, so a
+   *     wall stops you before its face has quite reached the core.
+   * A single hard pebble embedded in soft ground therefore does NOT lock the
+   * machine up: you cut past it and it stays behind as a stone — and with the
+   * trim above it stays behind INTACT, which is what that sentence always
+   * meant and, until now, never quite said.
+   * The fraction test counts only what is IN THE PATH — ahead of the bit along
+   * the facing — not the whole box. Measured against a real bedrock floor: the
+   * box straddling the boundary is mostly ordinary rock, so a whole-box fraction
+   * came out under the threshold, the gate never fired, and the cutter chewed
+   * hardness-26 bedrock at about 1.2 s a deposit while the hull slowly died.
+   * Classifying per deposit is rotation-correct even though the BOX cannot be:
+   * the box stays axis-aligned for particles.js, and a dot product decides what
+   * is in front of us.
+   * ------------------------------------------------------------------ */
   var ADV_BLOCK_FRAC = 0.22;
+  /* How far INSIDE the first uncuttable deposit the damage rect must stop.
+   * damageSolidInRect() takes a deposit when |dx| <= half + r, so the trim has
+   * to land strictly under that — half a world unit is invisible next to the 21
+   * unit deposit pitch and puts the compare the right side of the boundary
+   * without relying on float equality going our way. */
+  var ADV_SAFE_EPS = 0.5;
   var ADV_PATH_BEHIND = 8;       // tolerance: material level with the bit counts
   var ADV_STALL_DECAY = 14;      // e-folds/sec bled off the blocked direction
   // ...and then a hard refusal below this, because an exponential alone leaves a
@@ -367,7 +416,21 @@ SM.vehicle = (function () {
   // this speed the contact still reads as a crunch that takes a tenth of a
   // second to arrest; below it, the rock simply wins.
   var ADV_STALL_CREEP = 26;      // units/sec of push into a wall that is refused
-  var ADV_STALL_FX = 0.13;       // seconds between spark bursts while blocked
+  /* --- WHAT A REFUSAL LOOKS AND SOUNDS LIKE ----------------------------
+   * Two rates, not one, because a refusal has two halves and they are different
+   * events:
+   *
+   *   THE CONTACT is a single hard moment — the bit arrives, the clank lands,
+   *   sparks come STRAIGHT BACK off the face and the camera takes one tick. It
+   *   happens once per episode (see ADV_TOOHARD_GAP) and it is what the player
+   *   remembers.
+   *   THE GRIND is the bed under it — a smaller skitter every ADV_STALL_FX for
+   *   as long as they lean on it. 0.13 s was the old rate and it machine-guns
+   *   a ten-second grind; 0.24 reads as a bit skating rather than a stutter,
+   *   and leaves the contact clank the loudest thing in the sequence.
+   * ------------------------------------------------------------------ */
+  var ADV_STALL_FX = 0.24;       // seconds between skitter bursts while blocked
+  var ADV_BOUNCE_SPREAD = 0.85;  // radians either side of the reflected axis
   /* HITTING A WALL IS A HARD STOP, NOT A SLOW DEATH.
    * Continuous wear while stalled (this was 0.5 integrity/sec) means leaning on
    * anything impenetrable — and the mine's bedrock FLOOR is the one every player
@@ -393,7 +456,50 @@ SM.vehicle = (function () {
   // what turns a jam into an overheat, which is where that pressure belongs.
   var ADV_STALL_HEAT = 3.0;      // heat points/sec while stalled on the cap
   var ADV_STALL_SHAKE = 7;       // trauma floor while stalled
-  var ADV_STALL_SAY = 1.1;       // seconds between `drill:blocked` captions
+  var ADV_CONTACT_SHAKE = 6;     // ...and one additive tick on the contact step
+  var ADV_STALL_SAY = 1.1;       // seconds between `drill:blocked` heartbeats
+
+  /* --- "TOO HARD FOR THIS DRILL": THE ANNOUNCEMENT AND ITS RATE LIMIT ----
+   * `drill:blocked` above is a HEARTBEAT — it says "still stuck" every 1.1 s and
+   * exists for anything that wants to poll the fact through an event. It is the
+   * wrong shape for a caption: a banner that re-fires every 1.1 s for the ten
+   * seconds a player spends working out that a wall is a wall is nagging, and
+   * nagging is what makes people stop reading the HUD.
+   *
+   * So the caption rides its own event, `drill:toohard`, and the emitter — not
+   * the HUD, not sound, not effects — owns the rate limit, so all three hang off
+   * one source of truth and cannot disagree about how often the game is allowed
+   * to mention this.
+   *
+   * THE RULE, and it is two clauses:
+   *
+   *   ONE PER CONTACT EPISODE. An episode begins the step the bit is refused
+   *   after ADV_TOOHARD_GAP of not being refused, and lasts until then. The gap
+   *   exists because the pre-scan samples a moving box and the gate genuinely
+   *   flickers off for a step at a boundary; without it, one lean on one wall
+   *   would be a dozen episodes.
+   *   ...AND NEVER TWICE FOR THE SAME MATERIAL INSIDE ADV_TOOHARD_SAY. Backing
+   *   off and having another go at the same silver — which is exactly what a
+   *   player does — is one lesson, not five. A different material announces
+   *   immediately, because that IS new information, and the same material a
+   *   minute later announces again, because by then it is a reminder rather
+   *   than an echo.
+   *   ...WITH EXACTLY ONE REPEAT, and no more, if a single episode runs past
+   *   ADV_TOOHARD_SAY. MEASURED: an episode does not end when the player backs
+   *   off, because the damage box reaches ~195 units ahead of the hull and a
+   *   nudge in reverse is thirty of them — so "one per episode" alone means a
+   *   player who leant on a wall, missed the 2.8 s banner and kept leaning got
+   *   nothing more for as long as they stayed in front of it. The second one is
+   *   the nudge for exactly that; after it the episode goes quiet for good and
+   *   the machine's own silence is the message.
+   *
+   * The per-material clock is a Float32Array beside the hardness cache, so the
+   * test is one array read and one compare on a path that is already scanning
+   * sixty deposits.
+   * ------------------------------------------------------------------ */
+  var ADV_TOOHARD_GAP = 0.6;     // seconds free of refusal that end an episode
+  var ADV_TOOHARD_SAY = 6.0;     // ...the quiet period per material, and the
+                                 // grind length that earns the one repeat
 
   // --- what the work costs (reported to SM.adv) ------------------------
   // THE RATES ARE SM.rig's. getDriveBurn() and getDrillBurn() are published
@@ -566,13 +672,26 @@ SM.vehicle = (function () {
   var advLoad = 0;               // smoothed seconds of work ahead of the bit
   var loadPeak = 0;              // highest load since the last breakthrough
   var stallFxTimer = 0;
-  var stallSay = 0;              // caption rate limiter (see advStallFeedback)
+  var stallSay = 0;              // heartbeat rate limiter (see advStallFeedback)
   var stallPrev = false;         // stalled on the previous step (ram detection)
+  /* --- the announcement's episode clock (see ADV_TOOHARD_GAP) ---------- */
+  var toohardOn = false;         // an episode is running
+  var toohardFree = 99;          // seconds since the bit was last refused
+  var toohardSaid = false;       // ...and it announced itself when it began
+  var toohardAgain = false;      // ...and has already spent its one repeat
+  var advClock = 0;              // monotonic seconds of driving, for the quiet
+                                 // period. Never reset mid-run: it is only ever
+                                 // read as a difference.
   var ramCool = 0;               // rate limit on wall impacts
   var stallHold = 0;             // seconds continuously stalled
   var lurchCool = 0;
   var blockedMat = -1;           // material index of what is blocking us
   var blockedHard = 0;
+  /* ...and WHY. The level seal is a wall at every drill tier (see the note by
+   * boxHitsSeal), so it is a refusal that no purchase in the game will ever
+   * lift — telling the player to upgrade the drill would be a lie. The flag is
+   * what lets one event carry both answers. */
+  var blockedSeal = false;
   var driveBurn = 0;             // smoothed fuel/sec from driving + drilling
   var advDry = false;            // the tank came up empty on the last draw
   var advTurning = 0;            // rad/sec actually applied, for the bank
@@ -584,15 +703,34 @@ SM.vehicle = (function () {
    * ------------------------------------------------------------------ */
   var advHard = null;            // Float32Array: matIndex -> hardness
   var advHardN = -1;
+  var advMaxHard = 0;            // hardest entry in the table — the early-out
+  var toohardAt = null;          // Float32Array: matIndex -> advClock last said
   var PD = null;                 // SM.particles.data, cached (READ-ONLY)
   var scCap = 0;                 // hardness ceiling for this scan
   var scCount = 0, scOver = 0, scCoreOver = 0;
   var scPath = 0, scPathOver = 0;      // ...and the same, restricted to the path
   var scHardSum = 0, scHardest = 0, scHardestMat = -1;
+  /* The four sides of a damage rect, as the largest extent from its centre that
+   * reaches nothing over the cap: [-x, +x, -y, +y].
+   *
+   * FOUR AND NOT ONE, because a single symmetric half-extent gives up the clear
+   * side of the box along with the blocked one: measured, a lone uncuttable
+   * nodule 60 units off the axis halved the whole corridor while the machine
+   * drove past it, when only the side it was on had anything wrong with it.
+   *
+   * TWO ARRAYS AND NOT ONE, because the bit's box and the hull's box are
+   * measured about different centres and one is scanned after the other has
+   * already cut. Sharing them would work today and would be a landmine the day
+   * somebody reorders the block. Allocated once, never resized. */
+  var LIM_XN = 0, LIM_XP = 1, LIM_YN = 2, LIM_YP = 3;
+  var scLim = new Float32Array(4);               // the bit's
+  var shLim = new Float32Array(4);               // ...and the hull's
   var scBitX = 0, scBitY = 0, scFx = 0, scFy = 0;
+  var shCap = 0, shX = 0, shY = 0;
 
   /* --- reused event payloads (never stashed) --------------------------- */
-  var evBlocked = { x: 0, y: 0, matIndex: -1, hardness: 0, cap: 0 };
+  var evBlocked = { x: 0, y: 0, matIndex: -1, hardness: 0, cap: 0, seal: false };
+  var evTooHard = { x: 0, y: 0, matIndex: -1, hardness: 0, cap: 0, seal: false };
 
   /* =====================================================================
    * SETUP
@@ -693,12 +831,21 @@ SM.vehicle = (function () {
     lurchCool = 0;
     blockedMat = -1;
     blockedHard = 0;
+    blockedSeal = false;
     driveBurn = 0;
     advDry = false;
     advTurning = 0;
     advTravel = 1;
     // A re-descent must never inherit half a docking from the run before it.
     glideOn = false;
+    /* ...nor half a lesson. A NEW EXPEDITION re-teaches: the per-material quiet
+     * period is about not nagging inside one descent, and a player coming back
+     * down after buying a drill deserves to be told plainly which wall is still
+     * a wall. Cleared here rather than in parkAtDoor(), because a LIFT RIDE is
+     * the same run and the same lesson. */
+    toohardOn = false;
+    toohardFree = 99;
+    if (toohardAt) for (var ti = 0; ti < toohardAt.length; ti++) toohardAt[ti] = -1e9;
 
     parkAtDoor();
     syncRig();
@@ -743,6 +890,11 @@ SM.vehicle = (function () {
     lurchCool = 0;
     blockedMat = -1;
     blockedHard = 0;
+    blockedSeal = false;
+    // ...and no episode either: setting the machine down somewhere else means
+    // the next refusal is a fresh contact, whatever it was grinding on before.
+    toohardOn = false;
+    toohardFree = 99;
     driveBurn = 0;
     return true;
   }
@@ -783,6 +935,11 @@ SM.vehicle = (function () {
     lurchCool = 0;
     blockedMat = -1;
     blockedHard = 0;
+    blockedSeal = false;
+    // ...and no episode either: setting the machine down somewhere else means
+    // the next refusal is a fresh contact, whatever it was grinding on before.
+    toohardOn = false;
+    toohardFree = 99;
     driveBurn = 0;
     return true;
   }
@@ -927,6 +1084,7 @@ SM.vehicle = (function () {
     resistance -= resistance * kLoad;
     blockedMat = -1;
     blockedHard = 0;
+    blockedSeal = false;
     driveBurn = 0;
     var fx = Math.sin(heading), fy = -Math.cos(heading);
     advPushToParticles(dt, fx, fy);
@@ -1068,16 +1226,23 @@ SM.vehicle = (function () {
     if (changed) { upgradeVersion++; gradSig = -1; }
   }
 
-  /** Hardness by material index. Cached: the table is rewritten only at load. */
+  /** Hardness by material index. Cached: the table is rewritten only at load.
+   *  `toohardAt` rides along because it is the same shape and the same lifetime
+   *  — one slot per material, holding the advClock reading at which that
+   *  material was last announced. -1e9 so the first contact always speaks. */
   function ensureHardness() {
     var M = SM.materials;
     var n = (M && M.count) ? M.count : 0;
     if (n === advHardN && advHard) return;
     advHardN = n;
     advHard = new Float32Array(n);
+    toohardAt = new Float32Array(n);
+    advMaxHard = 0;
     for (var i = 0; i < n; i++) {
       var m = M.get(i);
       advHard[i] = m ? (m.hardness || 0) : 0;
+      if (advHard[i] > advMaxHard) advMaxHard = advHard[i];
+      toohardAt[i] = -1e9;
     }
   }
 
@@ -1180,6 +1345,8 @@ SM.vehicle = (function () {
     ensureHardness();
     if (!PD) PD = SM.particles.data;
     if (ramCool > 0) ramCool -= dt;
+    // The announcement's quiet period is measured against this and nothing else.
+    advClock += dt;
     // ONCE per step, read before anything uses it: the cut clip (block 3) and the
     // position clamps (block 5) must agree about where this level ends.
     lvB = advBounds();
@@ -1263,6 +1430,16 @@ SM.vehicle = (function () {
      * the same branch a powerless machine already used. */
     if (inLift) power = 0;
     var kLoad = 1 - Math.exp(-ADV_LOAD_LERP * dt);
+    /* CAN ANYTHING IN THIS WORLD BE OVER THE CAP AT ALL? A tier-5 bit's cap is
+     * 34 and the hardest thing in the table is bedrock at 26, so for a maxed rig
+     * the whole gate — the trim, the hull scan, all of it — is answering a
+     * question with no yes in it. One compare buys the entire early-out, and it
+     * is read LIVE off SM.rig and SM.materials so it stays true whatever the
+     * balance pass lands on. */
+    var canOverCap = cap < advMaxHard;
+    // The four sides of this step's damage rect, as distances from the bit.
+    var cxn = cutHalf, cxp = cutHalf, cyn = cutHalf, cyp = cutHalf;
+    var cutOk = true;              // ...false when the trim went negative
     if (power > 0) {
       scanBox(hx, hy, cutHalf, cap, fx, fy);
       // Blocked when the bit itself is on uncuttable rock, or when enough of
@@ -1290,8 +1467,10 @@ SM.vehicle = (function () {
        *   deposit of the seal is ever passed to particles.js at all. Thickness
        *   would not have done this — a thick enough border to survive a maxed
        *   bit is a border you can see from the middle of the level. */
+      blockedSeal = false;
       if (lvB && boxHitsSeal(hx, hy, cutHalf)) {
         stalled = true;
+        blockedSeal = true;
         if (blockedMat < 0) { blockedMat = sealMat(); blockedHard = 99; }
       }
 
@@ -1304,30 +1483,60 @@ SM.vehicle = (function () {
       advLoad += (scHardSum / power - advLoad) * kLoad;
       resistance += (scHardSum - resistance) * kLoad;
       if (advLoad > loadPeak) loadPeak = advLoad;
+
+      /* THE BOX NEVER REACHES PAST THE FIRST THING IT CANNOT CUT. The four
+       * extents are +Infinity whenever there is nothing over the cap in the box
+       * at all — which is nearly always — so this collapses to the box the cut
+       * has always used, side for side. That is the point: below the cap,
+       * nothing here changes anything. */
+      if (canOverCap) {
+        cxn = capExtent(scLim[LIM_XN], cutHalf); cxp = capExtent(scLim[LIM_XP], cutHalf);
+        cyn = capExtent(scLim[LIM_YN], cutHalf); cyp = capExtent(scLim[LIM_YP], cutHalf);
+        // A negative extent is the bit standing INSIDE something uncuttable.
+        // Zero would not exclude it (a zero-width rect is a line, and a line
+        // still catches circles), so the honest answer is no cut at all.
+        if (cxn < 0 || cxp < 0 || cyn < 0 || cyp < 0) cutOk = false;
+      }
     } else {
       advLoad -= advLoad * kLoad;
       resistance -= resistance * kLoad;
     }
 
     if (power > 0 && !stalled) {
-      var res = SM.particles.damageSolidInRect(
-        hx - cutHalf, clipT(hy - cutHalf),
-        hx + cutHalf, hy + cutHalf,
-        power * dt, hx, hy
-      );
-      damaged = res.damaged;
-      broke = res.broken;
+      if (cutOk) {
+        var res = SM.particles.damageSolidInRect(
+          hx - cxn, clipT(hy - cyn),
+          hx + cxp, hy + cyp,
+          power * dt, hx, hy
+        );
+        damaged = res.damaged;
+        broke = res.broken;
+      }
       cutting = damaged > 0;
 
       // The hull's own janitor box (see the tunables note): stops the chassis
       // being drawn standing inside rock when it pivots. Clipped at the ceiling
-      // for the same reason the cut is — it is a cut, at 16% power.
-      var hres = SM.particles.damageSolidInRect(
-        x - ADV_HULL_HALF, clipT(y - ADV_HULL_HALF),
-        x + ADV_HULL_HALF, y + ADV_HULL_HALF,
-        power * ADV_HULL_GRIND * dt, x, y
-      );
-      damaged += hres.damaged;
+      // for the same reason the cut is — it is a cut, at 16% power. And trimmed
+      // off uncuttable material for the same reason too: a chassis brushing
+      // along a silver face must not wear it away at 16% of a power that is
+      // already refused at 100%.
+      var hxn = ADV_HULL_HALF, hxp = ADV_HULL_HALF;
+      var hyn = ADV_HULL_HALF, hyp = ADV_HULL_HALF;
+      var hullOk = true;
+      if (canOverCap) {
+        scanHull(x, y, ADV_HULL_HALF, cap);
+        hxn = capExtent(shLim[LIM_XN], ADV_HULL_HALF); hxp = capExtent(shLim[LIM_XP], ADV_HULL_HALF);
+        hyn = capExtent(shLim[LIM_YN], ADV_HULL_HALF); hyp = capExtent(shLim[LIM_YP], ADV_HULL_HALF);
+        if (hxn < 0 || hxp < 0 || hyn < 0 || hyp < 0) hullOk = false;
+      }
+      if (hullOk) {
+        var hres = SM.particles.damageSolidInRect(
+          x - hxn, clipT(y - hyn),
+          x + hxp, y + hyp,
+          power * ADV_HULL_GRIND * dt, x, y
+        );
+        damaged += hres.damaged;
+      }
 
       /* THE LURCH. Straining against something and then breaking through it
        * should throw the machine forward — the single most satisfying beat in
@@ -1347,9 +1556,21 @@ SM.vehicle = (function () {
       // Pinned. resistance and advLoad are already the whole wall (the scan
       // above fed them), so the engine note, the camera rumble and the blade
       // glow all read "loaded" without a single extra flag.
-      advStallFeedback(dt, hx, hy);
+      advStallFeedback(dt, hx, hy, fx, fy);
     }
-    if (!stalled) { stallHold = 0; stallFxTimer = 0; stallSay = 0; }
+    if (!stalled) {
+      stallHold = 0; stallFxTimer = 0; stallSay = 0;
+      /* THE EPISODE ENDS SLOWLY. The gate flickers off for a step at a boundary
+       * because the pre-scan is sampling a moving box; ending the episode on the
+       * first free step would make one lean on one wall into a dozen contacts.
+       * Counted here rather than in advStallFeedback() because a machine in the
+       * lift or on a dry tank never reaches that function, and time spent not
+       * touching the wall is time spent not touching the wall. */
+      toohardFree += dt;
+      if (toohardFree >= ADV_TOOHARD_GAP) toohardOn = false;
+    } else {
+      toohardFree = 0;
+    }
 
     /* --- 4. motion ----------------------------------------------------
      * Thrust is an ACCELERATION BUDGET. The stick sets a target velocity and the
@@ -1526,7 +1747,43 @@ SM.vehicle = (function () {
     scCount = 0; scOver = 0; scCoreOver = 0;
     scPath = 0; scPathOver = 0;
     scHardSum = 0; scHardest = 0; scHardestMat = -1;
+    resetLim(scLim);
     SM.particles.queryRect(cx - half, cy - half, cx + half, cy + half, scanSolid);
+  }
+
+  /**
+   * TRIM ONE SIDE OF A RECT so that a deposit at (dx, dy) with radius r, offset
+   * from the rect's centre, ends up outside it. `lim` is scLim or shLim.
+   *
+   * WHICH side: the one the deposit is FURTHEST along, because that is the trim
+   * that costs the least box. A deposit off to the left takes the left side and
+   * leaves the right, the front and the back at full reach.
+   *
+   * damageSolidInRect() takes a deposit when its circle overlaps the rect, so
+   * the extent that just excludes it is (distance along that axis) - r, less
+   * ADV_SAFE_EPS to keep the compare off the boundary. The result can be
+   * NEGATIVE — the centre is standing inside something uncuttable — and the
+   * caller reads that as "refuse the whole cut" rather than clamping it to zero,
+   * because a zero-extent rect is a line and a line still catches circles.
+   *
+   * Greedy per deposit, and correct however many there are: every over-cap
+   * deposit ends up with at least one side of the final rect violating it, which
+   * is all exclusion needs. The box it leaves is not always the largest possible
+   * one — that is a packing problem and this is a drill.
+   */
+  function trimLim(lim, dx, dy, r) {
+    var ax = dx < 0 ? -dx : dx;
+    var ay = dy < 0 ? -dy : dy;
+    var k, v;
+    if (ax >= ay) { k = dx > 0 ? LIM_XP : LIM_XN; v = ax - r - ADV_SAFE_EPS; }
+    else { k = dy > 0 ? LIM_YP : LIM_YN; v = ay - r - ADV_SAFE_EPS; }
+    if (v < lim[k]) lim[k] = v;
+  }
+
+  /** Open a rect's four extents right up, before a scan closes them in. */
+  function resetLim(lim) {
+    lim[LIM_XN] = Infinity; lim[LIM_XP] = Infinity;
+    lim[LIM_YN] = Infinity; lim[LIM_YP] = Infinity;
   }
 
   /** queryRect callback. Hoisted, allocation-free, O(1) per deposit. */
@@ -1549,8 +1806,39 @@ SM.vehicle = (function () {
       if (inPath) scPathOver++;
       if (along > -ADV_CORE_HALF &&
           dx * dx + dy * dy <= ADV_CORE_HALF * ADV_CORE_HALF) scCoreOver++;
+      // ...and pull the damage rect back off it. See trimLim().
+      trimLim(scLim, dx, dy, PD.r[i]);
     }
   }
+
+  /**
+   * The same measurement for the HULL's janitor box, which is a different square
+   * about a different centre and so cannot share the bit's answer.
+   *
+   * It is a SECOND queryRect, and it runs only when the drill's cap is under the
+   * hardest material in the table (`canOverCap`) — a maxed rig never pays for it
+   * at all. The callback is deliberately thinner than scanSolid: the hull box
+   * has no path, no core and no load to total, it only wants to know how far it
+   * may reach. MEASURED: no change to step time at 1 decimal place of a
+   * millisecond, against a step that is already scanning ~60 deposits twice.
+   */
+  function scanHull(cx, cy, half, cap) {
+    shCap = cap; shX = cx; shY = cy;
+    resetLim(shLim);
+    SM.particles.queryRect(cx - half, cy - half, cx + half, cy + half, scanHullSolid);
+  }
+
+  function scanHullSolid(i) {
+    if (PD.state[i] !== SM.particles.SOLID) return;
+    var m = PD.mat[i];
+    var h = m < advHardN ? advHard[m] : 0;
+    if (h <= shCap) return;
+    trimLim(shLim, PD.x[i] - shX, PD.y[i] - shY, PD.r[i]);
+  }
+
+  /** min(a, b) with b the box's own half-extent. Hoisted so the four calls at
+   *  each cut site read as one thought instead of four ternaries. */
+  function capExtent(limit, half) { return limit < half ? limit : half; }
 
   /**
    * THE HARDNESS GATE, AS A FEELING. This is the emotional engine of the
@@ -1560,24 +1848,57 @@ SM.vehicle = (function () {
    * being eaten, and one rate-limited `drill:blocked` for the HUD to caption.
    * No error, no message from nowhere: the machine visibly fails.
    */
-  function advStallFeedback(dt, hx, hy) {
+  function advStallFeedback(dt, hx, hy, fx, fy) {
     stallHold += dt;
     if (SM.camera && SM.camera.shakeFloor) SM.camera.shakeFloor(ADV_STALL_SHAKE);
+    var m = blockedMat >= 0 ? blockedMat : 0;
 
-    stallFxTimer -= dt;
-    if (stallFxTimer <= 0) {
+    /* --- THE CONTACT ---------------------------------------------------
+     * The step an episode begins. One clank, one big bounce, one additive
+     * camera tick, and the caption — everything the player is supposed to
+     * remember about this, landing together on one frame. Everything AFTER it
+     * is the grind bed, and is quieter on purpose. */
+    if (!toohardOn) {
+      toohardOn = true;
+      toohardSaid = false;
+      toohardAgain = false;
       stallFxTimer = ADV_STALL_FX;
-      if (SM.effects) {
-        var m = blockedMat >= 0 ? blockedMat : 0;
-        SM.effects.sparks(hx, hy, m, 5, 210);
-        SM.effects.flash(hx, hy, 16, m);
+      if (SM.effects && SM.effects.refuse) SM.effects.refuse(hx, hy, m, -fx, -fy, 1);
+      if (SM.sound) SM.sound.play('refuse');
+      if (SM.camera) SM.camera.shake(ADV_CONTACT_SHAKE);
+
+      /* ...and the announcement, if this material has not just made it. The
+       * quiet period is per MATERIAL and survives the episode ending, so
+       * backing off and having another go says nothing; a different wall
+       * speaks at once. See the ADV_TOOHARD_SAY note. */
+      if (toohardAt && m < advHardN && advClock - toohardAt[m] >= ADV_TOOHARD_SAY) {
+        toohardSaid = true;
+        sayTooHard(hx, hy, m);
       }
-      if (SM.sound) SM.sound.play('hit');
+    } else {
+      // THE ONE REPEAT. Still leaning on the same thing after a whole quiet
+      // period, and we did announce it when contact was made: say it once more
+      // for the player who missed the banner, then never again this episode.
+      if (toohardSaid && !toohardAgain && stallHold >= ADV_TOOHARD_SAY) {
+        toohardAgain = true;
+        sayTooHard(hx, hy, m);
+      }
+      /* --- THE GRIND BED ------------------------------------------------
+       * A smaller bounce every ADV_STALL_FX for as long as they lean on it.
+       * Sparks come BACK off the face along the reflected axis rather than
+       * bursting radially, because radial is what CUTTING looks like — this
+       * has to read as the bit skating off something it cannot bite. */
+      stallFxTimer -= dt;
+      if (stallFxTimer <= 0) {
+        stallFxTimer = ADV_STALL_FX;
+        if (SM.effects && SM.effects.refuse) SM.effects.refuse(hx, hy, m, -fx, -fy, 0);
+        if (SM.sound) SM.sound.play('hit');
+      }
     }
 
-    // One caption per ADV_STALL_SAY of grinding, not one per step. The timer
-    // starts at zero (cleared the moment the machine is free) so the FIRST
-    // contact announces immediately and a long grind then repeats slowly.
+    // The HEARTBEAT, one per ADV_STALL_SAY of grinding. Nothing in the shipped
+    // game captions this — the caption is `drill:toohard` above — but it is the
+    // event a poller would want and it costs one compare.
     stallSay -= dt;
     if (stallSay <= 0) {
       stallSay = ADV_STALL_SAY;
@@ -1585,8 +1906,21 @@ SM.vehicle = (function () {
       evBlocked.matIndex = blockedMat;
       evBlocked.hardness = blockedHard;
       evBlocked.cap = scCap;
+      evBlocked.seal = blockedSeal;
       SM.events.emit('drill:blocked', evBlocked);
     }
+  }
+
+  /** Fire the announcement and stamp the material's quiet clock. One place, so
+   *  the two call sites above cannot drift apart on what a "say" costs. */
+  function sayTooHard(hx, hy, m) {
+    if (toohardAt && m < advHardN) toohardAt[m] = advClock;
+    evTooHard.x = hx; evTooHard.y = hy;
+    evTooHard.matIndex = blockedMat;
+    evTooHard.hardness = blockedHard;
+    evTooHard.cap = scCap;
+    evTooHard.seal = blockedSeal;
+    SM.events.emit('drill:toohard', evTooHard);
   }
 
   /**
@@ -1895,7 +2229,24 @@ SM.vehicle = (function () {
   /* =====================================================================
    * RENDER  (local space: -y is forward, origin is the chassis centre)
    * ================================================================== */
-  function render(ctx) {
+  /**
+   * @param showroom  the WORKSHOP asking for the machine, not the world.
+   *
+   * THE WORKSHOP CALLS THIS SAME FUNCTION, and once the workshop could be opened
+   * from inside the lift that stopped working. Both guards below say "the cage
+   * has swallowed the machine, draw nothing" — which is right in the world and
+   * catastrophic on the one screen whose entire job is showing you the machine
+   * you are about to spend money on. MEASURED before the flag: the workshop
+   * painted its shop floor, its grid, its lamp and all eight hotspot tags over
+   * empty space.
+   *
+   * A FLAG RATHER THAN advDriving(), because the world pass runs on the same
+   * frames as the workshop screen — main.js renders the mine behind every meta
+   * screen — so "are we driving" cannot separate the two callers. Only the
+   * caller knows which pass this is.
+   */
+  function render(ctx, showroom) {
+    if (showroom) { drawShowroom(ctx); return; }
     /* IN THE LIFT: DRAW NOTHING. Not the hull, not the ore bed, not the ground
      * shadow — drawMachine() carries all three, so one return covers them.
      *
@@ -1920,6 +2271,20 @@ SM.vehicle = (function () {
     // The hull faces its heading. heading 0 is local -y, i.e. straight up the
     // screen; `bank` is the visual roll into a turn on top of it.
     ctx.rotate(heading + bank);
+    drawMachine(ctx);
+    ctx.restore();
+  }
+
+  /**
+   * The workshop's pass: the machine at its own coordinates, at full opacity,
+   * FLAT — no heading, no bank. The garage transform has already framed it and
+   * the shop floor is drawn under it; a machine rolled 8 degrees into a turn it
+   * was making when the player opened the menu is the workshop showing the last
+   * frame of the drive instead of the product.
+   */
+  function drawShowroom(ctx) {
+    ctx.save();
+    ctx.translate(x, y);
     drawMachine(ctx);
     ctx.restore();
   }

@@ -583,7 +583,7 @@ SM.save = (function () {
 
   function str(v, dflt, maxLen) {
     if (typeof v !== 'string') return dflt;
-    var s = v.replace(/[ -]/g, '').substring(0, maxLen);
+    var s = v.replace(/[\x00-\x1f]/g, '').substring(0, maxLen);
     return s.length ? s : dflt;
   }
 

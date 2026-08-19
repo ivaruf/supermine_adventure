@@ -29,7 +29,7 @@
  * Public API (contract)
  *   SM.sound.init() / update(dt) / reset()
  *   SM.sound.play(name, opts?)   'break' 'crunch' 'hit' 'impact' 'clank'
- *                                'collect' 'sparkle' 'ui'
+ *                                'refuse' 'collect' 'sparkle' 'ui'
  *   SM.sound.setMuted(b) / toggleMute() / isMuted()
  *
  * PAUSE
@@ -365,6 +365,30 @@ SM.sound = (function () {
 
       case 'clank':                    // metal on metal
         clank(260 + v * 220, 0.24, 0.30);
+        break;
+
+      /* --- THE REFUSAL ----------------------------------------------
+       * The bit meeting rock it cannot cut. It has to be TELLABLE APART from
+       * 'hit' (the skitter of a cutter working hard) and from 'clank' (metal on
+       * metal) inside a tenth of a second, because it is the only sound in the
+       * game that means "stop, you need a better drill".
+       *
+       * What makes it read: it is LOW, it is DEAD, and it does not ring. A
+       * struck bell rings because the energy went into the bell; a bit bouncing
+       * off a face it cannot bite gives its energy straight back, so the note
+       * has to stop almost as fast as it started. So: a short bandpassed crack
+       * for the strike, a low inharmonic knock UNDER 'clank' pitch (its partials
+       * are the same stack, an octave and a bit down, which is what makes the
+       * two obviously the same machine), and a sub thud that decays in a fifth
+       * of a second with no tail at all.
+       *
+       * Rate limited at 0.30 s — three times 'hit', and much longer than the
+       * grind bed's 0.24 s spacing, so a ten-second lean on a wall is a clank
+       * followed by skittering rather than a clank every quarter second. */
+      case 'refuse':
+        noiseBurst(0.05, 900 + v * 500, 2.2, 0.30, 'bandpass');
+        clank(96 + v * 34, 0.18, 0.40);
+        tone(74, 38, 0.20, 0.34, 'sine');
         break;
 
       /* --- loot ------------------------------------------------------ */

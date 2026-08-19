@@ -1485,9 +1485,26 @@ SM.advui = (function () {
     els.garageDive = button(s.foot, '', 'BACK TO MINE');
     onTap(els.garageDive, onBackToMine);
 
-    onTap(button(s.foot, '', 'BACK TO THE MAP'), function () {
+    els.garageMap = button(s.foot, '', 'BACK TO THE MAP');
+    onTap(els.garageMap, function () {
       if (SM.adv && SM.adv.backToMap) SM.adv.backToMap();
       else if (SM.adv && SM.adv.openMap) SM.adv.openMap();
+    });
+
+    /* --- THE ONE WAY OUT WHEN A RUN IS STILL UNDERNEATH -----------------
+     * Opened from the lift menu (SM.adv.openGarage() with the machine in the
+     * cage), this screen is a DETOUR and not a destination: the hold, the tank
+     * and the tunnels are all still live one state below it, and the only honest
+     * exit is back into the lift the player is standing in.
+     *
+     * The other two plates are HIDDEN rather than disabled for that trip, and
+     * that is deliberate — both of them mean "start something else", and both
+     * are refused by adv.js while a run is held (see the shopHold note there).
+     * A greyed-out BACK TO MINE beside a live expedition would be the screen
+     * asking a question that has no answer. */
+    els.garageLift = button(s.foot, 'sm-btn-primary sm-btn-big', 'BACK TO THE LIFT');
+    onTap(els.garageLift, function () {
+      if (SM.adv && SM.adv.closeShop) SM.adv.closeShop();
     });
   }
 
@@ -1536,14 +1553,20 @@ SM.advui = (function () {
     paintPart();
     drawRig();
 
+    /* THE FOOTER IS ONE OF TWO SHAPES, and which one depends on whether there
+     * is a live expedition parked under this screen. See buildGarage(). */
+    var held = !!(SM.adv && SM.adv.isShopHold && SM.adv.isShopHold());
+    if (els.garageLift) els.garageLift.style.display = held ? '' : 'none';
+    if (els.garageMap) els.garageMap.style.display = held ? 'none' : '';
+
     /* BACK TO MINE only exists when there is somewhere to go back to, and it
      * says whether the tank can actually do it — the alternative is a button
      * that drops you into a shaft on an empty tank and ends the run instantly. */
     if (els.garageDive) {
       var id = lastMineId();
       var aboard = advNum('getTank', 0);
-      els.garageDive.style.display = id ? '' : 'none';
-      if (id) {
+      els.garageDive.style.display = (id && !held) ? '' : 'none';
+      if (id && !held) {
         // Label stays put; an empty tank just greys it out. See paintResFooter().
         els.garageDive.textContent = 'BACK TO MINE';
         if (aboard < 1) els.garageDive.setAttribute('disabled', 'disabled');
@@ -1759,7 +1782,12 @@ SM.advui = (function () {
     ctx.translate(-vx, -vy);
     placeHotspots(cx, cy, s);
     try {
-      if (SM.vehicle && SM.vehicle.render) SM.vehicle.render(ctx);
+      /* `true` = SHOWROOM PASS. Without it the machine is invisible whenever the
+       * workshop is opened from inside the lift: vehicle.render()'s first two
+       * lines are "the cage has the machine, draw nothing", which is right in
+       * the world and wrong on this screen. It also drops the heading and the
+       * bank, so the portrait is the machine and not the last frame of a turn. */
+      if (SM.vehicle && SM.vehicle.render) SM.vehicle.render(ctx, true);
     } catch (e) {
       // The renderer belongs to another agent and may be mid-edit. A workshop
       // that cannot draw the machine is a bad screen; one that throws takes

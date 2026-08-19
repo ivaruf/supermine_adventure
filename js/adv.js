@@ -1136,7 +1136,7 @@ SM.adv = (function () {
      *
      * NOT DURING A RUN, though: getLevel() means "the map the run is on" while
      * one is live, and the machine is still standing where it was. */
-    if (state !== 'mine') runLevel = i;
+    if (state !== 'mine' && !shopHold) runLevel = i;
 
     evLiftBought.i = i;
     evLiftBought.price = price;
@@ -1243,8 +1243,12 @@ SM.adv = (function () {
     return dx * dx + dy * dy <= r * r;
   }
 
-  /** True while the machine is IN the lift: hidden, parked, menu up. */
-  function isInLift() { return state === 'mine' && inLift; }
+  /** True while the machine is IN the lift: hidden, parked, menu up.
+   *  ...AND while the workshop is open on top of that (shopHold): the cage still
+   *  has the machine, the doors are still shut on it, and every consumer of this
+   *  — vehicle.js's park, advterrain.js's door hold, the HUD's panel — has to go
+   *  on believing so or the machine reappears in the rock behind the screen. */
+  function isInLift() { return (state === 'mine' || shopHold) && inLift; }
 
   /** Either answer is "the door menu's verbs are legal here". */
   function atDoorOrInLift() { return inLift || getBoardable() >= 0; }
@@ -2352,7 +2356,10 @@ SM.adv = (function () {
   /** Leave the campaign. MUST call SM.ui.leaveAdventure() to restore the title. */
   function close() {
     if (state === 'off') return;
-    if (state === 'mine') teardownRun();
+    // `shopHold` too: a campaign closed while the workshop sits over a live run
+    // still has a run to take apart, and teardownRun() is where the carve store
+    // and the piles get written.
+    if (state === 'mine' || shopHold) teardownRun();
     hideRunChrome();
     setState('off');
     flushSave();
@@ -2445,13 +2452,101 @@ SM.adv = (function () {
     setState('map');
   }
 
-  function openMap() { if (isActive() && state !== 'mine') setState('map'); }
-  function openGarage() { if (isActive() && state !== 'mine') setState('garage'); }
+  function openMap() { if (isActive() && state !== 'mine' && !shopHold) setState('map'); }
+
+  /* =====================================================================
+   * THE WORKSHOP, FROM INSIDE THE LIFT
+   * ---------------------------------------------------------------------
+   * OWNER'S RULE: "workshop needs to be a button on the lift menu." It is the
+   * answer to the drill that cannot cut what the player just found — find
+   * silver, drive into the lift, buy the bit, drive out and cut it, all in one
+   * expedition. Without it the loop is: find silver, drive all the way back,
+   * LEAVE, sell, workshop, re-descend — and the discovery has gone cold.
+   *
+   * IT IS THE SAME 'garage' STATE, and that is the point: one workshop screen,
+   * one purchase path, one set of prices. What is different is that a RUN IS
+   * STILL LIVE UNDERNEATH IT, and `shopHold` is the flag that says so.
+   *
+   * WHY THE STATE MACHINE TAKES THIS WITHOUT A NEW MODE. holdsSim() is
+   * `state !== 'mine'`, so stepping into 'garage' freezes the fixed step exactly
+   * as it does from the surface — main.js zeroes the accumulator, the world
+   * keeps RENDERING behind the screen, and every module that asks "am I driving"
+   * gets the same no it would get on the map. Nothing is torn down: the hold,
+   * the tank, the day, the carve store, the machine's position and the level all
+   * live in module state that no screen transition touches. VERIFIED by driving
+   * it: hold, fuel, day and position all came back identical.
+   *
+   * WHAT SHOPHOLD HAS TO STOP is the handful of verbs whose only guard was
+   * `state === 'mine'` and which would therefore wake up the moment the state
+   * said 'garage' while a run was still in memory:
+   *
+   *   buyFuel()     fills `tank`, the BETWEEN-RUNS tank, which is 0 during a run
+   *                 and is overwritten by teardownRun(). The player would pay
+   *                 for diesel that goes nowhere. Refuelling mid-run is
+   *                 refuelAtDoor()'s job and it is on the lift menu already.
+   *   selectMine()  rewrites mineDef and runLevel — the ground under the run.
+   *   enterMine()   a whole fresh descent, over the top of a live one, without
+   *                 a teardown: the hold is destroyed AND the carve store is
+   *                 re-imported stale, so the tunnels dug this run vanish.
+   *   openMap()     leaves a zombie run in memory with the world still loaded.
+   *   buyLevel()'s `runLevel = i` — legal from the surface, a silent
+   *                 teleport of the run's map while the machine stands still.
+   *
+   * All five are refused rather than adapted, because every one of them means
+   * "start something else" and the answer to that from inside a lift is: shut
+   * the workshop, then use the plates that are already there.
+   * ================================================================== */
+  var shopHold = false;
+
+  function openGarage() {
+    if (!isActive()) return false;
+    if (state !== 'mine') { setState('garage'); return true; }
+    /* MID-RUN, AND ONLY FROM INSIDE THE CAGE. Not at the doors, not out in the
+     * rock: the machine has to be parked, hidden and out of the player's hands
+     * already, so that freezing the world is a continuation of what the lift is
+     * doing rather than a new thing that happens to the run. */
+    if (!inLift || trMode !== TR_NONE) return false;
+    shopHold = true;
+    setState('garage');
+    return true;
+  }
+
+  /** True while the workshop is open ON TOP OF a live run. */
+  function isShopHold() { return shopHold; }
+
+  /**
+   * Shut the workshop and go back to the lift menu — NOT to the map, which is
+   * where every other way out of this screen goes.
+   *
+   * THE CAPS ARE RE-SNAPSHOTTED HERE, and that is the whole reason this is a
+   * function rather than a setState() at the call site. `fuelCap`, `cargoCap`
+   * and `heatCap` are taken ONCE, in enterMine(), because during a run the rig
+   * cannot change — except that now it can. Without this, a tank bought in the
+   * lift reads at its old size for the rest of the expedition: the gauge, the
+   * REFUEL quote and pumpFuel()'s own ceiling all trust the snapshot.
+   *
+   * A BIGGER TANK KEEPS THE LITRES, NOT THE PERCENTAGE. `fuel` is deliberately
+   * untouched: the player bought a tank, not a tankful, and the diesel to fill
+   * it is sold on the plate next door. (The gauge therefore DROPS when a tank is
+   * fitted — 40/45 becomes 40/150 — which is honest and is what the REFUEL plate
+   * is for.) Caps only ever grow, so `fuel` can never end up above one.
+   */
+  function closeShop() {
+    if (!shopHold) return false;
+    shopHold = false;
+    fuelCap = rigNum('getFuelCap', fuelCap);
+    cargoCap = rigNum('getCargoCap', cargoCap);
+    heatCap = rigNum('getHeatCap', heatCap);
+    if (fuel > fuelCap) fuel = fuelCap;      // belt and braces; caps only grow
+    setState('mine');
+    return true;
+  }
+
   function backToMap() { openMap(); }
 
   /** -> prep, if the rights are held. */
   function selectMine(mineId) {
-    if (state === 'mine') return false;
+    if (state === 'mine' || shopHold) return false;
     var def = resolveMine(mineId);
     if (!def) return false;
     if (!ownsRights(def.id)) return false;      // the map buys them first
@@ -2511,7 +2606,7 @@ SM.adv = (function () {
    *                 — see the note there.
    */
   function enterMine(mineId, loadout) {
-    if (state === 'mine') return false;
+    if (state === 'mine' || shopHold) return false;
     var def = resolveMine(mineId || selectedId);
     if (!def) return false;
     if (!ownsRights(def.id)) return false;
@@ -2669,6 +2764,8 @@ SM.adv = (function () {
   /** Close the mine down and hand the carve mask back to the save record. */
   function teardownRun() {
     clearPause();
+    // A run being taken apart cannot still be holding a workshop open over it.
+    shopHold = false;
     // The cage does not follow you to the world map — and neither does a
     // half-finished manoeuvre. cancelTransit() hands the machine and the leaves
     // back before the world under them is taken apart.
@@ -3414,7 +3511,8 @@ SM.adv = (function () {
    * that lets you pay for litres the tank cannot hold is a bug, not a lesson.
    */
   function buyFuel(units) {
-    if (state === 'mine' || !(units > 0)) return false;
+    // ...and never with a run live under the workshop: see the shopHold note.
+    if (state === 'mine' || shopHold || !(units > 0)) return false;
     var cap = rigNum('getFuelCap', 100);
     fuelCap = cap;
     var room = cap - tank;
@@ -3577,6 +3675,8 @@ SM.adv = (function () {
     startCompany: startCompany,
     openMap: openMap,
     openGarage: openGarage,
+    closeShop: closeShop,
+    isShopHold: isShopHold,
     selectMine: selectMine,
     backToMap: backToMap,
     enterMine: enterMine,

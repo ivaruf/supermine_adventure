@@ -483,7 +483,18 @@
 }
 
 /* --- the alert banner --------------------------------------------------
- * Directly under the stack (top:100%), centred. Short, loud, and gone. */
+ * Directly under the stack (top:100%), centred. Short, loud, and gone.
+ *
+ * IT SIZES TO ITS SENTENCE. An absolutely positioned box with `left` and no
+ * `width` shrinks to fit the space between `left` and the edge of its
+ * containing block — which here is half of .sm-ah, i.e. 280px on a desktop. Every
+ * banner in the game used to be short enough not to notice, and then
+ * "SILVER — TOO HARD FOR THIS DRILL" arrived and broke across two lines in the
+ * middle of a phrase. `width: max-content` lets a banner be as wide as the thing
+ * it has to say, and the max-width keeps it inside the window on a phone; short
+ * banners are unchanged, because min-width was already doing the work for them.
+ * There is nothing to the right of the stack to collide with — the two icon
+ * buttons are pinned to the far corner. */
 .sm-ah-alert {
   position: absolute;
   top: 100%;
@@ -491,6 +502,8 @@
   margin-top: 12px;
   transform: translateX(-50%) translateY(-8px);
   min-width: 210px;
+  width: max-content;
+  max-width: min(540px, calc(100vw - var(--sm-gutter) * 2));
   padding: 8px 18px 9px;
   text-align: center;
   background: linear-gradient(180deg, rgba(48, 20, 14, 0.92), rgba(20, 9, 7, 0.94));
@@ -933,7 +946,15 @@
   bottom: calc(var(--sm-top-y) + var(--sm-ah-foot) + 38px);
   margin-top: 0;
   min-width: 0;
-  width: min(320px, calc(100vw - 2 * var(--sm-gutter)));
+  /* Was a flat `width: min(320px, ...)`. 320 is exactly one pixel short of
+   * "SILVER — TOO HARD FOR THIS DRILL" at this size (measured: 321px), which
+   * orphaned DRILL onto a line of its own — the worst possible break in the one
+   * sentence the banner exists to say. Sizing to the content and clamping at the
+   * viewport keeps every short banner exactly where it was and gives the long
+   * ones the last thirty pixels of the screen. The SUB may still wrap on a phone
+   * and that is fine: it is a comma list, and it breaks between clauses. */
+  width: max-content;
+  max-width: calc(100vw - 2 * var(--sm-gutter));
   padding: 7px 12px 8px;
 }
 .sm-adv.sm-compact .sm-ah-alert-title { font-size: 13px; letter-spacing: 2.2px; text-indent: 2.2px; }
@@ -3259,10 +3280,16 @@
    NUMBERS — what the hold banks and what a tank costs — and everything else on
    this panel is downstream of that answer. A grid rather than wrapping flex,
    because there are exactly two and they must never reflow to a stack. */
+/* THREE PLATES NOW: SELL, REFUEL, WORKSHOP — the three things the surface is
+ * for. The grid is EXPLICIT and three-valued for the same reason it was
+ * explicit and two-valued: a wrapping flex would drop the third plate onto a
+ * second row, and the height for that row comes out of the level ladder, which
+ * on a landscape phone has about fifty pixels to give. Three columns costs
+ * width, and width is what this panel has spare. */
 .sm-ah-door-acts {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
   margin-bottom: 10px;
 }
@@ -3303,12 +3330,16 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* THE NUMBER IS THE PLATE. On the two trade plates the value line is the thing
+/* THE NUMBER IS THE PLATE. On the trade plates the value line is the thing
    being read at a glance, so the hierarchy inverts: the label goes quiet and
-   small above it and the money is set at 20 px. */
+   small above it and the money is set large.
+   STEPPED DOWN FROM 20 px WITH THE THIRD COLUMN. Each plate lost a third of its
+   width when WORKSHOP joined the row, and `$12 400` still has to sit on one line
+   without ellipsising — `.sm-ah-doorval` truncates rather than pushing its
+   neighbours, so the failure would have been silent. */
 .sm-ah-door-acts .sm-ah-doorval {
-  font-size: 20px;
-  letter-spacing: 0.4px;
+  font-size: 17px;
+  letter-spacing: 0.2px;
   line-height: 1.15;
 }
 /* SELL is the loop's payday, so it wears the gold — the same plate family as
@@ -3321,6 +3352,11 @@
 .sm-ah-door-sell .sm-ah-doorval { color: var(--sm-gold); }
 .sm-ah-door-fuel { border-color: rgba(90, 226, 140, 0.34); }
 .sm-ah-door-fuel .sm-ah-doorval { color: var(--sm-green); }
+/* The workshop is the MACHINE, so it wears the machine's cyan — the same colour
+   as RETURN TO MINE and every rig readout in the game. Deliberately not gold:
+   nothing is banked at this plate, something is spent. */
+.sm-ah-door-shop { border-color: rgba(122, 214, 255, 0.34); }
+.sm-ah-door-shop .sm-ah-doorval { color: var(--sm-cyan); }
 
 /* ========================================================================
    THE FOOT — THE CALL TO ACTION, AND THE WAY OUT
@@ -3534,7 +3570,7 @@
 .sm-adv.sm-compact .sm-ah-lift.sm-ah-lift-on { transform: translateX(-50%); }
 .sm-adv.sm-compact .sm-ah-door-acts { gap: 6px; margin-bottom: 8px; }
 .sm-adv.sm-compact .sm-ah-door-acts .sm-ah-doorbtn { min-height: 54px; }
-.sm-adv.sm-compact .sm-ah-door-acts .sm-ah-doorval { font-size: 17px; }
+.sm-adv.sm-compact .sm-ah-door-acts .sm-ah-doorval { font-size: 14px; }
 .sm-adv.sm-compact .sm-ah-liftgo { min-height: 36px; gap: 8px; padding: 0 9px; }
 .sm-adv.sm-compact .sm-ah-liftbuy { min-height: 36px; min-width: 60px; }
 .sm-adv.sm-compact .sm-ah-door-return { min-height: 48px; }
@@ -3559,7 +3595,7 @@
 .sm-adv.sm-compact:not(.sm-portrait) .sm-ah-lift-head { margin-bottom: 7px; padding-bottom: 6px; }
 .sm-adv.sm-compact:not(.sm-portrait) .sm-ah-door-acts { margin-bottom: 7px; }
 .sm-adv.sm-compact:not(.sm-portrait) .sm-ah-door-acts .sm-ah-doorbtn { min-height: 44px; }
-.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-door-acts .sm-ah-doorval { font-size: 15px; }
+.sm-adv.sm-compact:not(.sm-portrait) .sm-ah-door-acts .sm-ah-doorval { font-size: 13px; }
 .sm-adv.sm-compact:not(.sm-portrait) .sm-ah-unlock { padding: 6px 9px; margin-bottom: 7px; }
 .sm-adv.sm-compact:not(.sm-portrait) .sm-ah-unlock-title { font-size: 10px; }
 .sm-adv.sm-compact:not(.sm-portrait) .sm-ah-unlock-body { font-size: 8.5px; line-height: 1.45; }
@@ -3575,7 +3611,7 @@
  * ladder off the bottom, which is worse than smaller numbers. */
 .sm-adv.sm-tiny .sm-ah-lift { padding: 9px 10px 10px; }
 .sm-adv.sm-tiny .sm-ah-door-acts .sm-ah-doorbtn { min-height: 48px; }
-.sm-adv.sm-tiny .sm-ah-door-acts .sm-ah-doorval { font-size: 15px; }
+.sm-adv.sm-tiny .sm-ah-door-acts .sm-ah-doorval { font-size: 12.5px; }
 .sm-adv.sm-tiny .sm-ah-liftname { font-size: 10px; }
 .sm-adv.sm-tiny .sm-ah-liftgo { min-height: 34px; }
 .sm-adv.sm-tiny .sm-ah-liftbuy { min-height: 34px; }

@@ -376,7 +376,7 @@ pool bookkeeping and will corrupt the simulation.
 ### `SM.vehicle`
 
 ```js
-SM.vehicle.init() / reset() / update(dt) / render(ctx)
+SM.vehicle.init() / reset() / update(dt) / render(ctx [, showroom])
 SM.vehicle.renderPreview(ctx, cx, cy, scale, rot)   // the workshop portrait
 
 // STABLE GETTERS — other modules depend on these; do not rename or change units
@@ -400,6 +400,37 @@ SM.vehicle.parkAtDoor()
 
 The facing unit vector is `(sin h, -cos h)`.
 
+**`render(ctx, showroom)` — the second argument is the WORKSHOP asking.** The
+world pass draws nothing while the machine is in the lift and fades it across
+the doorway; the workshop's canvas calls the same function and must get the
+machine regardless, flat, with no heading and no bank. `js/advui.js`'s
+`drawRig()` is the only caller that passes `true`. Without it, opening the
+workshop from inside the lift paints a shop floor with nothing standing on it.
+
+**THE HARDNESS CAP IS A REFUSAL, NOT A SLOW GRIND.** Material whose live
+`hardness` is above `SM.rig.getHardnessCap()` takes **zero** damage from this
+machine — it is a wall until the drill is upgraded, and the workshop sells the
+fix. Two mechanisms in `js/vehicle.js` make that true, and both are needed:
+
+1. **The stall.** The cut box is pre-scanned and the whole cut refused when a
+   wall is in the way (the bit is sitting on over-cap rock, or enough of what
+   lies in the path is over-cap). That is the gate the player *feels*: the
+   machine grinds to a halt, sparks come straight back off the face, and it
+   says so.
+2. **The box never reaches past the first thing it cannot cut.** A vein at the
+   shoulder of the box does not trip the stall — and `damageSolidInRect()`
+   damages every SOLID in a rect with no way to skip a material, so until this
+   was added it chipped over-cap deposits anyway. The pre-scan now also trims
+   each of the four sides of the damage rect back off the nearest over-cap
+   deposit on that side. **Below the cap the trim is inert** (all four extents
+   stay at infinity and the rect is the rect it always was), which is why
+   ordinary cutting is unchanged. The hull's janitor box gets its own scan for
+   the same reason.
+
+Whichever materials sit above the cap is `js/materials.js` and `js/rig.js`'s
+business; both numbers are read **live**, every step, so the mechanic is correct
+whatever the balance pass lands on.
+
 **The morph survives, and it is not upgrade-gate machinery.**
 `bladeWidthTarget` / `bodyWidthTarget` and the per-part `deploy[]` unfold are how
 a workshop purchase lands on the machine: `syncRig()` writes the new targets and
@@ -415,6 +446,7 @@ whose whole job is showing it to you.
 SM.effects.init() / reset() / update(dt) / render(ctx)
 SM.effects.dust / sparks / sparksDir / chips / smoke / glint / streak
 SM.effects.ring / shock / flash / popup / burst
+SM.effects.refuse(x, y, matIndex, normX, normY, big)   // the bit BOUNCING OFF
 SM.effects.screenFlash(strength, r, g, b)
 SM.effects.getCount()
 SM.effects.renderDarkness(ctx)   // called ONLY from SM.adv.renderWorld()
@@ -428,7 +460,7 @@ All shake lives in `camera.js`; `effects.js` deliberately never calls
 ```js
 SM.sound.init() / update(dt) / reset()
 SM.sound.play(name)   // 'break' 'crunch' 'hit' 'impact' 'clank'
-                      // 'collect' 'sparkle' 'ui'
+                      // 'refuse' 'collect' 'sparkle' 'ui'
 SM.sound.setMuted(b) / toggleMute() / isMuted() / isReady() / getBedLevel()
 ```
 
@@ -463,6 +495,7 @@ load-bearing parts:
 SM.adv.isActive() / isInMine() / isDriving() / holdsSim() / getState()
 SM.adv.open() / close() / restart() / update(dt) / renderWorld(ctx)
 SM.adv.startCompany(i) / openMap() / openGarage() / selectMine(id) / enterMine(id, L)
+SM.adv.closeShop() / isShopHold()      // the workshop, opened from the lift
 SM.adv.getFuel/getFuelCap/getCargo/getCargoCap/getCargoPct/getHeat/getIntegrity
 SM.adv.getCash/getDay/getDepthM/getManifest/fragValue(matIndex)
 SM.adv.burnFuel(n) / addHeat(n) / damage(n, source) / offerCargo(matIndex)
@@ -528,7 +561,8 @@ Payload shapes are exact. Anything that can fire more than a few times a second
 | `lift:unlocked` | `{level, price, mineId}` — the progression gate opened on that level. Fires ONCE per rung, ever | adv |
 | `lift:docking` / `lift:entered` / `lift:undocking` / `lift:exited` | `{level, reason}` — see adv.js | adv |
 | `rail:bought` / `rail:deposit` / `rail:fuel` | see adv.js (dormant) | adv |
-| `drill:blocked` | `{x, y, matIndex, hardness, cap}` | vehicle |
+| `drill:blocked` | `{x, y, matIndex, hardness, cap, seal}` — HEARTBEAT: still stuck. Re-fires while the grind lasts | vehicle |
+| `drill:toohard` | `{x, y, matIndex, hardness, cap, seal}` — THE ANNOUNCEMENT: one per contact EPISODE, never twice for the same material inside the quiet period, plus one repeat if a single grind runs past it. `seal` distinguishes the level boundary (no drill ever cuts it) from a cap refusal (the workshop sells the fix). The HUD banner, the clank and the bounce sparks all hang off this one emitter | vehicle |
 | `scan:contact` | `{matIndex, dist, bearing}` | scanner |
 | `mine:layer` | `{name, depthM}` | advterrain |
 | `mine:lode` | see advterrain.js | advterrain |
@@ -803,6 +837,11 @@ adv.isInLift()       the machine is IN the cage: hidden, undriveable, MENU UP.
 adv.isInTransit()    the lift has the machine and the player does not
 adv.exitLift()       (= dismissing the menu) start the UNDOCKING; control comes
                      back ~1.1 s later at the park below the doors
+adv.openGarage()     from the lift menu, MID-RUN: the workshop over a live
+                     expedition. Returns false unless the machine is actually in
+                     the cage and no manoeuvre is running
+adv.closeShop()      ...and back to the lift menu, NOT to the map
+adv.isShopHold()     true while that is the case
 adv.sellAtDoor()     banks hold + secured, rolls the day (the door IS surface
                      access). The results screen remains for STRAND only
 adv.leaveToMap()     teardown -> map state
@@ -825,6 +864,28 @@ put you in the lift; it hands the machine to the lift, which then drives it in
 behind it from 55% of that drive, and only THEN hides it and opens the menu —
 about 0.87 s end to end. Dismissing the menu runs the mirror: the leaves part
 (0.38 s), the machine rolls out to the park (~0.73 s), control returns.
+
+**THE WORKSHOP IS ON THE LIFT MENU, AND OPENING IT DOES NOT END THE RUN.**
+SELL / REFUEL / **WORKSHOP** is the trade row; the third plate steps into the
+same `'garage'` state the surface uses, with `shopHold` set. `holdsSim()` is
+`state !== 'mine'`, so the world freezes and keeps rendering exactly as it does
+under any other meta screen, and *nothing* is torn down — hold, tank, day, level,
+carve store and machine position are all module state that no screen transition
+touches. `closeShop()` goes back to the **lift menu**, not the map.
+
+Five verbs are refused while `shopHold` is set, because every one of them means
+"start something else" and would act on a run that is still live:
+`buyFuel` (fills the between-runs tank, which is 0 and gets overwritten),
+`selectMine` (rewrites the ground under the run), `enterMine` (a fresh descent
+over a live one, with no teardown: the hold dies and the carve store is
+re-imported stale), `openMap` (a zombie run), and `buyLevel`'s `runLevel = i`
+(teleports the run's map while the machine stands still).
+
+`closeShop()` **re-snapshots `fuelCap` / `cargoCap` / `heatCap`**, which
+`enterMine()` otherwise takes once per descent — without it a tank bought in the
+lift reads at its old size for the rest of the expedition, gauge, quote and fill
+ceiling alike. **A bigger tank keeps the LITRES, not the percentage**: `fuel` is
+untouched, so the gauge drops and the REFUEL plate next door is the answer.
 
 **AND YOU ARRIVE OUTSIDE.** A descent and a ride both set the machine down IN
 the cage with the doors shut and then UNDOCK it, so a run opens — and a ride

@@ -65,7 +65,35 @@
 //         no module load order and no asset changed, so the list below is
 //         unchanged; the bump is here because a cached client would otherwise
 //         keep the old flow forever.
-const VERSION = 'v2.3.0';
+// v2.4.0  THE WHOLE-MAP BALANCE PASS, AND THE DRILL BECOMES A KEY.
+//         The six paid mines are redesigned as one campaign: eighteen rungs
+//         (rights + levels) whose dollars-per-unit-of-hold rises monotonically,
+//         asserted over all 153 owned-vs-purchasable pairs at the drill era each
+//         mine implies — the free starter mine no longer out-earns the first
+//         paid one. Every price is now stated in HAULS (a level costs one full
+//         haul of the rung above, a mine's rights four), every mine has a
+//         distinct geological identity and signature mineral, and each mine's
+//         deepest rung carries an uncuttable trace of the next mine's mineral.
+//         AND, on the owner's instruction, "uncuttable" is designed early: the
+//         ore hardness ladder is re-spaced against js/rig.js's drill caps so the
+//         starter auger cuts only coal, copper and iron — silver sits at 9.0
+//         against its cap of 8.5, so the guaranteed silver motherlode below Old
+//         Creek's first lift is a wall on the first descent and a full hold once
+//         the $1 000 bit is bought. Country rock is untouched, so driving feels
+//         identical; only ore moved.
+//         ...AND THE MECHANIC THAT MAKES THAT LEGIBLE, in the same build.
+//         Above-cap material is now a TRUE REFUSAL: the damage rect is trimmed
+//         off anything the bit cannot bite, so an uncuttable deposit takes zero
+//         damage instead of being chipped to 45% and then refusing to break. The
+//         contact throws sparks BACK off the face, lands a dead low clank
+//         ('refuse'), and raises one HUD banner — "SILVER — TOO HARD FOR THIS
+//         DRILL" — off a new rate-limited `drill:toohard` event. And the WORKSHOP
+//         is on the lift menu, so the fix is one tap away from the wall: find it,
+//         ride up, buy the bit, drive back out and cut it, all in one expedition.
+//         Touches vehicle/effects/sound/advhud/adv/advui + style-adventure.css.
+//         No save format change and no asset list change, so the list below is
+//         unchanged; the bump is what gets a cached client the new code.
+const VERSION = 'v2.4.0';
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 

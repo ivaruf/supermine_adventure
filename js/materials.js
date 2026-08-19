@@ -221,7 +221,7 @@ SM.materials = (function () {
     {
       id: 'gold', name: 'Gold',
       colors: ['#ffcb31', '#c9911a', '#fff3ab'],
-      hardness: 2.9, value: 30,
+      hardness: 9.8, value: 30,
       radius: [7.6, 10.0], density: 3.10,
       restitution: 0.10, friction: 0.95,   // heavy, rolls less
       debrisCount: 5, breakStyle: 'burst', glow: true, sparkle: 0.7,
@@ -233,7 +233,7 @@ SM.materials = (function () {
       // haul readout calls it what the player actually sees.
       id: 'gem', name: 'Emerald',
       colors: ['#33dd80', '#12a05a', '#a5ffce'],
-      hardness: 4.0, value: 55,
+      hardness: 10.6, value: 55,
       radius: [7.0, 9.4], density: 0.95,
       restitution: 0.74, friction: 0.62,   // bouncy little things, ping around
       debrisCount: 5, breakStyle: 'burst', glow: true, sparkle: 1.0,
@@ -242,7 +242,7 @@ SM.materials = (function () {
     {
       id: 'crystal', name: 'Crystal',
       colors: ['#48bcff', '#1f76cf', '#c2ecff'],
-      hardness: 4.9, value: 85,
+      hardness: 11.2, value: 85,
       radius: [7.8, 11.0], density: 1.20,
       restitution: 0.44, friction: 0.72,
       debrisCount: 6, breakStyle: 'fracture', glow: true, sparkle: 0.9,
@@ -252,7 +252,7 @@ SM.materials = (function () {
     {
       id: 'rare', name: 'Voidstone',
       colors: ['#c46bff', '#7c22cf', '#f3d4ff'],
-      hardness: 6.6, value: 190,
+      hardness: 19.0, value: 190,
       radius: [8.2, 11.0], density: 1.65,
       restitution: 0.52, friction: 0.78,
       debrisCount: 7, breakStyle: 'burst', glow: true, sparkle: 1.0,
@@ -290,7 +290,7 @@ SM.materials = (function () {
       // table. A maxed machine deletes a wall of this per second.
       id: 'starcore', name: 'Starcore',
       colors: ['#ff7ad9', '#b81f8e', '#ffe6fb'],
-      hardness: 8.0, value: 420,
+      hardness: 23.0, value: 420,
       radius: [8.6, 11.0], density: 1.45,
       restitution: 0.58, friction: 0.68,
       debrisCount: 7, breakStyle: 'shatter', glow: true, sparkle: 1.0,
@@ -411,14 +411,65 @@ SM.materials = (function () {
      *   ONE FLOOR  bedrock. Not a resource: it is the bottom of the mine
      *     expressed as hardness rather than as an invisible wall.
      *
-     * HARDNESS IS THE DEPTH GATE. Contact time is ~BLADE_DEPTH/speed, so at
-     * the starting rig (power 21, speed 200) a deposit breaks without stalling
-     * up to hardness ~3.5. Everything at or under copper (3.0) is therefore
-     * "drillable now"; silver (3.6) grinds; platinum (5.2) needs a real bit;
-     * the ancient formation (9.5) and bedrock (26) need the top of the tree.
-     * That is the "your drill cannot get through that yet" gate, and it is a
-     * SLOWDOWN, never a refusal — an under-gunned player burns fuel instead
-     * of being told no.
+     * ===================================================================
+     * HARDNESS IS THE DRILL GATE — THE CUTTABLE LADDER
+     * ===================================================================
+     * >> OWNER'S RULE: "We need to design 'uncuttable' way earlier — as a
+     * >> motivation to upgrade the drill. Touch uncuttable, little warning,
+     * >> material not cut. The starter drill maybe only copper and coal and
+     * >> iron — then needs upgrade."
+     *
+     * So hardness is no longer a slowdown curve with three exceptions at the
+     * top. It is a LADDER, read against js/rig.js's drill `cap` per tier, and
+     * every rung of it opens NAMED MATERIALS. js/vehicle.js already implements
+     * the mechanic ("rock above SM.rig.getHardnessCap() is not slow, it is a
+     * WALL", plus the rate-limited `drill:blocked` event); these numbers are
+     * what decide WHEN each wall lifts.
+     *
+     *   TIER 0  WORN AUGER BIT          cap  8.5   coal 1.5, copper 3.0,
+     *                                              iron 3.4  — and every layer
+     *                                              fill up to granite 6.2
+     *   TIER 1  TUNGSTEN BIT            cap 11.5   SILVER 9.0, GOLD 9.8,
+     *                                              EMERALD 10.6, CRYSTAL 11.2
+     *   TIER 2  COMPOSITE ROTARY HEAD   cap 14.0   ANCIENT DEBRIS 12.0,
+     *                                              PLATINUM 13.5
+     *   TIER 3  POLYCRYSTALLINE CUTTER  cap 20.0   OBSIDIAN 16.0,
+     *                                              URANIUM 18.0, VOIDSTONE 19.0
+     *   TIER 4  THERMAL LANCE ARRAY     cap 25.0   STARCORE 23.0
+     *   TIER 5  PLASMA CORE BREAKER     cap 34.0   BEDROCK 26.0
+     *
+     * THE TWO NUMBERS THAT CARRY THE OWNER'S BEAT. Silver is 9.0 against the
+     * worn auger's cap of 8.5 — it sits JUST above it, so the first silver a
+     * company ever touches is a wall with a warning on it and a $1 000 answer
+     * in the workshop. And Old Creek level 1's guaranteed motherlode is SILVER,
+     * a couple of hundred metres south of the lift, so that lesson is delivered
+     * on the FIRST DESCENT rather than eventually.
+     *
+     * THE HARD INVARIANT SURVIVES: every layer `fill` in js/mines.js is still
+     * below the TIER-0 cap (granite, the hardest, is 6.2 < 8.5), so no mine is
+     * ever physically unenterable. Only ORE is gated. An under-gunned player is
+     * always able to DRIVE; what they cannot do is take the good stuff home.
+     *
+     * WHY THE ORE LADDER MOVED SO FAR (silver 3.6 -> 9.0, uranium 4.4 -> 18.0).
+     * The old spacing put eleven of the twelve sellable minerals under the
+     * starting cap, so the cap gated almost nothing and the drill was a speed
+     * stat rather than a key. Spreading the ORES across 9..23 while leaving
+     * every COUNTRY ROCK exactly where it was means the feel of driving through
+     * a mine is completely unchanged — dirt, clay, sandstone, stone, limestone
+     * and granite all still cut at the rates design note 1 in js/mines.js was
+     * measured against — and only the moment you bite an ore seam is new.
+     *
+     * IT COSTS SPEED IN ORE, DELIBERATELY. js/vehicle.js's slowdown is
+     * 1/(1 + 1.45*sqrt(load)) with load = summed hardness / drill power, so a
+     * solid lens of the best rock you can only just cut is a crawl (floored at
+     * ADV_MIN_FACTOR 0.12, never a stop). Precious ore SHOULD be work; it is a
+     * few per cent of the cells in a level, so the pace of a run is set by the
+     * country rock as before.
+     *
+     * >> js/mines.js design note 4j holds the per-mine consequences: which
+     * >> drill era each mine's signature mineral belongs to, and the deliberate
+     * >> TRACE of the next mine's mineral in every mine's deepest rung — a
+     * >> tease you can see, price, and not yet cut.
      *
      * COLOUR IS A LEGIBILITY BUDGET, NOT DECORATION. Thirteen materials were
      * already using up the hue circle, so each of these was picked against
@@ -510,7 +561,7 @@ SM.materials = (function () {
       // CHANGES WHAT YOU CAN DO rather than adding a percentage.
       id: 'silver', name: 'Silver',
       colors: ['#d9e2ea', '#93a1b0', '#ffffff'],
-      hardness: 3.6, value: 60,
+      hardness: 9.0, value: 60,
       radius: [7.8, 10.4], density: 2.80,
       restitution: 0.16, friction: 0.93,
       debrisCount: 5, breakStyle: 'burst', glow: false, sparkle: 0.60,
@@ -522,7 +573,7 @@ SM.materials = (function () {
       // one worth the fuel.
       id: 'platinum', name: 'Platinum',
       colors: ['#c6cde4', '#767d99', '#ffffff'],
-      hardness: 5.2, value: 150,
+      hardness: 13.5, value: 150,
       radius: [8.0, 10.8], density: 3.20,
       restitution: 0.14, friction: 0.94,
       debrisCount: 5, breakStyle: 'burst', glow: true, sparkle: 0.85,
@@ -534,7 +585,7 @@ SM.materials = (function () {
       // uranium pocket is where a player with poor cooling learns that.
       id: 'uranium', name: 'Uranium Ore',
       colors: ['#a8e02a', '#4d6d05', '#eaff9a'],
-      hardness: 4.4, value: 220,
+      hardness: 18.0, value: 220,
       radius: [8.0, 10.8], density: 2.60,
       restitution: 0.30, friction: 0.82,
       debrisCount: 6, breakStyle: 'burst', glow: true, sparkle: 0.95,
@@ -565,7 +616,7 @@ SM.materials = (function () {
       // colours and the loudest break style in the table.
       id: 'ancient', name: 'Ancient Debris',
       colors: ['#fff0b8', '#9a6a10', '#ffffff'],
-      hardness: 9.5, value: 2000,
+      hardness: 12.0, value: 2000,
       radius: [8.6, 11.0], density: 1.70,
       restitution: 0.55, friction: 0.70,
       debrisCount: 8, breakStyle: 'shatter', glow: true, sparkle: 1.0,

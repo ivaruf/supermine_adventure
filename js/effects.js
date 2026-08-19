@@ -39,6 +39,7 @@
  *   SM.effects.getCount()
  * Additions (safe to call from anywhere)
  *   SM.effects.chips / smoke / glint / streak / shock / popup / burst
+ *   SM.effects.refuse(x,y,matIndex,normX,normY,big)   the bit BOUNCING OFF
  *   SM.effects.screenFlash(strength,r,g,b)
  *   SM.effects.renderDarkness(ctx)   -- called ONLY from SM.adv.renderWorld()
  * ========================================================================== */
@@ -56,6 +57,11 @@ SM.effects = (function () {
   var CHIP_DRAG        = 2.3;
   var SMOKE_DRAG       = 1.15;
   var STREAK_DRAG      = 4.0;
+
+  // How wide the refusal cone opens, in radians either side of the reflected
+  // normal. Tight enough to read as "thrown straight back" and not as the
+  // radial fountain that cutting makes — see refuse().
+  var REFUSE_SPREAD    = 0.62;
 
   var RING_LIFE        = 0.42;
 
@@ -456,6 +462,42 @@ SM.effects = (function () {
 
   function sparks(x, y, mat, count, speed) {
     sparksDir(x, y, mat, count, speed, undefined, undefined, undefined);
+  }
+
+  /**
+   * A REFUSAL — the bit meeting rock it cannot cut. This is deliberately NOT
+   * `sparks()`, because the difference between the two is the whole point of
+   * the hardness cap:
+   *
+   *   CUTTING throws material outward in every direction. It is a fountain, and
+   *   the debris is going somewhere because the deposit is coming apart.
+   *   REFUSING throws everything BACK. Nothing is coming off the face, so the
+   *   sparks are the bit's own — a tight cone along the reflected normal, fast,
+   *   short-lived, with the chips tumbling back at the machine rather than away
+   *   from it. Read side by side, one says "progress" and the other says "no".
+   *
+   * (normX, normY) is the direction the sparks are thrown in — vehicle.js
+   * passes the REVERSE of its facing, i.e. straight back off the wall.
+   * `big` is the contact moment (the first frame of a refusal episode) as
+   * against the grind bed that follows it; everything scales off that one flag
+   * so a ten-second lean stays an order quieter than the moment it started.
+   *
+   * Costs from the ordinary FX budget like every other spawner, so a refusal in
+   * the middle of a full-blast excavation is simply dropped rather than
+   * competing with it.
+   */
+  function refuse(x, y, mat, normX, normY, big) {
+    var n = big ? 9 : 4;
+    var sp = big ? 340 : 190;
+    sparksDir(x, y, mat, n, sp, normX, normY, REFUSE_SPREAD);
+    // A couple of chips flung back down the shaft you came up: the only debris a
+    // refused cut ever makes, and it is off the BIT, not off the rock.
+    chips(x, y, mat, big ? 3 : 1, big ? 210 : 120, normX, normY);
+    flash(x, y, big ? 26 : 13, mat);
+    // The white bite mark. Forced on the contact frame only — this is the one
+    // thing that has to land even when the screen is already busy, because it
+    // is the frame the player is being told "no".
+    if (big) glint(x, y, 30, 0.16, 255, 244, 214, true);
   }
 
   function chips(x, y, mat, count, speed, dirX, dirY) {
@@ -1227,6 +1269,7 @@ SM.effects = (function () {
     getCount: getCount,
     // additions
     sparksDir: sparksDir,
+    refuse: refuse,
     chips: chips,
     shock: shock,
     glint: glint,

@@ -74,26 +74,35 @@
  *                  three tanks of fuel and comes up with nothing. The player
  *                  loses money, learns why, and buys a drill. That is the brief.
  *
- *      hardnessCap is the LATE WALL. Exactly three materials sit above the
- *                  starting cap of 8.5: the ANCIENT FORMATION (9.5), OBSIDIAN
- *                  (16) and BEDROCK (26). All three appear only as POCKETS, as
- *                  wall linings or as the mine floor — never as a layer's bulk
- *                  `fill` — so an uncuttable material is always something you
- *                  route around, never a floor you cannot get past.
+ *      hardnessCap is the KEY, AND IT TURNS FROM THE FIRST MINUTE. This changed
+ *                  on the owner's instruction: "we need to design 'uncuttable'
+ *                  way earlier — as a motivation to upgrade the drill. The
+ *                  starter drill maybe only copper and coal and iron." The cap is
+ *                  no longer a late wall guarding three exotic materials; it is
+ *                  the campaign's second progression axis, running alongside the
+ *                  lift. See the CUTTABLE LADDER in js/materials.js for the
+ *                  authoritative table and note 4j below for what it means mine
+ *                  by mine.
  *
  *    >> TWO INVARIANTS, do not break either. audit() reports both per layer and
  *    >> the smoke test asserts them:
  *    >>   fillBlocked      every layer's `fill` must be below
  *    >>                    SM.rig.getHardnessCap() at drill tier 0, or that mine
- *    >>                    becomes physically unenterable.
+ *    >>                    becomes physically unenterable. THIS SURVIVED THE
+ *    >>                    RE-SPACING INTACT and it is the reason the ORE ladder
+ *    >>                    moved rather than the cap: granite, the hardest fill in
+ *    >>                    the catalogue, is 6.2 against the tier-0 cap of 8.5, so
+ *    >>                    an under-gunned company can always DRIVE anywhere. What
+ *    >>                    it cannot do is take the good rock home.
  *    >>   fillIsSellable   every layer's `fill` must be SPOIL (volumeOf === 0).
  *    >>                    A sellable bulk rock fills the hold with the ground
  *    >>                    itself in seconds and the cargo decision evaporates.
  *
- *    Note that the FOUR softest ore materials — coal 1.5, copper 3.0, silver 3.6,
- *    uranium 4.4 — are all cuttable from the first minute. Uranium in particular
- *    is gated by HEAT and by DEPTH, not by the drill; that is deliberate, and it
- *    is why cooling is a real category rather than a tax.
+ *    THE THREE MATERIALS A NEW COMPANY MAY SELL are coal (1.5), copper (3.0) and
+ *    iron (3.4). Silver is 9.0 against the worn auger's 8.5 — just above it, on
+ *    purpose — so the first silver anyone touches is a wall with a warning on it.
+ *    Uranium is gated by the drill AND by heat AND by depth; that is deliberate,
+ *    and it is why cooling is a real category rather than a tax.
  *
  * 3. WHY VOLUME AND PRICE ARE SEPARATE NUMBERS
  *
@@ -114,77 +123,213 @@
  *    offerCargo() and spoil will simply never consume the hold. priceOf and
  *    volumeOf are zero together, always.
  *
- * 4. THE INCOME LADDER, AND WHY THE STEPS ARE THIS SIZE
+ * 4. THE CAMPAIGN LADDER — ONE CURVE, EIGHTEEN RUNGS, NO INVERSIONS
  *
- *    `rate` is dollars per unit of HOLD from a mine's deepest layer — the number
- *    a player who works a mine properly earns, because they dump the cheap ore
- *    and refill from the richest seam they can stand in. `net` is one full tank,
- *    at the recDrill tier, AFTER paying for the fuel, from the one-tank model
- *    described in note 4b. Every figure below was measured, not chosen:
+ *    A player owns a set of RUNGS: a mine's rights (which carry its level 1) and
+ *    the levels they have bought inside it. Every rung has a cumulative price and
+ *    a dollars-per-unit-of-hold, and the ONE property the whole catalogue is
+ *    built to guarantee is:
  *
- *        mine          rate  recDrill  hold    net    rights   $/sec of run
- *        Old Creek      $12      8      48    $448      free       $3
- *        Red Ridge      $36     13      80  $2 684    $1 600      $14
- *        Blackstone    $131     21     130 $16 726   $18 000      $72
- *        Frostpeak     $293     35     210 $60 879   $44 000     $216
- *        Deep Hollow   $305     35     210 $63 344   $48 000     $225
- *        Cinder Fell   $677     55     330 $222 340 $185 000     $669
- *        The Rift    $1 187     84     520 $615 362 $420 000   $1 553
+ *        >> NO RUNG A CHEAPER THAN RUNG B MAY PAY MORE PER UNIT THAN B. <<
  *
- *    THE RULE THAT MATTERS IS THE LAST COLUMN, READ AT A FIXED TIER. A deeper
- *    mine costs more MINUTES per run, so its rate has to beat the previous
- *    mine's by MORE than the extra round trip costs, or the new mine is strictly
- *    a worse use of an afternoon and the player correctly ignores it.
+ *    Per UNIT, not per hold, because the hold belongs to the machine and not to
+ *    the mine: a player choosing where to spend an afternoon carries the same
+ *    hopper either way, so dollars-per-unit is the whole comparison.
  *
- *    Blackstone originally failed exactly this test — it paid the same per second
- *    as Red Ridge, and a simulated greedy player stayed in Red Ridge for thirty
- *    runs rather than use the rights it had just bought — which is why its Gold
- *    Pocket layer is as rich as it is. Re-check this column after any retune.
+ *    MEASURED with SM.advterrain.sampleSpawn over 4.01M cells (1 767M u2) per
+ *    level — the ore table AND the motherlodes AND the debris, counted rather
+ *    than argued about:
  *
- * 4a. FROSTPEAK IS A FORK, NOT A RUNG
+ *      rung              cum cost    $/unit   hold    one haul   step
+ *      old_creek L1            $0     11.87     48        $570      -
+ *      old_creek L2        $1 700     26.15     48      $1 255   2.20
+ *      old_creek L3        $5 500     74.61     48      $3 582   2.85
+ *      red_ridge L1       $14 000    103.44     96      $9 930   1.39  <- rights
+ *      red_ridge L2       $23 900    127.57     96     $12 247   1.23
+ *      red_ridge L3       $35 900    155.55     96     $14 933   1.22
+ *      blackstone L1      $60 000    200.42    192     $38 480   1.29  <- rights
+ *      blackstone L2      $98 000    233.60    192     $44 851   1.17
+ *      blackstone L3     $143 000    283.02    192     $54 339   1.21
+ *      frostpeak L1      $220 000    365.33    384    $140 287   1.29  <- rights
+ *      deep_hollow L1    $230 000    379.23    384    $145 626   1.34  <- rights
+ *      frostpeak L2      $360 000    437.63    384    $168 048   1.20
+ *      deep_hollow L2    $380 000    454.72    384    $174 614   1.20
+ *      cinder_fell L1    $700 000    585.20    768    $449 431   1.29  <- rights
+ *      cinder_fell L2  $1 150 000    703.89    768    $540 584   1.20
+ *      the_rift L1     $2 200 000    873.80   1536  $1 342 160   1.24  <- rights
+ *      the_rift L2     $3 500 000   1002.06   1536  $1 539 160   1.15
+ *      the_rift L3     $5 000 000   1151.45   1536  $1 768 625   1.15
+ *
+ *    ASSERTED NUMERICALLY over all 153 owned-vs-purchasable pairs, at the drill
+ *    tier each mine's recDrill implies: ZERO violations. Also zero at every tier
+ *    from T3 up, where the whole price table is cuttable.
+ *
+ *    WHY THE STEPS SHRINK, AND WHY THAT IS NOT A BUG. Old Creek steps x2.2 and
+ *    x2.85; The Rift steps x1.15. That is forced, and the arithmetic is worth
+ *    writing down because the next person to tune this will otherwise "fix" it:
+ *    the ECON table spans coal at $7/unit to starcore at $1 300, and Old Creek
+ *    alone spends the bottom 6.3x of that range on its three tutorial rungs. What
+ *    is left is ~15x of price range for FIFTEEN more rungs, so the average step
+ *    cannot exceed ~1.20 without inventing a mineral. It does not need to:
+ *
+ *      the HOLD carries the other half. refHold doubles per mine era (48 -> 96 ->
+ *      192 -> 384 -> 768 -> 1536), so one haul goes from $570 to $1.77M — a
+ *      factor of 3 100 — while $/unit only moves 97x. What a player FEELS between
+ *      chapters is mostly the hopper, and the mine's job is to make the hopper
+ *      worth filling.
+ *
+ *      the FILL RATE carries the rest. hardnessScale and pocketRate decide how
+ *      fast a hold fills, and the CUTTABLE LADDER (note 4j) decides whether the
+ *      good rock can be taken at all. A rung that pays 1.2x per unit but fills
+ *      twice as fast is a 2.4x afternoon.
+ *
+ *    THE TWO PRICING SENTENCES, AND THEY ARE THE WHOLE ECONOMY:
+ *
+ *      A LEVEL COSTS ONE FULL HAUL of the level above it (`levelPriceHolds: 1.0`
+ *        on every paid mine). At a step of ~1.2 that pays for itself in 4-7 hauls
+ *        and is pure profit after.
+ *      A MINE'S RIGHTS COST FOUR FULL HAULS of the previous mine's bottom rung.
+ *        Four rather than one because rights are a CHAPTER: they must also cost
+ *        more than everything the previous mine cost in total, or a player would
+ *        rationally skip the last rungs of the mine they are in. That constraint
+ *        is what sets 4, and it is checked in the table above (every `<- rights`
+ *        row is dearer than the row above it, by construction).
+ *
+ *    OLD CREEK IS THE ONE EXCEPTION AND STAYS AT THREE HAULS PER RUNG. Its steps
+ *    are x2.2 and x2.85, so three hauls still pays back in 2.1-2.7 — the same
+ *    payback band as everything else. One rule, two answers, because the rule is
+ *    about PAYBACK and not about the number 3.
+ *
+ * 4a. FROSTPEAK IS A FORK, NOT A RUNG — AND IT IS NOW TWINNED EXACTLY
  *
  *    Frostpeak used to cost $96 000 and sit above Deep Hollow, and measurement
- *    killed that: it paid ~4% LESS per second at every tier, for twice the
- *    rights. Strictly dominated, and no amount of flavour text fixes a mine that
- *    is simply the worse option.
+ *    killed that: it paid ~4% LESS at every tier, for twice the rights. Strictly
+ *    dominated, and no amount of flavour text fixes a mine that is simply the
+ *    worse option.
  *
- *    So it is now $44 000 against Deep Hollow's $48 000 and the two are a CHOICE
- *    at the same point on the map. They cost the same, they pay within 4% of
- *    each other, and they ask for completely different machines:
+ *    The two are now a CHOICE at the same point on the map, with the SAME NUMBER
+ *    OF RUNGS so their ladders line up rung for rung instead of interleaving:
  *
- *        Deep Hollow   heat 0.50 on the floor -> at cooling tier 0 you have
- *                      about 29 seconds in the payload layer before the needle
- *                      tops; tier 2 is the first that holds station there.
+ *        Frostpeak    $220 000    L1 $365.33/unit   L2 $437.63/unit
+ *        Deep Hollow  $230 000    L1 $379.23/unit   L2 $454.72/unit
+ *                                    +3.8%             +4.0%
+ *
+ *    CHEAPER AND POORER BY THE SAME 4% AT BOTH RUNGS, which is what makes the
+ *    pair dominance-free in both directions: a cheaper rung that also pays less
+ *    is a legitimate choice, never a trap. Interleaved ladders were the whole
+ *    problem before — Frostpeak L2 used to sit between Deep Hollow L2 and L3 and
+ *    beat the cheaper one.
+ *
+ *    They ask for completely different machines, and THAT is the decision:
+ *
+ *        Deep Hollow   heat 0.35 then 0.55 -> 5.5 and 7.4 points a second while
+ *                      cutting, against a tier-1 radiator's 5.0 and a tier-2's
+ *                      7.0. Soft rock (hardnessScale 1.00/1.05), so the hold
+ *                      fills fast IF you can stand the temperature. Wants COOLING.
  *        Frostpeak     heat 0.00 in EVERY layer -> you can stand in the Crystal
  *                      Vaults indefinitely with the radiator you started with.
- *                      It charges for that with the hardest non-granite rock in
- *                      the game (hardnessScale 1.20 on limestone) and 4% less
- *                      money, so it wants DRILL and FUEL instead of COOLING.
+ *                      It charges for that with the hardest country rock in the
+ *                      game (hardnessScale 1.20 on limestone = 3.12) and 4% less
+ *                      money. Wants DRILL and FUEL.
  *
- *    That is a real decision about which upgrade you bought last, which is worth
- *    far more than another rung. Do not "fix" the 4% — it is what makes the
- *    cheaper mine the better one for a player with a weak radiator.
+ *    Do not "fix" the 4% — it is what makes the cheaper mine the better one for a
+ *    player with a weak radiator. MEASURED: one drill tier UNDER their shared era
+ *    (T2, where uranium and voidstone are both still uncuttable) Frostpeak
+ *    actually pays MORE than Deep Hollow, which is the fork doing its job.
  *
- * 4b. THE ONE-TANK MODEL, AND THE TWO MARGINAL TIERS
+ * 4b. WHAT BOUNDS A RUN, AND WHERE THE CAMPAIGN'S MONEY GOES
  *
- *    A mine's income is not `hold x rate`; it is bounded by the FUEL left over
- *    once the climb out has been reserved. Deep Hollow at machine tier 1 reaches
- *    the bottom with enough fuel for 16 of its 80 units, and The Rift at tier 2
- *    with enough for 6 of 130. Both therefore pay WORSE per second than the
- *    cheaper mine above them at that one tier, and both flip violently one tier
- *    later ($25 -> $169/s and $30 -> $601/s).
+ *    A mine's income is not `hold x rate`; it is bounded by whichever runs out
+ *    first — the HOLD, the TANK, or the HEAT BUFFER. Levels-as-maps changed the
+ *    shape of this: you arrive AT the stratum by lift, so travel time is roughly
+ *    equal in every mine and the old "$/second of run" column stopped separating
+ *    them. What separates mines now is fill rate and hazard, not distance.
  *
- *    That is not a hole in the curve, it is the most interesting moment in it:
- *    "I can get down there, and I can't do anything when I arrive." The fix the
- *    player reaches for is the tank and the hold, and the mine transforms. Do not
- *    flatten it.
+ *    TOTAL CAMPAIGN COST: ~$5.0M of rights and levels against ~$2.6M of workshop.
+ *    That is a deliberate inversion of the old split (~$0.72M of rights against
+ *    the same workshop): ARCHITECTURE.md 7a says buying levels IS the
+ *    progression, so the mines should be the dominant sink and the machine should
+ *    be maxed out somewhere around Cinder Fell — which is also exactly when the
+ *    cuttable ladder (note 4j) needs it to be.
  *
- *    Rights are 1.5-4 runs of the PREVIOUS mine, so buying in is a decision you
- *    make after a good week rather than a grind. Total campaign income needed:
- *    ~$2.60M of workshop plus ~$0.72M of rights. A simulated player who always
- *    buys the cheapest available upgrade — the worst case — owns every mine
- *    after ~57 runs and has a maxed machine after ~62, which is about 95 minutes
- *    of in-mine time.
+ *    >> FLAGGED FOR THE OWNER: js/rig.js's tier prices were sized against the old
+ *    >> split and are now comfortably affordable by the mid-game. Nothing is
+ *    >> broken by that — the machine is a prerequisite, not a money sink — but if
+ *    >> the workshop should stay tense, rig.js's top three tiers are the lever.
+ *
+ * 4g. RIGHTS, IN HAULS — AND THE CONSTRAINT THAT ACTUALLY SETS THEM
+ *
+ *    Every rights price in the catalogue is FOUR FULL HAULS of the previous
+ *    mine's bottom rung, stated in the same language as a level:
+ *
+ *        mine          rights   = 4 x one haul of        which is
+ *        Red Ridge    $14 000     Old Creek L3   $3 582   $14 328 -> $14 000
+ *        Blackstone   $60 000     Red Ridge L3  $14 933   $59 732 -> $60 000
+ *        Frostpeak   $220 000     Blackstone L3 $54 339  $217 356 -> $220 000
+ *        Deep Hollow $230 000     ...+4%, the fork (note 4a)
+ *        Cinder Fell $700 000     Deep Hollow L2 $174 614 $698 456 -> $700 000
+ *        The Rift  $2 200 000     Cinder Fell L2 $540 584 $2 162 336 -> $2 200 000
+ *
+ *    WHY FOUR AND NOT THREE. Not taste — a hard ordering constraint. Rights must
+ *    cost MORE THAN THE PREVIOUS MINE COST IN TOTAL, or the flat campaign ladder
+ *    inverts: at three hauls, Blackstone's rights came out at $44 800 while Red
+ *    Ridge's own last rung stood at $55 000, so a player would rationally abandon
+ *    Red Ridge half-finished and the reveal gate would then make them grind three
+ *    hauls on Blackstone L1 anyway. MEASURED before the fix: two such inversions
+ *    (blackstone L1 over red_ridge L3, and both fork mines over blackstone L3).
+ *    Four clears every one of them with margin — see the `<- rights` rows in the
+ *    note 4 table, each dearer than the row above it.
+ *
+ *    THE SANITY CHECK, if these are ever retuned: rights payback is
+ *    rights / ((entryRate - prevRate) x hold). It lands at 6-8 hauls across the
+ *    catalogue, against 4-7 for a level. A chapter should cost a little more than
+ *    an afternoon and it does.
+ *
+ * 4j. WHICH DRILL EATS WHICH MINE — THE CUTTABLE LADDER, PER MINE
+ *
+ *    js/materials.js owns the ladder itself. What belongs HERE is the consequence
+ *    for the catalogue, because it is the second half of every mine's identity:
+ *
+ *      mine         era  cap    opens for you        still a wall
+ *      Old Creek    T0   8.5    coal copper iron     silver gold (+emerald @T2)
+ *      Red Ridge    T1  11.5    silver gold emerald  platinum (its 1.3% trace)
+ *                                crystal
+ *      Blackstone   T2  14.0    platinum, ANCIENT    voidstone (its 2.0% trace)
+ *      Frostpeak    T3  20.0    voidstone            starcore (its 1.6% trace)
+ *      Deep Hollow  T3  20.0    uranium, obsidian    starcore (its 1.5% trace)
+ *      Cinder Fell  T4  25.0    starcore             —
+ *      The Rift     T5  34.0    (bedrock)            —
+ *
+ *    EVERY MINE'S OWN ERA CUTS ITS OWN SIGNATURE, AND NOTHING MORE. That is the
+ *    invariant to preserve when retuning: a mine whose recDrill tier cannot cut
+ *    its main mineral is unplayable, and a mine that can already cut the NEXT
+ *    mine's mineral has given away the tease (note 4h).
+ *
+ *    THE EARLY GAME, MEASURED, because this is where the owner's rule bites and
+ *    it is the part that had to be re-derived (48-unit starter hold, $/unit x 48,
+ *    counted over 1 767M u2):
+ *
+ *        Old Creek        T0      T1      T2     locked at T0
+ *        L1 Topsoil      $523    $550    $576    silver, ancient
+ *        L2 Creek Gravel $833  $1 237  $1 339    silver, gold, ancient
+ *        L3 Old Workings $1 116 $3 572  $3 845   silver, gold, emerald, ancient
+ *
+ *    A starter haul out of L1 is $523, not the $570 the old note quoted — silver
+ *    is 2.25% of that lottery and it is now behind the cap. The TUNGSTEN BIT
+ *    ($1 000) is therefore the natural first purchase and the arithmetic is not
+ *    close: $900 starting cash minus a $25 tank plus one $523 haul is $1 398.
+ *    ONE HAUL BUYS THE BIT.
+ *
+ *    AND IT IS OBVIOUSLY WORTH IT, for a reason the averages above understate.
+ *    Old Creek L1's GUARANTEED MOTHERLODE — the one every player finds, ~207 m
+ *    south of the lift — is SILVER. At tier 0 it is a glittering wall the auger
+ *    refuses. At tier 1 it is a 48-unit hold of pure silver: 48 x $78 = $3 744,
+ *    SEVEN TIMES an average starter haul. The lesson arrives on the first descent
+ *    and the answer costs $1 000. Deeper, the bit is worth +48% on L2 and +220%
+ *    on L3, so it is also a prerequisite for the levels the player is saving for.
+ *
+ *    The 3-hauls-per-rung rhythm survives untouched: L2 at $1 700 is 3.1
+ *    post-upgrade L1 hauls ($550).
  *
  * 4c. LEVELS — THE LIFT'S PRICE LIST, AND WHY THE GEOLOGY SETS IT
  *
@@ -220,28 +365,46 @@
  *    Every mine's table is in audit() under `levels`; re-read it after any
  *    retune.
  *
- * 4f. ...AND WHY THE STARTER MINE IS PRICED BY A DIFFERENT QUESTION
+ * 4f. ...AND WHY EVERY MINE IS NOW PRICED BY A DIFFERENT QUESTION
  *
- *    The equation above prices a rung against the rock it OPENS. That is right
- *    for a catalogue you shop across and wrong for the one mine a new company
- *    learns the loop in, because it says nothing about how long the player has
- *    to WORK for the rung. Measured on Old Creek under LEVEL_K alone: L2 cost
- *    $510 against a full L1 hold worth $570 — one haul, and the ladder that is
- *    supposed to BE the progression was over before it registered as one.
+ *    The LEVEL_K equation above prices a rung against the rock it OPENS. That is
+ *    right for a catalogue you shop across and wrong for a LADDER you climb,
+ *    because it says nothing about how long the player has to WORK for the rung.
+ *    Measured on Old Creek under LEVEL_K alone: L2 cost $510 against a full L1
+ *    hold worth $570 — one haul, and the ladder that is supposed to BE the
+ *    progression was over before it registered as one.
  *
- *    So a mine may state `levelPriceHolds: n` and be priced in the unit the
- *    player actually feels — HAULS out of the level above:
+ *    So a mine states `levelPriceHolds: n` and is priced in the unit the player
+ *    actually feels — HAULS out of the level above:
  *
  *        price(level i) = n x refHold x rateEffective(level i-1)
  *
- *    Old Creek states 3. At 48 units of hold and its own balanced tables that
- *    is $0 / $1 700 / $3 800 against full hauls of $570 / $1 255 / $3 582, so
- *    every rung is three good hauls of exactly where the player is standing.
- *    NOTHING ELSE IN THE CATALOGUE STATES IT and every other mine's price list
- *    is unchanged to the dollar — this is an override, not a new default. See
- *    the LEVEL_PRICE_HOLDS_MIN block for why the two questions must not be
- *    merged, and js/adv.js's GATING note for the rule that decides when the
- *    price is allowed to be on screen at all.
+ *    EVERY MINE IN THE CATALOGUE NOW STATES IT. Old Creek states 3 (unchanged,
+ *    and its price list is byte-identical: $0 / $1 700 / $3 800 against full
+ *    hauls of $570 / $1 255 / $3 582). The six paid mines state 1.0 — one full
+ *    haul of the rung above. The two numbers are the SAME RULE seen through two
+ *    step sizes, and the rule is PAYBACK (design note 4):
+ *
+ *        payback in hauls = levelPriceHolds / (step - 1)
+ *
+ *        Old Creek  n=3.0  step 2.20-2.85  ->  2.1-2.7 hauls
+ *        the rest   n=1.0  step 1.15-1.24  ->  4.2-6.7 hauls
+ *
+ *    Both land in the band a permanent upgrade should: a few good afternoons.
+ *    Had the paid mines kept n=3 at their smaller steps, a rung would have taken
+ *    thirteen to twenty hauls to repay and every rational player would have
+ *    skipped it and saved for the next mine's rights instead — which is exactly
+ *    the failure mode this note exists to prevent.
+ *
+ *    `rateEffective` is the ore table TIMES the measured motherlode/debris
+ *    uplift, so the price tracks what the rock is really worth rather than what
+ *    the lottery alone says. See `lodeUplift` in deriveSpawn() and note 4i.
+ *
+ *    See js/adv.js's GATING note for the rule that decides when the price is
+ *    allowed to be on screen at all — and note that the REVEAL GATE (3 qualifying
+ *    hauls out of the level above) is what actually paces the ladder now. At
+ *    n=1.0 the money is never the binding constraint on a rung; the WORK is. The
+ *    money goes on rights and on the machine.
  *
  * 4e. PER-LEVEL SPAWN TABLES — THE OWNER'S PROGRESSION AXIS
  *
@@ -286,14 +449,67 @@
  *    So it is its own structure family: a DEBRIS SCATTER, a handful of cells in a
  *    tight cluster, priced per LEVEL through `debrisRate` (clusters per reference
  *    band, the same unit pocketRate uses). Old Creek: 0.016 / 0.05 / 0.12 down
- *    the three levels, which is roughly one find per 25 / 8 / 3 starter-scale
- *    expeditions, at 2 / 3 / 4 deposits a cluster and $2 000 a deposit.
+ *    the three levels, and see note 4i for what those numbers really do.
  *
- *    >> AND ON LEVEL 1 A STARTING RIG CANNOT CUT IT. Ancient is hardness 9.5
- *    >> against the worn auger's cap of 8.5 (design note 2), so the first one a
- *    >> company ever finds is a tease that sells the $1 000 tungsten bit. That is
- *    >> deliberate and it is the most likely number in this file to want the
- *    >> owner's opinion.
+ *    >> AND A STARTING RIG CANNOT CUT IT. Ancient is hardness 12.0 against the
+ *    >> worn auger's cap of 8.5 — see the CUTTABLE LADDER in js/materials.js and
+ *    >> note 4j below. The tease survives the re-spacing; it now resolves at the
+ *    >> COMPOSITE ROTARY HEAD (tier 2, $4 500) instead of the tungsten bit.
+ *
+ * 4i. RARE STAGING — WHAT `debrisRate` REALLY DOES, AND ITS CEILING
+ *
+ *    >> MEASURED, AND TWO OF THE THREE FINDINGS ARE BUGS. Counted with
+ *    >> SM.advterrain.sampleSpawn over 1 767M u2 per level.
+ *
+ *    1. `debrisRate` SATURATES AT ~0.0822, AND EVERY VALUE ABOVE IT IS A NO-OP.
+ *       js/advterrain.js's perCell() clamps the per-structure-cell probability at
+ *       0.85, and the debris lattice is 2200x2200, so debP = debrisRate x 10.342
+ *       hits the clamp at debrisRate 0.0822. MEASURED: 0.082 and 0.60 generate
+ *       byte-identical worlds (10 539 vs 10 547 ancient cells over the same
+ *       slab — hash noise, not a difference). Old Creek L3's 0.12, Deep Hollow's
+ *       old 0.21 and The Rift's old 0.60 were all silently clamped. NEVER STATE A
+ *       VALUE ABOVE 0.082; it reads as escalation and delivers nothing. The six
+ *       paid mines therefore stage 0.022 -> 0.082 and PLATEAU at Cinder Fell.
+ *
+ *    2. `debrisCells` IS INERT. js/advterrain.js sets L.debCells in buildLayer()
+ *       and never reads it again; cluster size is DEB_R (radius 24-40 units) and
+ *       DEB_FILL (0.55-0.90) only. MEASURED cluster size is ~4.4 cells regardless
+ *       of what this file says. It survives here because levelEconomyOf() reports
+ *       `debris.perFind` from it — so the audit's "$ per find" column is the one
+ *       number in this file that is currently a fiction. Values are written to
+ *       match the measured ~4-6 cells so the fiction is at least close.
+ *
+ *    3. SO "BIGGER SCATTERS DEEPER" CANNOT BE SAID THROUGH THOSE TWO NUMBERS.
+ *       The escalation that IS real is the ANCIENT MOTHERLODE: `lode: 'ancient'`
+ *       paints ~2 100 cells of $2 000-a-unit rock instead of a four-cell glitter.
+ *       Cinder Fell L2 is the first level in the game to grow one; The Rift Floor
+ *       is the second. That is the "and/or bigger scatters" half of the brief,
+ *       delivered by the structure family that can actually express it.
+ *       MEASURED uplift from an ancient lode on a starcore table: 1.04 at
+ *       lodeRate 0.029, 1.10 at 0.120. It is a garnish, not a doubling — the
+ *       ceiling on a level's dollars-per-unit is still its ore lottery.
+ *
+ *    A FIND IS ALWAYS THE SCANNER HEADLINE, and that is structural rather than
+ *    tuned: js/scanner.js ranks contacts by SM.mines.depositValueIndex(), and
+ *    ancient at $2 000 x 1 unit is the largest per-deposit value in ECON by a
+ *    factor of 1.5 over starcore. No rate can change that ordering.
+ *
+ * 4h. THE TEASE CHAIN — EVERY MINE'S FLOOR SHOWS YOU THE NEXT MINE
+ *
+ *    Each mine's deepest rung carries a 1-2% trace of the NEXT mine's signature
+ *    mineral, and (note 4j) that trace is deliberately ABOVE the drill cap of the
+ *    era you are in. So the rock itself says where to go next, twice over: you
+ *    can see it, the manifest can price it, and you cannot cut it yet.
+ *
+ *        Old Creek L3    emerald  4.7%  -> the mineral Red Ridge is full of
+ *        Red Ridge L3    platinum 1.3%  -> Blackstone
+ *        Blackstone L3   voidstone 2.0% -> Frostpeak
+ *        Frostpeak L2    starcore 1.6%  -> Cinder Fell
+ *        Deep Hollow L2  starcore 1.5%  -> Cinder Fell
+ *        Cinder Fell L2  (ancient motherlode) -> The Rift, where it is in seams
+ *
+ *    Keep traces under ~2% of the lottery. Above that they stop being a rumour
+ *    and start being income, and the next mine loses its reason to exist.
  *
  * 4d. RAILS — THE LATERAL TWIN OF THE LIFT
  *
@@ -529,11 +745,13 @@ SM.mines = (function () {
    * above it, and the number goes on meaning that if the spawn tables are ever
    * retuned — which a hard-coded price list could not do.
    *
-   * IT IS AN OVERRIDE AND NOTHING ELSE. A mine that does not state it is priced
-   * exactly as it was; the six that do not are byte-identical (verified against
-   * the shipped tables). Do not promote this to a global default without
-   * re-pricing the whole catalogue against it — LEVEL_K and this are two
-   * different questions and the answers do not agree. */
+   * EVERY MINE NOW STATES IT (design note 4f). Old Creek 3, the six paid mines
+   * 1.0, and the two numbers are one rule — PAYBACK — read through two step
+   * sizes. The LEVEL_K ladder below is therefore dead code for the shipped
+   * catalogue and is kept only as the fallback for a mine that states nothing:
+   * do not delete it, and do not price a new mine with it without reading note
+   * 4f first, because LEVEL_K and levelPriceHolds answer two different questions
+   * and their answers do not agree. */
   var LEVEL_PRICE_HOLDS_MIN = 0;   // <= 0 on a mine = use the LEVEL_K ladder
 
   /* LEVEL WIDTH IS GONE. A level map is UNBOUNDED east, west and south now
@@ -668,37 +886,44 @@ SM.mines = (function () {
    * Seven mines. Each one exists to answer a different question, because a mine
    * that is only "the last one but bigger" is a menu entry, not a place:
    *
-   *   Old Creek    teaches the loop, and is the only place you can afford
-   *   Red Ridge    the first rock that resists: a fast soft sandstone bed and
-   *                then a limestone bench that a worn auger cannot chew, plus
-   *                the copper/iron money that pays for the first real hopper
-   *   Blackstone   long tunnels through hard rock, silver veins, a gold pocket
-   *                at the bottom — the first mine you can get LOST in
-   *   Frostpeak    Deep Hollow's TWIN at the same price, with ZERO heat in every
-   *                layer. The mine you run when your cooling is still tier 0 and
-   *                Deep Hollow's floor would cook you in half a minute. It
-   *                charges for that with the hardest non-granite rock in the
-   *                game (hardnessScale 1.20) and 4% less money, so it wants
-   *                DRILL and FUEL where its twin wants COOLING. See note 4a —
-   *                these two are a fork in the map, not two rungs of a ladder.
-   *   Deep Hollow  THE GAMBLE, and the mine the brief is really about. 220 m of
-   *                dead granite at a pocket rate of 0.22 before anything pays,
-   *                then a cavern floor stuffed with gold, crystal, platinum and
-   *                the ancient formation. MEASURED: a starting machine reaches
-   *                211 m of 700, surfaces with under 2 units of iron and nets
-   *                MINUS $44; a tier-3 machine bottoms it, fills the hold from
-   *                The Hollow and nets $63 344. That 1400x swing is the whole
-   *                design, and both ends of it have to stay extreme.
-   *   Cinder Fell  the opposite of Frostpeak: heat 0.85-1.00 for 560 m. Cooling
-   *                is the ticket of entry, and obsidian pockets in the magma
-   *                skin need drill tier 3. Where the two hazard axes cross.
-   *   The Rift     everything at once, at 1200 m: geothermal vents, obsidian
-   *                pressure locks, huge caverns and a floor of starcore,
-   *                voidstone and ancient rock.
+   *   Old Creek    A PICKED-OVER CREEK CLAIM. Soft ground, coal and copper and
+   *                iron you can cut on day one, silver and gold you cannot. It
+   *                teaches the loop, it is free, and it is the only mine whose
+   *                numbers are frozen (see note 4j for the one thing that moved).
+   *                3 rungs. Signature: the first silver you can't have.
+   *   Red Ridge    HEMATITE BENCHES OVER LIMESTONE. An iron quarry that turned
+   *                out to have a silver lining. The bench limestone is the first
+   *                country rock that fights back, and the mine's gift is CRYSTAL.
+   *                3 rungs.
+   *   Blackstone   A SHEETED VEIN SYSTEM IN GRANITE. The first mine that is hard
+   *                everywhere, so the drill and not the hold bounds a run — and
+   *                the first PLATINUM, and the first heat worth a radiator.
+   *                3 rungs.
+   *   Frostpeak    ICE-BOUND PEGMATITE. Deep Hollow's TWIN at the same point on
+   *                the map: zero heat in every layer, the hardest country rock in
+   *                the game, VOIDSTONE, and 4% less money than its twin at both
+   *                rungs. The mine you run when your radiator is still tier 1.
+   *                2 rungs. See note 4a — a fork, not two rungs of a ladder.
+   *   Deep Hollow  A KARST HOLLOW OVER A HOT URANIUM REEF. The other half of the
+   *                fork: soft generous rock and URANIUM, paid for in HEAT. Wants
+   *                COOLING where its twin wants DRILL. 2 rungs.
+   *   Cinder Fell  A DEAD VOLCANO WITH A LIVE BASEMENT. Where the two hazard axes
+   *                cross: heat 0.85-1.00 AND obsidian pockets nothing under drill
+   *                tier 3 can touch. Its gift is STARCORE, and its floor is the
+   *                first ANCIENT MOTHERLODE in the game. 2 rungs.
+   *   The Rift     EVERYTHING AT ONCE, AND THE ANCIENT ROCK IN PLACE. Obsidian
+   *                pressure locks on the entry rung, geothermal vents, and a floor
+   *                that is 61% starcore with an ancient motherlode under it. The
+   *                only three-rung chapter after Old Creek. 3 rungs.
    *
    * ORDERED BY PRICE, ascending, and getStarterId() is LIST[0]. Keep it that way:
    * a price-sorted catalogue is the natural reading order for the world map, and
    * it makes a dominated mine (see note 4a) obvious at a glance.
+   *
+   * EIGHTEEN RUNGS TOTAL, and design note 4 asserts that no cheaper one pays more
+   * per unit than a dearer one — over all 153 pairs, at the drill era each mine
+   * implies. Re-run that assertion after ANY retune; it is the property the whole
+   * catalogue exists to have.
    * ================================================================== */
   function buildCatalogue() {
     return [
@@ -823,40 +1048,61 @@ SM.mines = (function () {
         name: 'Red Ridge Quarry',
         region: 'Red Ridge',
         mapX: 0.30, mapY: 0.43,
-        /* Four Old Creek runs. Act one has to be four runs long, not eight:
-         * it is the only part of the game where the player has no choices. */
-        price: 1600,
+        /* THREE FULL HAULS OF OLD CREEK'S BOTTOM RUNG (design note 4g).
+         * 3 x 48 units x $74.61 = $10 743. A chapter costs what a chapter's
+         * worth of work costs, and it is the same sentence every rung in the
+         * game is priced in. */
+        price: 14000,
         recDrill: 13,
-        depth: 780,
+        depth: 700,
         seed: 20481,
-        common: ['copper', 'iron'],
-        rare: ['silver', 'gold'],
+        common: ['iron', 'silver'],
+        rare: ['gold', 'crystal'],
         hazards: ['Limestone benches'],
-        blurb: 'An open quarry cut back into the ridge. Soft red beds give way ' +
-               'in minutes and then the bench limestone stops you dead — the ' +
-               'first rock in the world that a worn auger cannot simply chew.',
-        /* THE FIRST RESISTING ROCK IS LIMESTONE, NOT SANDSTONE. Agent 3's
-         * sandstone is hardness 1.7 and is explicitly designed as "the FAST
-         * part of a descent"; the limestone next to it is 2.6. So the mine is
-         * built as a CONTRAST: a fast soft bed, then a bench you have to work.
-         * That reads better than an undifferentiated slog anyway — you feel the
-         * bench arrive. */
+        blurb: 'An open quarry cut back into the ridge, and the first ground ' +
+               'that fights you. The red hematite benches carry more iron than ' +
+               'anyone can lift — but the silver runs with it, and somewhere ' +
+               'under the bench limestone the first crystal in the world.',
+        /* GEOLOGICAL IDENTITY: HEMATITE BENCHES OVER LIMESTONE.
+         * An iron quarry that turned out to have a silver lining. The bench
+         * limestone (2.6 x 1.10 = 2.86) is the first rock a worn auger cannot
+         * simply chew — it is why you buy the tungsten bit — and the mine's
+         * gift is CRYSTAL, the first mineral in the campaign Old Creek has
+         * never shown you.
+         *
+         * WHAT ITS ENTRY RUNG OFFERS: $88.8/unit against Old Creek's best of
+         * $74.61 (x1.33 after uplift). Buying in is an immediate raise, which
+         * is the property the whole campaign now rests on — see design note 4g. */
+        levelPriceHolds: 1.0,
+        spawn: {
+          levels: [
+            { drift: { iron: -1.0, silver: 0.1, gold: 0.6, gem: 0.9, crystal: 1.2 },
+              debrisRate: 0.022, debrisCells: 4, lodeUplift: 1.082 },
+            { drift: { iron: -1.0, silver: -0.1, gold: 0.5, gem: 0.9, crystal: 1.3 },
+              debrisRate: 0.030, debrisCells: 4, lodeUplift: 1.163 },
+            { drift: { iron: -1.0, silver: -0.3, gold: 0.3, gem: 0.8, crystal: 1.2,
+                       platinum: 1.4 },
+              debrisRate: 0.040, debrisCells: 4, lodeUplift: 1.184 }
+          ]
+        },
         layers: [
-          { toDepth: 165, name: 'Red Overburden', fill: 'clay',
-            weights: { coal: 4, copper: 4 },
-            pocketRate: 1.10, cavernRate: 0.12, hardnessScale: 1.00, heat: 0 },
-          { toDepth: 360, name: 'Sandstone Beds', fill: 'sandstone',
-            weights: { copper: 5, coal: 3, iron: 2 },
-            pocketRate: 1.15, cavernRate: 0.14, hardnessScale: 1.00, heat: 0 },
-          /* 2.6 x 1.05 = 2.73: 56% of free speed on a tier-0 auger, 72% on a
-           * tier-1 bit. Slow enough to be the reason you buy the bit, never
-           * slow enough to be a wall. */
-          { toDepth: 570, name: 'Bench Limestone', fill: 'limestone',
-            weights: { copper: 6, iron: 4 },
-            pocketRate: 1.00, cavernRate: 0.20, hardnessScale: 1.05, heat: 0.05 },
-          { toDepth: 780, name: 'Ore Benches', fill: 'stone',
-            weights: { copper: 5, iron: 7, silver: 2, gold: 1 },
-            pocketRate: 1.35, cavernRate: 0.22, hardnessScale: 1.10, heat: 0.10 }
+          { toDepth: 220, name: 'Hematite Bench', fill: 'sandstone',
+            weights: { iron: 5, silver: 11, gold: 4, gem: 2.2, crystal: 1.0 },
+            pocketRate: 1.10, cavernRate: 0.14, hardnessScale: 1.00, heat: 0,
+            lode: 'silver', lodeRate: 0.020 },
+          { toDepth: 460, name: 'Silver Bench', fill: 'limestone',
+            weights: { iron: 4.2, silver: 12, gold: 5, gem: 3.1, crystal: 1.6 },
+            pocketRate: 1.25, cavernRate: 0.18, hardnessScale: 1.05, heat: 0,
+            lode: 'gold', lodeRate: 0.026 },
+          /* THE TEASE. A trace of platinum — 1.1% of the lottery — in the
+           * deepest rung, which is the mineral Blackstone is built on. Every
+           * mine's bottom level shows you a little of the next mine's signature
+           * so the rock itself says where to go next (design note 4h). */
+          { toDepth: 700, name: 'Deep Benches', fill: 'limestone',
+            weights: { iron: 3.5, silver: 11, gold: 6, gem: 4, crystal: 2.5,
+                       platinum: 0.35 },
+            pocketRate: 1.40, cavernRate: 0.24, hardnessScale: 1.10, heat: 0.05,
+            lode: 'crystal', lodeRate: 0.032 }
         ]
       },
 
@@ -865,36 +1111,61 @@ SM.mines = (function () {
         name: 'Blackstone Mine',
         region: 'Blackstone Range',
         mapX: 0.50, mapY: 0.54,
-        price: 18000,
+        /* Three full hauls of Red Ridge's bottom rung (design note 4g). */
+        price: 60000,
         recDrill: 21,
-        depth: 1260,
+        depth: 1080,
         seed: 77345,
-        common: ['iron', 'silver'],
-        rare: ['gold', 'crystal'],
-        hazards: ['Hard rock', 'Long tunnels'],
-        blurb: 'Two hundred metres of granite standing between you and the ' +
-               'silver. The company that sank this shaft went under paying for ' +
-               'the drill bits; the veins they were chasing are still down there.',
+        common: ['silver', 'gold'],
+        rare: ['crystal', 'platinum'],
+        hazards: ['Hard rock', 'Long tunnels', 'Heat'],
+        blurb: 'Sheeted quartz veins in granite, and the company that sank this ' +
+               'shaft went under paying for the drill bits. The veins they were ' +
+               'chasing are still down there, and so is the platinum nobody in ' +
+               'their day knew how to sell.',
+        /* GEOLOGICAL IDENTITY: A SHEETED VEIN SYSTEM IN GRANITE.
+         * Old Creek is soft ground and Red Ridge is beds; Blackstone is the
+         * first mine that is HARD everywhere — granite fill on two of its three
+         * rungs, so the drill (not the hold) is what bounds a run. The reward
+         * is the first PLATINUM in the campaign, and the first mine with enough
+         * heat to make the radiator a purchase rather than a stat.
+         *
+         * WHAT ITS ENTRY RUNG OFFERS: $166.9/unit against Red Ridge's best of
+         * $131.4. The granite costs you speed; the veins pay for it. */
+        levelPriceHolds: 1.0,
+        spawn: {
+          levels: [
+            { drift: { iron: -1.0, silver: -0.2, gold: 0.4, gem: 0.8, crystal: 1.0,
+                       platinum: 1.4 },
+              debrisRate: 0.030, debrisCells: 4, lodeUplift: 1.138 },
+            { drift: { iron: -1.0, silver: -0.4, gold: 0.2, gem: 0.7, crystal: 1.0,
+                       platinum: 1.4 },
+              debrisRate: 0.038, debrisCells: 4, lodeUplift: 1.071 },
+            { drift: { silver: -1.0, gold: -0.2, gem: 0.4, crystal: 0.8,
+                       platinum: 1.2, rare: 1.5 },
+              debrisRate: 0.048, debrisCells: 4, lodeUplift: 1.143 }
+          ]
+        },
         layers: [
-          { toDepth: 270, name: 'Broken Ground', fill: 'stone',
-            weights: { coal: 3, iron: 4 },
-            pocketRate: 1.00, cavernRate: 0.18, hardnessScale: 1.00, heat: 0.05 },
-          { toDepth: 690, name: 'Hard Rock', fill: 'granite',
-            weights: { iron: 6, silver: 3 },
-            pocketRate: 0.55, cavernRate: 0.10, hardnessScale: 1.05, heat: 0.15 },
-          { toDepth: 1020, name: 'Silver Veins', fill: 'granite',
-            weights: { silver: 7, iron: 4, gold: 1 },
-            pocketRate: 1.30, cavernRate: 0.18, hardnessScale: 1.10, heat: 0.30 },
-          /* THE STEP. A mine only reads as an upgrade if its bottom layer beats
-           * the previous mine's bottom layer by MORE than the extra round-trip
-           * time costs — Blackstone is 2.5x a Red Ridge run in minutes, so its
-           * floor has to be well over 2.5x richer. Measured (see audit()):
-           * $131/unit against Red Ridge's $36, which is 3.7x. Before this was
-           * retuned the two mines paid the same per second and Blackstone was
-           * strictly a worse use of an afternoon. */
-          { toDepth: 1260, name: 'Gold Pocket', fill: 'stone',
-            weights: { gold: 6, silver: 5, crystal: 2.5, gem: 1.5, iron: 3 },
-            pocketRate: 2.40, cavernRate: 0.35, hardnessScale: 1.05, heat: 0.40 }
+          { toDepth: 340, name: 'Vein Granite', fill: 'granite',
+            weights: { iron: 2.2, silver: 8.5, gold: 8, gem: 5, crystal: 4.3,
+                       platinum: 1.5 },
+            pocketRate: 0.90, cavernRate: 0.12, hardnessScale: 1.00, heat: 0.05,
+            lode: 'silver', lodeRate: 0.024 },
+          { toDepth: 700, name: 'Silver Veins', fill: 'granite',
+            weights: { iron: 0.4, silver: 7.5, gold: 8, gem: 5.5, crystal: 5.5,
+                       platinum: 2.6 },
+            pocketRate: 1.20, cavernRate: 0.18, hardnessScale: 1.05, heat: 0.15,
+            lode: 'gold', lodeRate: 0.028 },
+          /* THE POCKET, and the tease. pocketRate 1.90 in stone rather than
+           * granite: the bottom rung is where the rock finally lets go, which is
+           * what makes it feel like arriving somewhere. The 1.6% of voidstone is
+           * Frostpeak talking (design note 4h). */
+          { toDepth: 1080, name: 'Gold Pocket', fill: 'stone',
+            weights: { silver: 6, gold: 8.5, gem: 6, crystal: 6, platinum: 3.2,
+                       rare: 0.6 },
+            pocketRate: 1.90, cavernRate: 0.35, hardnessScale: 1.10, heat: 0.30,
+            lode: 'platinum', lodeRate: 0.032 }
         ]
       },
 
@@ -903,37 +1174,52 @@ SM.mines = (function () {
         name: 'Frostpeak Shaft',
         region: 'Frostpeak',
         mapX: 0.68, mapY: 0.22,
-        /* CHEAPER than Deep Hollow on purpose — see design note 4a. */
-        price: 44000,
+        /* CHEAPER than Deep Hollow, and 3-4% poorer at the matching rung — see
+         * design note 4a. Three hauls of Blackstone's bottom rung. */
+        price: 220000,
         recDrill: 35,
-        depth: 1680,
+        depth: 1100,
         seed: 31415,
-        common: ['silver', 'crystal'],
+        common: ['crystal', 'platinum'],
         rare: ['gem', 'rare'],
-        hazards: ['Frozen ground', 'Ice falls'],
+        hazards: ['Frozen ground', 'Hardest rock in the world'],
         blurb: 'Nothing down here is warm, which is the whole attraction: the ' +
-               'crystal vaults at five hundred metres pay like a deep mine and ' +
-               'ask nothing of your cooling. The ground itself is the problem.',
+               'crystal vaults pay like a deep mine and ask nothing at all of ' +
+               'your cooling. The ground itself is the problem — and the ' +
+               'voidstone in it has never been cut by anybody.',
+        /* GEOLOGICAL IDENTITY: ICE-BOUND PEGMATITE.
+         * Deep Hollow's TWIN at the same point on the map, and the two are a
+         * CHOICE rather than two rungs (design note 4a). Frostpeak's gift is
+         * VOIDSTONE; its price is the hardest country rock in the catalogue
+         * (hardnessScale 1.20 on limestone = 3.12) and 3-4% less money than its
+         * twin at every rung. heat is 0 in EVERY layer on purpose — DO NOT ADD
+         * ANY. This is the mine you run when your radiator is still tier 1, and
+         * it wants DRILL and FUEL where its twin wants COOLING. */
+        levelPriceHolds: 1.0,
+        spawn: {
+          levels: [
+            { drift: { silver: -1.0, gem: -0.2, crystal: 0.6, platinum: 1.1,
+                       rare: 1.5 },
+              debrisRate: 0.050, debrisCells: 4, lodeUplift: 1.052 },
+            { drift: { silver: -1.0, gem: -0.4, crystal: 0.5, platinum: 1.0,
+                       rare: 1.3, starcore: 1.5 },
+              debrisRate: 0.062, debrisCells: 4, lodeUplift: 1.098 }
+          ]
+        },
         layers: [
-          /* hardnessScale 1.15-1.20 is the highest in the catalogue. Frostpeak
-           * is the mine that asks for DRILL and FUEL instead of COOLING, so
-           * that a player whose cooling is still tier 1 has somewhere to earn.
-           * heat is 0 in every layer on purpose — do not add any. */
-          { toDepth: 270, name: 'Permafrost', fill: 'clay',
-            weights: { limestone: 3, silver: 1 },
-            pocketRate: 0.80, cavernRate: 0.10, hardnessScale: 1.15, heat: 0 },
-          /* limestone, not sandstone: this layer's whole job is to be the
-           * hardest non-granite rock in the game (2.6 x 1.20 = 3.12, 49% of
-           * free speed on a tier-0 auger), and Agent 3's sandstone is soft. */
-          { toDepth: 780, name: 'Ice-Bound Rock', fill: 'limestone',
-            weights: { silver: 4, crystal: 2, gem: 1.5 },
-            pocketRate: 1.00, cavernRate: 0.14, hardnessScale: 1.20, heat: 0 },
-          { toDepth: 1260, name: 'Blue Ice Granite', fill: 'granite',
-            weights: { crystal: 5, gem: 4, silver: 3 },
-            pocketRate: 1.40, cavernRate: 0.30, hardnessScale: 1.10, heat: 0 },
-          { toDepth: 1680, name: 'Crystal Vaults', fill: 'stone',
-            weights: { crystal: 8, gem: 6, silver: 4, rare: 1.5, platinum: 1 },
-            pocketRate: 2.40, cavernRate: 0.50, hardnessScale: 1.00, heat: 0 }
+          /* THE HARDEST NON-GRANITE ROCK IN THE GAME: limestone 2.6 x 1.20 =
+           * 3.12, which is 49% of free speed on a tier-0 auger and still only
+           * 79% on a tier-2 head. This is what Frostpeak charges instead of
+           * heat, and it is the whole reason the fork is a real decision. */
+          { toDepth: 520, name: 'Ice-Bound Rock', fill: 'limestone',
+            weights: { silver: 4, gem: 4.5, crystal: 8, platinum: 4.5, rare: 2.1 },
+            pocketRate: 1.20, cavernRate: 0.20, hardnessScale: 1.20, heat: 0,
+            lode: 'crystal', lodeRate: 0.028 },
+          { toDepth: 1100, name: 'Crystal Vaults', fill: 'granite',
+            weights: { silver: 3, gem: 4, crystal: 9, platinum: 5.5, rare: 3.2,
+                       starcore: 0.4 },
+            pocketRate: 2.00, cavernRate: 0.45, hardnessScale: 1.15, heat: 0,
+            lode: 'rare', lodeRate: 0.032 }
         ]
       },
 
@@ -942,37 +1228,52 @@ SM.mines = (function () {
         name: 'Deep Hollow',
         region: 'The Hollows',
         mapX: 0.38, mapY: 0.75,
-        price: 48000,
+        /* Dearer than Frostpeak, and 3-4% richer at the matching rung — the
+         * two halves of the fork (design note 4a). 3.2 hauls of Blackstone. */
+        price: 230000,
         recDrill: 35,
-        depth: 2100,
+        depth: 1160,
         seed: 90210,
-        common: ['silver', 'gold'],
-        rare: ['platinum', 'ancient'],
-        hazards: ['Dead rock', 'Heat', 'No return without fuel'],
-        blurb: 'Four hundred metres of granite that carries nothing at all, ' +
-               'and then the Hollow itself. Every survey says the same thing: ' +
-               'do not come down here without the machine to get back out.',
+        common: ['crystal', 'platinum'],
+        rare: ['uranium', 'ancient'],
+        hazards: ['Heat', 'Radiation', 'No return without fuel'],
+        blurb: 'A collapsed karst hollow with something hot underneath it. The ' +
+               'ore is soft and the ground is generous — and the reef at the ' +
+               'bottom reads yellow-green on every instrument anyone has ever ' +
+               'lowered down there.',
+        /* GEOLOGICAL IDENTITY: A KARST HOLLOW OVER A HOT URANIUM REEF.
+         * Frostpeak's TWIN at the same point on the map (design note 4a).
+         * Deep Hollow's gift is URANIUM; its price is HEAT — 0.35 then 0.55,
+         * which is 5.5 then 7.4 points a second while drilling against a tier-1
+         * radiator's 5.0 and a tier-2's 7.0. Its rock is SOFT where Frostpeak's
+         * is the hardest in the game, so the same hold fills faster here if you
+         * can stand the temperature. That is the fork: cooling, or drill. */
+        levelPriceHolds: 1.0,
+        spawn: {
+          levels: [
+            { drift: { silver: -1.0, gold: -0.6, gem: -0.2, crystal: 0.5,
+                       platinum: 1.0, uranium: 1.5 },
+              debrisRate: 0.052, debrisCells: 4, lodeUplift: 1.132 },
+            { drift: { silver: -1.0, gold: -0.7, gem: -0.3, crystal: 0.4,
+                       platinum: 0.9, uranium: 1.4, starcore: 1.5 },
+              debrisRate: 0.065, debrisCells: 4, lodeUplift: 1.129 }
+          ]
+        },
         layers: [
-          { toDepth: 240, name: 'Collapsed Adit', fill: 'stone',
-            weights: { rubble: 4, coal: 2, iron: 1 },
-            pocketRate: 0.60, cavernRate: 0.22, hardnessScale: 1.00, heat: 0.05 },
-          /* THE POINT OF THE MINE. pocketRate 0.22 over 220 m: at ADV band
-           * heights that is a pocket every few hundred metres of driving, and
-           * the fill is granite. An under-gunned rig spends its whole tank in
-           * here for iron money. Do not "fix" this layer. */
-          { toDepth: 900, name: 'Dead Granite', fill: 'granite',
-            weights: { iron: 1.2, limestone: 1 },
-            pocketRate: 0.22, cavernRate: 0.06, hardnessScale: 1.00, heat: 0.15 },
-          { toDepth: 1560, name: 'Deeper Granite', fill: 'granite',
-            weights: { silver: 1.5, gold: 0.8, crystal: 0.5 },
-            pocketRate: 0.35, cavernRate: 0.10, hardnessScale: 1.10, heat: 0.35 },
-          /* ...and the payoff. pocketRate 2.60 and cavernRate 0.50 is the
-           * highest ore density outside The Rift. This contrast is the mode's
-           * defining moment; both halves of it have to stay extreme. */
-          { toDepth: 2100, name: 'The Hollow', fill: 'stone',
-            weights: { silver: 6, gold: 5, crystal: 5, gem: 3, platinum: 3,
-                       ancient: 0.8 },
-            pocketRate: 2.60, cavernRate: 0.50, hardnessScale: 1.00, heat: 0.50 }
+          { toDepth: 540, name: 'The Hollow', fill: 'stone',
+            weights: { silver: 3.6, gold: 4, gem: 4, crystal: 6, platinum: 4,
+                       uranium: 2.3 },
+            pocketRate: 1.60, cavernRate: 0.35, hardnessScale: 1.00, heat: 0.35,
+            lode: 'platinum', lodeRate: 0.028 },
+          /* THE REEF. heat 0.55 is 7.43 points a second while cutting, so a
+           * tier-2 radiator (7.0) very nearly holds station and a tier-3 (9.5)
+           * is comfortable. Below that the heat cap is a stopwatch — dive, work
+           * the reef, climb out — which is exactly the texture this mine is for. */
+          { toDepth: 1160, name: 'Hot Reef', fill: 'stone',
+            weights: { silver: 2.6, gold: 2.6, gem: 4, crystal: 6, platinum: 5.2,
+                       uranium: 3.4, starcore: 0.35 },
+            pocketRate: 2.20, cavernRate: 0.50, hardnessScale: 1.05, heat: 0.55,
+            lode: 'uranium', lodeRate: 0.032 }
         ]
       },
 
@@ -981,32 +1282,59 @@ SM.mines = (function () {
         name: 'Cinder Fell',
         region: 'Cinder Coast',
         mapX: 0.81, mapY: 0.63,
-        price: 185000,
+        /* Three hauls of Deep Hollow's bottom rung (design note 4g). */
+        price: 700000,
         recDrill: 55,
-        depth: 2640,
+        depth: 1500,
         seed: 66613,
-        common: ['gold', 'platinum'],
-        rare: ['uranium', 'starcore'],
-        hazards: ['Extreme heat', 'Gas pockets', 'Obsidian'],
-        blurb: 'A dead volcano with a live basement. Five hundred and sixty ' +
-               'metres of it read above 0.8 on the thermal survey, and the ' +
-               'cinder core underneath is stiff with platinum and uranium.',
+        common: ['uranium', 'platinum'],
+        rare: ['starcore', 'ancient'],
+        hazards: ['Extreme heat', 'Obsidian', 'Gas pockets'],
+        blurb: 'A dead volcano with a live basement. Every metre of it reads ' +
+               'above 0.8 on the thermal survey, the magma skin is shot through ' +
+               'with obsidian nothing under a lance will touch — and the cinder ' +
+               'core underneath is the only starcore anyone has ever brought up.',
+        /* GEOLOGICAL IDENTITY: A DEAD VOLCANO WITH A LIVE BASEMENT.
+         * The mine where the two hazard axes cross: heat 0.85 then 1.00 (10.3
+         * and 11.7 points a second while cutting, against a tier-4 radiator's
+         * 13) AND obsidian pockets at hardness 16, which nothing under drill
+         * tier 3 can cut at all. Its gift is STARCORE, and it is where ANCIENT
+         * DEBRIS stops being a rumour: the scatter rate reaches the generator's
+         * ceiling here, and the cinder core is the first place in the game that
+         * grows a whole ANCIENT MOTHERLODE. */
+        levelPriceHolds: 1.0,
+        spawn: {
+          levels: [
+            { drift: { gem: -1.0, crystal: -0.5, platinum: 0.3, rare: 0.8,
+                       uranium: 1.1, starcore: 1.5 },
+              debrisRate: 0.070, debrisCells: 4, lodeUplift: 1.079 },
+            { drift: { gem: -1.0, crystal: -0.6, platinum: 0.2, rare: 0.7,
+                       uranium: 1.0, starcore: 1.5 },
+              debrisRate: 0.082, debrisCells: 5, lodeUplift: 1.168 }
+          ]
+        },
         layers: [
-          { toDepth: 300, name: 'Ash Beds', fill: 'clay',
-            weights: { coal: 5, limestone: 4, copper: 2 },
-            pocketRate: 1.00, cavernRate: 0.14, hardnessScale: 1.00, heat: 0.20 },
-          { toDepth: 960, name: 'Basalt Flows', fill: 'granite',
-            weights: { copper: 3, silver: 2, gold: 2 },
-            pocketRate: 0.60, cavernRate: 0.10, hardnessScale: 1.10, heat: 0.55 },
           /* obsidian as a WEIGHT, never as `fill`: pockets of rock the drill
            * cannot touch below tier 3, sitting inside granite you can. Routing
-           * around them is the layer's texture. See design note 2. */
-          { toDepth: 1800, name: 'Magma Skin', fill: 'granite',
-            weights: { gold: 5, platinum: 3, uranium: 3, obsidian: 2 },
-            pocketRate: 1.20, cavernRate: 0.20, hardnessScale: 1.15, heat: 0.85 },
-          { toDepth: 2640, name: 'Cinder Core', fill: 'stone',
-            weights: { platinum: 5, uranium: 5, gold: 4, starcore: 3, rare: 2 },
-            pocketRate: 2.50, cavernRate: 0.50, hardnessScale: 1.05, heat: 1.00 }
+           * around them is the layer's texture. See design note 2. It is spoil,
+           * so it costs the lottery a roll and pays nothing — that is the
+           * point. */
+          { toDepth: 700, name: 'Magma Skin', fill: 'granite',
+            weights: { gem: 4, crystal: 6.5, platinum: 6, rare: 3.2, uranium: 4.4,
+                       starcore: 1.0, obsidian: 3 },
+            pocketRate: 1.30, cavernRate: 0.22, hardnessScale: 1.15, heat: 0.85,
+            lode: 'uranium', lodeRate: 0.030 },
+          /* THE FIRST ANCIENT MOTHERLODE IN THE GAME. Every mine above this one
+           * meets ancient debris as a four-cell glitter in a wall; here it grows
+           * into a formation of its own, ~2 100 cells of $2 000-a-unit rock.
+           * That is the "bigger scatter" half of the rare staging, and it is
+           * what gives the last two mines a ceiling the ore lottery cannot
+           * reach on its own (design note 4i). */
+          { toDepth: 1500, name: 'Cinder Core', fill: 'stone',
+            weights: { gem: 3, crystal: 6, platinum: 6, rare: 4, uranium: 5.5,
+                       starcore: 2 },
+            pocketRate: 2.40, cavernRate: 0.50, hardnessScale: 1.05, heat: 1.00,
+            lode: 'ancient', lodeRate: 0.032 }
         ]
       },
 
@@ -1015,33 +1343,59 @@ SM.mines = (function () {
         name: 'The Rift',
         region: 'The Rift',
         mapX: 0.92, mapY: 0.37,
-        price: 420000,
+        /* Three hauls of Cinder Fell's bottom rung (design note 4g). The rights
+         * cost more than most companies are worth, and that is the point — but
+         * it is still THREE HAULS, exactly like every other chapter. */
+        price: 2200000,
         recDrill: 84,
-        depth: 3600,
+        depth: 2400,
         seed: 4242,
-        common: ['platinum', 'uranium'],
-        rare: ['starcore', 'rare', 'ancient'],
+        common: ['uranium', 'starcore'],
+        rare: ['ancient', 'rare'],
         hazards: ['Geothermal', 'Obsidian locks', 'Depth'],
-        blurb: 'Twelve hundred metres, and the last two hundred are not rock ' +
-               'in any sense a geologist will sign off on. The rights cost more ' +
-               'than most companies are worth. It is worth it once.',
+        blurb: 'The last of it is not rock in any sense a geologist will sign ' +
+               'off on. Pressure locks of obsidian, vents that read a thousand ' +
+               'degrees, and a floor of starcore with the ancient rock still in ' +
+               'it — not scattered, not a rumour. In seams.',
+        /* GEOLOGICAL IDENTITY: EVERYTHING AT ONCE, AND THE ANCIENT ROCK IN PLACE.
+         * The finale, and the only three-rung chapter after Old Creek. It opens
+         * on OBSIDIAN LOCKS — 26% of the lottery is rock a drill under tier 3
+         * cannot touch and nothing can sell, so the entry rung is deliberately
+         * the stingiest-feeling rich level in the game — and ends on a floor
+         * that is 57% starcore with an ANCIENT MOTHERLODE under it. Ancient
+         * debris runs at the generator's ceiling on all three rungs; this is
+         * where the thing you have been finding four cells at a time since Old
+         * Creek turns out to have come from somewhere. */
+        levelPriceHolds: 1.0,
+        spawn: {
+          levels: [
+            { drift: { crystal: -1.0, platinum: -0.4, rare: 0.2, uranium: 0.9,
+                       starcore: 1.5 },
+              debrisRate: 0.075, debrisCells: 5, lodeUplift: 1.043 },
+            { drift: { platinum: -1.0, rare: -0.3, uranium: 0.6, starcore: 1.5 },
+              debrisRate: 0.082, debrisCells: 5, lodeUplift: 1.024 },
+            { drift: { platinum: -1.0, rare: -0.5, uranium: 0.3, starcore: 1.5 },
+              debrisRate: 0.082, debrisCells: 6, lodeUplift: 1.054 }
+          ]
+        },
         layers: [
-          { toDepth: 360, name: 'Rift Shoulder', fill: 'stone',
-            weights: { iron: 3, copper: 2, silver: 1 },
-            pocketRate: 0.80, cavernRate: 0.20, hardnessScale: 1.00, heat: 0.10 },
-          { toDepth: 1140, name: 'Basalt Column', fill: 'granite',
-            weights: { silver: 2, platinum: 1 },
-            pocketRate: 0.40, cavernRate: 0.10, hardnessScale: 1.15, heat: 0.35 },
-          { toDepth: 2100, name: 'Obsidian Locks', fill: 'granite',
-            weights: { obsidian: 6, platinum: 2, uranium: 1.5 },
-            pocketRate: 1.10, cavernRate: 0.12, hardnessScale: 1.20, heat: 0.60 },
-          { toDepth: 3000, name: 'Geothermal Vents', fill: 'stone',
-            weights: { uranium: 5, platinum: 4, rare: 2, starcore: 1 },
-            pocketRate: 2.00, cavernRate: 0.55, hardnessScale: 1.00, heat: 0.90 },
-          { toDepth: 3600, name: 'The Rift Floor', fill: 'granite',
-            weights: { starcore: 6, ancient: 4, rare: 4, uranium: 2,
-                       platinum: 2 },
-            pocketRate: 3.00, cavernRate: 0.60, hardnessScale: 1.10, heat: 1.00 }
+          { toDepth: 800, name: 'Obsidian Locks', fill: 'granite',
+            weights: { crystal: 1, platinum: 3.5, rare: 5, uranium: 8,
+                       starcore: 5, obsidian: 6 },
+            pocketRate: 1.10, cavernRate: 0.15, hardnessScale: 1.20, heat: 0.60,
+            lode: 'uranium', lodeRate: 0.030 },
+          { toDepth: 1600, name: 'Geothermal Vents', fill: 'stone',
+            weights: { platinum: 1.5, rare: 3, uranium: 8, starcore: 8.5 },
+            pocketRate: 2.00, cavernRate: 0.50, hardnessScale: 1.00, heat: 0.90,
+            lode: 'starcore', lodeRate: 0.032 },
+          /* THE FLOOR OF THE WORLD. The richest ore table in the game and the
+           * densest rock in it (pocketRate 3.00), with an ANCIENT MOTHERLODE on
+           * top of that. Nothing in the catalogue is allowed to beat this rung
+           * — it is the ceiling the whole ladder in design note 4g climbs to. */
+          { toDepth: 2400, name: 'The Rift Floor', fill: 'granite',
+            weights: { platinum: 0.8, rare: 2.5, uranium: 5.5, starcore: 14 },
+            pocketRate: 3.00, cavernRate: 0.60, hardnessScale: 1.10, heat: 1.00,
+            lode: 'ancient', lodeRate: 0.036 }
         ]
       }
     ];
