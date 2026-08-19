@@ -3156,6 +3156,14 @@ SM.adv = (function () {
      * level sign has. An LED board is a light source; light sources are exempt
      * from the dark. */
     if (SM.advterrain && SM.advterrain.renderLit) SM.advterrain.renderLit(ctx);
+    /* ...and LAST, the NOTICE — the card that says "upgrade the drill to mine
+     * silver" over the machine. Exempt from the dark for a stronger version of
+     * the same reason: the light pool leans FORWARD, so the ground behind the
+     * machine (the only clear place to put a card without covering it) is
+     * exactly where the lamps are not, and a message crushed to 40% black by
+     * the player's own headlight is a message that did not arrive. It is not a
+     * thing in the mine; it is the game talking. */
+    if (SM.effects && SM.effects.renderNotice) SM.effects.renderNotice(ctx);
   }
 
   /* =====================================================================

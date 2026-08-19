@@ -113,6 +113,13 @@ SM.advhud = (function () {
 
   var ALERT_GAP      = 1.2;    // seconds between banners of the same kind
 
+  /* THE REFUSAL WINDOW — see the `adv:damage` handler for what it is FOR.
+   * vehicle.js beats `drill:blocked` every 1.1 s for as long as the bit is
+   * pinned; this is that heartbeat plus enough slack to bridge one of them, so
+   * "a wall is refusing us right now" stays true for the whole grind and goes
+   * false shortly after the machine backs off. */
+  var REFUSE_HOLD    = 1.7;
+
   /* THE RIDE DIP. Black lands instantly and holds for RIDE_HOLD_MS with the
    * level's name on it, then fades off over RIDE_FADE_MS (the transition is in
    * the stylesheet; this number only has to agree with it). ~1 s in total: long
@@ -174,6 +181,17 @@ SM.advhud = (function () {
   var manifestRows = [];     // pooled row elements
   var manifestSig = '';
   var lodeHold = 0;          // seconds the banner keeps its motherlode dress
+
+  /* --- THE REFUSAL WINDOW ---------------------------------------------
+   * "Is a wall refusing the bit right now, and if so which one." Counts DOWN in
+   * update(); everything that reads it just asks `refuseHold > 0`. See the
+   * `adv:damage` handler. */
+  var refuseHold = 0;        // seconds of window left, 0 = no wall in the story
+  var refuseMat = -1;        // ...and what it is made of
+  var refuseSeal = false;    // ...and whether it is the level boundary
+  var refuseHard = 0;        // ...its hardness
+  var refuseCap = 0;         // ...against the bit that will not cut it
+  var refuseSaid = 99;       // seconds since the refusal message last went out
 
   var liftRows = [];         // pooled station rows
   var liftSig = '';
@@ -1615,6 +1633,96 @@ SM.advhud = (function () {
   }
 
   /* =====================================================================
+   * THE WALL THAT WILL NOT CUT — the notice, the banner, and the window
+   * ---------------------------------------------------------------------
+   * Three small functions and one countdown, so that the three places that talk
+   * about a refused wall (`drill:toohard`, `drill:blocked`, `adv:damage`) cannot
+   * drift apart on what it is called or what the numbers are. See the
+   * subscriptions in init() for WHY each one exists.
+   * ================================================================== */
+
+  /** Remember the wall in front of us and hold the window open. */
+  function noteRefusal(p) {
+    if (!p) return;
+    refuseHold = REFUSE_HOLD;
+    refuseMat = num(p.matIndex, -1);
+    refuseSeal = !!p.seal;
+    refuseHard = num(p.hardness, refuseHard);
+    refuseCap = num(p.cap, refuseCap);
+  }
+
+  /**
+   * THE CARD OVER THE MACHINE — the primary channel, and the owner's own ask.
+   *
+   * THREE LINES, AND THE ORDER IS THE POINT. The mineral is the HERO: biggest,
+   * in its own ink, because it is the noun the player has to carry to the
+   * workshop. Above it, the instruction, so the card reads top to bottom as one
+   * sentence — "UPGRADE THE DRILL TO MINE / SILVER". Below it, the evidence, so
+   * a player who wants to know WHY has it without the headline arguing with
+   * itself.
+   *
+   * COMPRESSED FOR A PHONE. 390 px of portrait is 462 world units of visible
+   * map, and the card has to hold three lines inside 88% of that; effects.js
+   * scales the whole thing down to fit, so the copy's job is simply to not be
+   * long enough to make that scale silly. "UPGRADE THE DRILL TO MINE" fits at
+   * full size; a mineral name never runs past "ANCIENT DEBRIS".
+   *
+   * THE SEAL GETS ITS OWN WORDS AND NEVER AN UPGRADE PITCH. No drill in the shop
+   * cuts the level boundary — the lift is the only way through — so selling one
+   * here would be selling something that does not exist. (x, y) is the contact
+   * point, and only a fallback: effects.js pins the card to the machine.
+   */
+  function refuseNotice(x, y) {
+    if (!SM.effects || !SM.effects.notice) return;
+    var d = displayOf(refuseMat, null);
+    var name = (d.name || 'THIS ROCK').toUpperCase();
+    refuseSaid = 0;
+
+    if (refuseSeal) {
+      SM.effects.notice(x, y, 'THE LEVEL ENDS HERE', name,
+                        'NO DRILL CUTS IT · TAKE THE LIFT DOWN', -1);
+      return;
+    }
+    SM.effects.notice(x, y, 'UPGRADE THE DRILL TO MINE', name,
+                      'HARDNESS ' + refuseHard.toFixed(1)
+                      + ' · THIS BIT CUTS ' + refuseCap.toFixed(1), refuseMat);
+  }
+
+  /**
+   * THE BANNER — the secondary line, and the only channel that names the shop.
+   *
+   * `rammed` is the re-contact case: the card is deliberately silent (vehicle.js
+   * will not repeat itself for the same material inside its quiet period) but the
+   * hull just took a crunch, so this is the one place that gets to say so. It
+   * names the wall in the same breath, which is the whole difference between
+   * "grinding this dents the hull" and the bare "HULL DAMAGE / RAM" that started
+   * all this.
+   */
+  function refuseBanner(rammed) {
+    var d = displayOf(refuseMat, null);
+    var name = (d.name || 'THIS ROCK').toUpperCase();
+    refuseSaid = 0;
+
+    if (refuseSeal) {
+      alertKind('seal', name + ' — THE LEVEL ENDS HERE',
+                'The lift is the only way between levels', 2.6);
+      return;
+    }
+    /* The sub carries the two numbers because "too hard" on its own is a verdict
+     * and these are the evidence — and because they are what the workshop's
+     * drill card is quoting when the player gets there. Kept short enough to
+     * hold ONE line on a phone; see the compact banner rule in
+     * style-adventure.css for the width it has to live inside. */
+    alertKind('toohard', name + ' — TOO HARD FOR THIS DRILL',
+              rammed
+                ? 'Ramming it dents the hull · upgrade in the workshop'
+                : 'Hardness ' + refuseHard.toFixed(1)
+                  + ' · bit cuts ' + refuseCap.toFixed(1)
+                  + ' · upgrade in the workshop',
+              2.8);
+  }
+
+  /* =====================================================================
    * LIFECYCLE
    * ================================================================== */
   function init() {
@@ -1635,8 +1743,56 @@ SM.advhud = (function () {
         var pct = Math.round(num(p && p.pct, 0) * 100);
         alertKind('fuel', 'FUEL LOW', pct + '% left  ·  check the reserve mark', 2.8);
       });
+      /* --- HULL DAMAGE, AND WHY IT USED TO EAT THE STORY ------------------
+       * MEASURED, and it is an ORDERING bug rather than a wording one. Inside
+       * ONE simulation step, vehicle.js does this:
+       *
+       *   section 3   advStallFeedback() -> `drill:toohard` -> this HUD writes
+       *               "SILVER — TOO HARD FOR THIS DRILL" into the banner
+       *   section 4   the motion solve reaches the wall it cannot pass and
+       *               charges SM.adv.damage(ADV_RAM_WEAR * .., 'ram') for the
+       *               crunch -> `adv:damage` -> this handler OVERWROTE the
+       *               banner with "HULL DAMAGE / RAM", 0.1 ms later
+       *
+       * There is one banner element, so the second write simply won. A player
+       * driving into silver at speed never saw the first one AT ALL — not
+       * briefly, not once — and came away being told the machine was taking
+       * damage from nowhere. That is the owner's report, verbatim: "otherwise
+       * it just says hull damage and its unclear whats going on."
+       *
+       * THE MECHANIC IS NOT THE BUG AND IT STAYS. The hull cost of a refused
+       * wall is one IMPACT, on the step contact is made and only above a real
+       * closing speed (vehicle.js's ADV_RAM_SPEED / ADV_RAM_WEAR note is
+       * explicit that continuous wear was tried and removed). Ramming a wall
+       * dents you; leaning on it costs fuel and heat, which are recoverable.
+       * That is honest and it is already legible without words — the crunch,
+       * the shake and the hull gauge all report it.
+       *
+       * SO THE FIX IS PRECEDENCE. While a wall is refusing the bit (see
+       * `refuseHold`), the WALL owns the narrative and a generic damage caption
+       * is not allowed to displace it:
+       *
+       *   just said it   the notice and the banner are already up and correct.
+       *                  Say nothing; the hull gauge does the reporting.
+       *   said it lately re-contact inside the per-material quiet period, so
+       *                  vehicle.js is deliberately silent. Name the WALL, not
+       *                  the mystery — "HULL DAMAGE / RAM" with no antecedent is
+       *                  exactly the confusion being fixed.
+       *   anything else  the ordinary banner. A cave-in or an overheat while a
+       *                  wall happens to be nearby is still its own news.
+       * ------------------------------------------------------------------ */
       SM.events.on('adv:damage', function (p) {
-        alertKind('dmg', 'HULL DAMAGE', String((p && p.source) || 'impact').toUpperCase(), 1.8);
+        var src = String((p && p.source) || 'impact');
+        // buyRepair() reports itself down the same event. It is the opposite of
+        // damage and it must never raise a damage banner.
+        if (src === 'repair') return;
+
+        if (refuseHold > 0 && src === 'ram') {
+          if (refuseSaid < ALERT_GAP * 2) return;      // the message is already up
+          refuseBanner(true);
+          return;
+        }
+        alertKind('dmg', 'HULL DAMAGE', src.toUpperCase(), 1.8);
       });
       SM.events.on('adv:heat', function (p) {
         if (num(p && p.pct, 0) < 0.9) return;
@@ -1647,21 +1803,34 @@ SM.advhud = (function () {
         alertKind('layer', String(p.name).toUpperCase(),
                   Math.round(num(p.depthM, 0)) + ' m  ·  new stratum', 2.2);
       });
-      /* --- "TOO HARD FOR THIS DRILL" -------------------------------------
-       * The one thing in the mine that a player cannot work out by looking at
-       * it. Sparks and a dead stop say "something is wrong"; only a caption can
-       * say WHICH rock, WHY, and that there is a fix and where it is sold.
+      /* --- THE WALL THAT WILL NOT CUT ------------------------------------
+       * The one thing in the mine a player cannot work out by looking at it.
+       * Sparks and a dead stop say "something is wrong"; only words can say
+       * WHICH rock, WHY, and that there is a fix and where it is sold.
        *
-       * IT IS A BANNER AND NOT A PANEL, deliberately. The machine is still
-       * driveable — the correct response is usually to steer around the thing —
-       * so anything modal would be taking the wheel away to tell the player they
-       * still have it. This is the same short amber banner as a low tank.
+       * IT IS A CARD OVER THE MACHINE FIRST, AND A BANNER SECOND. It used to be
+       * the banner alone, in the top-left instrument stack — and the owner,
+       * playing it, was watching the machine, three hundred pixels away and on
+       * the other side of the screen. Told to fix it in his words: "we literally
+       * need a pop up warning right over the machine, that states you need to
+       * upgrade your drill to mine <mineral>".
+       *
+       * So `SM.effects.notice()` puts the sentence in the WORLD, over the rig,
+       * where the player's eyes already are, and the banner stays on as the
+       * secondary line — it is the only channel that names the WORKSHOP, and it
+       * holds the two hardness numbers the drill card will quote when the player
+       * gets there. Two channels, one story.
+       *
+       * IT IS STILL NOT A PANEL. The machine is driveable throughout — the
+       * correct response is usually to steer round the thing — so anything modal
+       * would be taking the wheel away to say the player still has it.
        *
        * THE RATE LIMIT IS THE EMITTER'S, NOT OURS. vehicle.js fires
        * `drill:toohard` once per contact episode and never twice for the same
        * material inside its quiet period (see ADV_TOOHARD_SAY there), so the
-       * banner, the clank and the bounce sparks cannot disagree about how often
-       * the game mentions this. alertKind()'s own 1.2 s floor stays as a net.
+       * card, the banner, the clank and the bounce sparks cannot disagree about
+       * how often the game mentions this. alertKind()'s 1.2 s floor stays as a
+       * net under the banner half.
        *
        * Building strings here is fine and would not be in a hot handler: this
        * fires on the order of once every several seconds at worst, against
@@ -1673,23 +1842,18 @@ SM.advhud = (function () {
        * selling them something that does not exist. vehicle.js flags which. */
       SM.events.on('drill:toohard', function (p) {
         if (!p) return;
-        var d = displayOf(p.matIndex, null);
-        var name = (d.name || 'THIS ROCK').toUpperCase();
-        if (p.seal) {
-          alertKind('seal', name + ' — THE LEVEL ENDS HERE',
-                    'The lift is the only way between levels', 2.6);
-          return;
-        }
-        var h = num(p.hardness, 0), cap = num(p.cap, 0);
-        /* The sub carries the two numbers because "too hard" on its own is a
-         * verdict and these are the evidence — and because they are what the
-         * workshop's drill card is quoting when the player gets there. Kept
-         * short enough to hold ONE line on a phone; see the compact banner rule
-         * in style-adventure.css for the width it has to live inside. */
-        alertKind('toohard', name + ' — TOO HARD FOR THIS DRILL',
-                  'Hardness ' + h.toFixed(1) + ' · bit cuts ' + cap.toFixed(1)
-                  + ' · upgrade in the workshop', 2.8);
+        noteRefusal(p);
+        refuseNotice(num(p.x, 0), num(p.y, 0));
+        refuseBanner(false);
       });
+      /* THE HEARTBEAT, and it is subscribed for ONE reason: it is the only event
+       * that says "a wall is refusing the bit RIGHT NOW". `drill:toohard` says
+       * "and it is worth mentioning", which is a rarer thing and deliberately
+       * silent on a re-contact. The damage handler needs the former. It also
+       * lands BEFORE the ram charge inside the same step — vehicle.js emits it
+       * from advStallFeedback() in section 3 and charges the crunch in section 4
+       * — which is exactly what makes the precedence rule work. */
+      SM.events.on('drill:blocked', noteRefusal);
       /* NO SCANNER BANNERS. `scan:contact` and `mine:lode` used to raise the
        * alert banner, and between them they fired often enough to sit over the
        * hold more or less permanently in ore-rich ground — so the instrument was
@@ -1813,6 +1977,14 @@ SM.advhud = (function () {
     dumpArmed = -1;
     dumpTimer = 0;
     slowTimer = 0;
+    /* THE REFUSAL WINDOW DIES WITH THE RUN. It is only ever opened by a wall in
+     * a mine, and update() — which is what closes it again — does not run behind
+     * the workshop or the map, so leaving it open here would carry one descent's
+     * wall into the next one's first hull hit. */
+    refuseHold = 0;
+    refuseMat = -1;
+    refuseSeal = false;
+    refuseSaid = 99;
     if (els.alert) els.alert.classList.remove('sm-ah-alert-on');
     // A fresh descent starts with the drawer shut over a clear view of the
     // shaft. paintDrawer() runs AFTER last = {} above, so the write lands.
@@ -1854,6 +2026,10 @@ SM.advhud = (function () {
       if (lodeHold <= 0) setClass('lode', els.alert, 'sm-ah-alert-lode', false);
     }
     for (var k in alertClock) if (alertClock.hasOwnProperty(k)) alertClock[k] += dt;
+    // The refusal window: opened by every `drill:blocked` heartbeat, closed by
+    // REFUSE_HOLD seconds of not touching the wall. See the `adv:damage` handler.
+    if (refuseHold > 0) refuseHold -= dt;
+    if (refuseSaid < 99) refuseSaid += dt;
     if (dumpArmed >= 0) {
       dumpTimer -= dt;
       if (dumpTimer <= 0) { dumpArmed = -1; paintDumpArm(); }

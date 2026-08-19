@@ -16,6 +16,8 @@
  *   smoke               exhaust plume behind the machine
  *   text popups         floating "+value", ONE COMBO PER MATERIAL, in that
  *                       material's own colour (see the combo buckets below)
+ *   the notice          a MESSAGE over the machine — one at a time, three
+ *                       lines, drawn above the darkness. See THE NOTICE below
  *   overlays            screen flash (world-space rect)
  *   the headlight       the darkness composite; see the section at the bottom
  *
@@ -40,8 +42,11 @@
  * Additions (safe to call from anywhere)
  *   SM.effects.chips / smoke / glint / streak / shock / popup / burst
  *   SM.effects.refuse(x,y,matIndex,normX,normY,big)   the bit BOUNCING OFF
+ *   SM.effects.notice(x,y,top,main,sub,matIndex)      the MESSAGE over the rig
+ *   SM.effects.clearNotice() / noticeUp()
  *   SM.effects.screenFlash(strength,r,g,b)
  *   SM.effects.renderDarkness(ctx)   -- called ONLY from SM.adv.renderWorld()
+ *   SM.effects.renderNotice(ctx)     -- ditto, and AFTER renderDarkness()
  * ========================================================================== */
 
 var SM = SM || {};
@@ -105,6 +110,56 @@ SM.effects = (function () {
 
   var COLLECT_POP_CHANCE = 0.34;
   var COLLECT_STREAK_CHANCE = 0.20;
+
+  /* =====================================================================
+   * THE NOTICE — a MESSAGE, in the world, over the machine
+   * ---------------------------------------------------------------------
+   * A value popup is a SCORE: small, plural, thrown out to the flank, gone in a
+   * second. A notice is a SENTENCE the player has to be able to read and act on,
+   * and the two want opposite things — so it is not a bigger popup, it is its
+   * own thing with its own rules.
+   *
+   * WHY IT IS NOT IN THE POOL. There is at most ONE of these on screen ever (the
+   * only caller is `drill:toohard`, which vehicle.js already rate-limits to one
+   * per contact episode), it lives ~3 s where a popup lives 1 s, and it has to
+   * come out on top rather than take its chances with 500 sparks. One record of
+   * plain scalars is smaller, cannot be evicted by a busy step, and costs one
+   * compare per frame when nothing is being said. A second notice REPLACES the
+   * first — the newest thing the mine is refusing is the one that matters.
+   *
+   * WHY IT IS DRAWN ABOVE THE DARKNESS. SM.adv.renderWorld() calls
+   * renderNotice() after renderDarkness(), next to advterrain's LED level
+   * boards, and for a stronger version of the same reason: the light pool leans
+   * FORWARD, so the ground behind the machine — the one clear place to put a
+   * card without covering the machine — is exactly where the lamps are not. A
+   * message crushed to 40% black by the player's own headlight is a message that
+   * did not arrive. It is not a thing IN the mine; it is the game talking.
+   *
+   * WHY IT FOLLOWS THE MACHINE. A refused wall is a wall you slither sideways
+   * along looking for a way round. A card left at the contact point would be
+   * behind you by the time you read it, so the anchor is re-read from
+   * SM.vehicle every frame and only the float is animated.
+   * ------------------------------------------------------------------ */
+  var NOTICE_LIFE    = 2.90;  // seconds — long enough to read twice
+  var NOTICE_IN      = 0.18;  // pop-in
+  var NOTICE_OUT     = 0.45;  // fade-out at the tail
+  var NOTICE_RISE    = 14;    // world units/s of gentle float (a popup does 66)
+  var NOTICE_CLEAR   = 150;   // world units above the machine centre = card foot
+  var NOTICE_MAIN    = 44;    // the hero line (the mineral), world units of type
+  var NOTICE_TOP     = 21;    // the instruction
+  var NOTICE_SUB     = 15;    // the evidence
+  var NOTICE_LEAD    = 1.34;  // line height as a multiple of its own size
+  var NOTICE_PAD_X   = 26;
+  var NOTICE_PAD_Y   = 15;
+  /* FIT TO THE VIEW, NOT TO A GUESS. The visible world width is 1600 units on a
+   * 1280 desktop and 462 on a 390 phone — nearly 3.5x — so a fixed type size is
+   * either tiny on one or off the edges of the other. Measured against the live
+   * view every frame and scaled down (never up) to fit. */
+  var NOTICE_FIT     = 0.88;
+  // While a notice is up, value popups are pushed clear of its band rather than
+  // suppressed: ore in flight still pays out, it just does not land on the
+  // sentence. Comfortably more than the tallest card.
+  var NOTICE_PUSH    = 104;
 
   var EXHAUST_RATE     = 15;    // puffs/s at full speed
   var GRIND_SPARK_RATE = 52;    // sparks/s at full cutter resistance
@@ -195,9 +250,17 @@ SM.effects = (function () {
   var flashAmt = 0;           // screen flash 0..1
   var flashR = 255, flashG = 255, flashB = 255;
 
+  /* --- the notice (see the tunables note) — one record, no pool --------- */
+  var ntLife = 0;             // > 0 == a notice is up
+  var ntMax = NOTICE_LIFE;
+  var ntTop = '', ntMain = '', ntSub = '';
+  var ntR = 255, ntG = 208, ntB = 96;     // the accent, i.e. the hero line
+  var ntX = 0, ntY = 0;                   // fallback anchor if there is no rig
+
   var subscribed = false;
 
   var fontCache = [];         // [px] -> "900 NNpx ..." string
+  var fontCache7 = [];        // ...and the 700 weight the notice's small lines use
 
   /* =====================================================================
    * POOL — O(1) alloc / release via swap-remove
@@ -628,6 +691,20 @@ SM.effects = (function () {
     return s;
   }
 
+  /** The same cache one weight down. 900 is right for a number thrown across a
+   *  cavern and too clotted for a line of small caps you are asked to READ. */
+  function fontMid(px) {
+    var k = px | 0;
+    if (k < 6) k = 6;
+    if (k > 90) k = 90;
+    var s = fontCache7[k];
+    if (!s) {
+      s = '700 ' + k + 'px ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif';
+      fontCache7[k] = s;
+    }
+    return s;
+  }
+
   function popup(x, y, text, size, r, g, b) {
     var i = allocForced();     // popups are already merged; never drop them
     if (i < 0) return;
@@ -642,6 +719,47 @@ SM.effects = (function () {
     fText[i] = text;
     fR[i] = r; fG[i] = g; fB[i] = b;
   }
+
+  /**
+   * RAISE THE NOTICE. See the tunables note for what this is and is not.
+   *
+   *   x, y      fallback anchor, used only if there is no machine to sit over
+   *   top       the instruction, small caps above the hero  (may be '')
+   *   main      the hero line — a NOUN, in that material's own ink
+   *   sub       the evidence, smaller and dimmer still      (may be '')
+   *   matIndex  whose colour the hero is; < 0 or unknown falls back to amber
+   *
+   * COLD PATH by construction: the only caller is a HUD handler hanging off
+   * `drill:toohard`, which fires at most once every few seconds. Strings arrive
+   * already built; nothing here is measured, laid out or allocated until the
+   * frame that draws it.
+   *
+   * The ink is `popR/popG/popB` — the SAME legible per-material colour a value
+   * popup uses — on purpose. The colour that says SILVER when the seam pays you
+   * is the colour that says SILVER when it refuses you.
+   */
+  function notice(x, y, top, main, sub, matIndex) {
+    ntX = x; ntY = y;
+    ntTop = top ? String(top) : '';
+    ntMain = main ? String(main) : '';
+    ntSub = sub ? String(sub) : '';
+    if (typeof matIndex === 'number' && matIndex >= 0 && matIndex < matCount && popR) {
+      ntR = popR[matIndex]; ntG = popG[matIndex]; ntB = popB[matIndex];
+    } else {
+      ntR = 255; ntG = 208; ntB = 96;          // the HUD's own warning amber
+    }
+    ntMax = NOTICE_LIFE;
+    ntLife = NOTICE_LIFE;
+  }
+
+  function clearNotice() {
+    ntLife = 0;
+    ntTop = ntMain = ntSub = '';
+  }
+
+  /** True while a notice is on screen. Used by the combo popups to get out of
+   *  its way, and exported so a caller can tell whether its message landed. */
+  function noticeUp() { return ntLife > 0; }
 
   /**
    * Glowing burst + shockwave — rare/crystal destruction, pulses, fireworks.
@@ -883,6 +1001,11 @@ SM.effects = (function () {
     // Stagger the height by bucket so two materials flushing on the same step
     // never render exactly on top of each other.
     var dy = -10 + ((bucket * 37) % 60) - 30;
+    /* ...and get out of the NOTICE's way while one is up. Pushed DOWN rather
+     * than suppressed: a payout the player earned should still pay out visibly,
+     * it just must not float up through the sentence telling them why the wall
+     * in front of them will not cut. See NOTICE_PUSH. */
+    if (ntLife > 0) dy += NOTICE_PUSH;
     popup(px, vy + dy, '+' + v, size, r, g, bl);
 
     // A really big seam gets a matching flare in its own colour.
@@ -927,6 +1050,7 @@ SM.effects = (function () {
     }
     cbOpen = 0;
     flashAmt = 0;
+    clearNotice();
   }
 
   function update(dt) {
@@ -939,6 +1063,11 @@ SM.effects = (function () {
     }
     if (ringCd > 0) ringCd -= dt;
     if (glintCd > 0) glintCd -= dt;
+    if (ntLife > 0) {
+      ntLife -= dt;
+      // Drop the strings on expiry so a dead notice holds no references.
+      if (ntLife <= 0) clearNotice();
+    }
 
     /* --- integrate the pool ------------------------------------------ */
     var k = 0;
@@ -1154,6 +1283,152 @@ SM.effects = (function () {
   }
 
   /* =====================================================================
+   * RENDER — THE NOTICE
+   * ---------------------------------------------------------------------
+   * Called from SM.adv.renderWorld() AFTER renderDarkness(), inside the same
+   * world transform. World space, so it sits over the machine wherever the
+   * machine is, and above the dark, so the lamps cannot swallow it. Costs one
+   * early-out per frame when nothing is being said.
+   *
+   * ROUNDED RECT BY HAND rather than ctx.roundRect(), matching advterrain.js:
+   * one less canvas API to depend on.
+   * ================================================================== */
+  function roundRectPath(ctx, x, y, w, h, r) {
+    if (r > w * 0.5) r = w * 0.5;
+    if (r > h * 0.5) r = h * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  /** One line of the card: measure at `size` and return its width. */
+  function noticeMeasure(ctx, text, size, heavy) {
+    if (!text) return 0;
+    ctx.font = heavy ? fontFor(size) : fontMid(size);
+    return ctx.measureText(text).width;
+  }
+
+  function renderNotice(ctx) {
+    if (ntLife <= 0 || !ctx) return;
+
+    var age = ntMax - ntLife;
+
+    /* --- SCALE: pop in, then FIT the view -----------------------------
+     * Two independent multipliers. The pop is the arrival (easeOutBack, the
+     * same shape the value popups use, so the two read as one family). The fit
+     * is the device, and it only ever shrinks — desktop framing is untouched
+     * and a phone gets a card that fits its 462 units of visible world instead
+     * of one running off both edges. */
+    var pop = 1;
+    if (age < NOTICE_IN) {
+      var ph = age / NOTICE_IN;
+      pop = 0.55 + ph * ph * (2.05 - 1.05 * ph);
+    }
+    var fade = ntLife < NOTICE_OUT ? ntLife / NOTICE_OUT : 1;
+
+    // Measure at nominal size first; the fit is a pure ratio off that.
+    var wTop = noticeMeasure(ctx, ntTop, NOTICE_TOP, false);
+    var wMain = noticeMeasure(ctx, ntMain, NOTICE_MAIN, true);
+    var wSub = noticeMeasure(ctx, ntSub, NOTICE_SUB, false);
+    var wMax = wTop > wMain ? wTop : wMain;
+    if (wSub > wMax) wMax = wSub;
+    if (wMax <= 0) return;
+
+    var b = SM.camera.getViewBounds();
+    var viewW = b.maxX - b.minX;
+    var fit = (viewW * NOTICE_FIT) / (wMax + NOTICE_PAD_X * 2);
+    if (fit > 1) fit = 1;
+
+    var k = pop * fit;
+    var sTop = NOTICE_TOP * k, sMain = NOTICE_MAIN * k, sSub = NOTICE_SUB * k;
+    var hTop = ntTop ? sTop * NOTICE_LEAD : 0;
+    var hMain = ntMain ? sMain * NOTICE_LEAD : 0;
+    var hSub = ntSub ? sSub * NOTICE_LEAD : 0;
+    var hAll = hTop + hMain + hSub;
+    var wAll = wMax * k;
+
+    /* --- WHERE: over the machine, floating gently --------------------- */
+    var ax = ntX, ay = ntY;
+    if (SM.vehicle && SM.vehicle.getX) { ax = SM.vehicle.getX(); ay = SM.vehicle.getY(); }
+    if (!(ax === ax) || !(ay === ay)) { ax = ntX; ay = ntY; }
+    // NOTICE_CLEAR is the foot of the card; the float lifts it from there.
+    var foot = ay - NOTICE_CLEAR - age * NOTICE_RISE;
+
+    var padX = NOTICE_PAD_X * k, padY = NOTICE_PAD_Y * k;
+    var plateW = wAll + padX * 2;
+    var plateH = hAll + padY * 2;
+    var plateX = ax - plateW * 0.5;
+    var plateY = foot - plateH;
+
+    /* KEEP IT ON SCREEN. The camera leads the machine, so driving hard into a
+     * wall can carry the card off the top edge on the very frame it is raised —
+     * which is the one frame it exists for. Clamped into the view, and the text
+     * follows the plate rather than the anchor so the two never come apart. */
+    var m = 10;
+    if (plateX < b.minX + m) plateX = b.minX + m;
+    if (plateX + plateW > b.maxX - m) plateX = b.maxX - m - plateW;
+    if (plateY < b.minY + m) plateY = b.minY + m;
+    if (plateY + plateH > b.maxY - m) plateY = b.maxY - m - plateH;
+
+    var cx = plateX + plateW * 0.5;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = fade;
+
+    /* --- the plate ---------------------------------------------------- */
+    roundRectPath(ctx, plateX, plateY, plateW, plateH, 12 * k);
+    ctx.fillStyle = 'rgba(8,10,14,0.86)';
+    ctx.fill();
+    ctx.lineWidth = 2.2 * k;
+    ctx.strokeStyle = 'rgba(' + ntR + ',' + ntG + ',' + ntB + ',0.75)';
+    ctx.stroke();
+
+    /* --- the three lines ---------------------------------------------- */
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    var y = plateY + padY;
+
+    if (ntTop) {
+      ctx.font = fontMid(sTop);
+      ctx.fillStyle = 'rgba(255,242,220,0.94)';
+      ctx.fillText(ntTop, cx, y + hTop * 0.5);
+      y += hTop;
+    }
+    if (ntMain) {
+      ctx.font = fontFor(sMain);
+      ctx.lineWidth = sMain * 0.14;
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.strokeText(ntMain, cx, y + hMain * 0.5);
+      ctx.fillStyle = 'rgb(' + ntR + ',' + ntG + ',' + ntB + ')';
+      ctx.fillText(ntMain, cx, y + hMain * 0.5);
+      y += hMain;
+    }
+    if (ntSub) {
+      ctx.font = fontMid(sSub);
+      ctx.fillStyle = 'rgba(196,206,220,0.86)';
+      ctx.fillText(ntSub, cx, y + hSub * 0.5);
+    }
+
+    // Leave the context as advterrain.js expects to find it — it draws strata
+    // labels and the lift's level boards with the default alignment.
+    ctx.lineJoin = 'miter';
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  /* =====================================================================
    * THE HEADLIGHT — the darkness composite
    * ---------------------------------------------------------------------
    * Called ONLY from SM.adv.renderWorld(), which main.js runs last inside the
@@ -1279,9 +1554,19 @@ SM.effects = (function () {
     burst: burst,
     screenFlash: screenFlash,
 
+    /* --- THE NOTICE ----------------------------------------------------
+     * A message over the machine. One at a time; a second replaces the first.
+     * See the tunables note for why it is not a bigger popup. */
+    notice: notice,
+    clearNotice: clearNotice,
+    noticeUp: noticeUp,
+
     /* --- THE HEADLIGHT -------------------------------------------------
      * Called by SM.adv.renderWorld() only, and it MUST be last inside the
-     * world transform — see the section header above. */
-    renderDarkness: renderDarkness
+     * world transform — see the section header above. renderNotice() goes
+     * AFTER it, with advterrain's LED boards: the game talking to the player is
+     * not something the player's own lamps get to dim. */
+    renderDarkness: renderDarkness,
+    renderNotice: renderNotice
   };
 })();
