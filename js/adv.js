@@ -13,9 +13,11 @@
  * ---------------------------------------------------------------------------
  * THE STATE MACHINE
  *
- *   off  --open()-->  slots  --startCompany()-->  map
- *                                                 |  ^
- *                              openGarage() ------+  |
+ *   off  --open()-->  slots  --startCompany()-->  PREP   <- A NEW COMPANY LANDS
+ *                                                 |         ON PREPARE DESCENT
+ *                                    map  <-------+  ...and only ever reaches the
+ *                                     |  ^           MAP once it has EARNED it —
+ *                              openGarage() ------+  see THE MAP IS EARNED below
  *                                     garage ---------+
  *                                                 |
  *                              selectMine() ------+
@@ -25,7 +27,8 @@
  *                                       |    ^ rideTo(L) hops between level maps
  *                                       |    | sellAtDoor()/refuelAtDoor() stay
  *                                       |      in the mine: the door IS the shop
- *                                       +-- leaveToMap() ------------> map
+ *                                       +-- leaveToMap() ---> map — or back to
+ *                                           PREP while the map is still locked
  *
  *   Inside MINE there is a second, smaller machine — the LIFT. It has three
  *   states and the two moves between them are ANIMATED, about a second each:
@@ -115,6 +118,14 @@
  *                                                one-time instruction box is
  *                                                waiting in getUnlockNotice().
  *                                                Fires ONCE per rung, ever
+ *   map:unlocked  {mineId, levels}            <- THE FIELD OPENED: the company
+ *                                                now holds MAP_LEVELS_TO_OPEN
+ *                                                levels in the starter mine, so
+ *                                                the world map and every route
+ *                                                to it exist from here on. The
+ *                                                one-time notice is waiting in
+ *                                                getMapNotice(). Fires ONCE per
+ *                                                company, ever
  *   lift:docking  {level, reason}             <- the doorway CAUGHT the machine.
  *                                                Control is gone; it is driving
  *                                                itself in and is still visible
@@ -1005,6 +1016,153 @@ SM.adv = (function () {
     return true;
   }
 
+  /* =====================================================================
+   * THE MAP IS EARNED — THE FIELD OPENS WHEN THE STARTER MINE IS FINISHED
+   * ---------------------------------------------------------------------
+   * OWNER'S RULE: "when you start a new game I do not want to start at the map —
+   * I would like to start at PREPARE DESCENT — and I would like for the map to be
+   * available only after you have unlocked at least 3 levels in the starter mine."
+   *
+   * SO A NEW COMPANY HAS ONE PLACE AND ONE DECISION. It signs the papers and is
+   * standing at Old Creek's lift with a tank to fill and a level to descend to.
+   * The world map is a screen about CHOOSING BETWEEN mines, and a company that
+   * owns exactly one mine has nothing to choose — showing it first asked a
+   * question with one answer and made the first tap navigation instead of work.
+   * PREPARE DESCENT is the home between runs until there is a second place to go.
+   *
+   * IT IS DERIVED, NOT STORED, and that is the whole design of it:
+   *
+   *     mapUnlocked  <=>  ownedLevels(starter) >= MAP_LEVELS_TO_OPEN
+   *                  OR   rights are held in any mine that had to be BOUGHT
+   *
+   * A new flag would be a third thing that can disagree with the two facts it is
+   * derived from, and it would need its own migration for every save already on
+   * disk. Ownership is already persisted, already validated by js/save.js and
+   * already the thing the player earned, so the answer is simply read off it —
+   * which means an existing company is correct the moment it loads, with no
+   * migration at all. THE SECOND CLAUSE IS WHAT KEEPS OLD SAVES SANE: a company
+   * that bought Red Ridge and never finished Old Creek is plainly past the
+   * tutorial and must not have the map taken away from it.
+   *
+   * WHY THREE. Level 1 comes with the rights and Old Creek sells exactly two more
+   * (design note 4f in js/mines.js: $1 700 and $3 800, three full hauls each), so
+   * three levels is "you have bought everything this mine has to sell" — the
+   * moment the starter mine genuinely has nothing left to offer is the moment
+   * looking elsewhere becomes the right move. It also lands the player on the far
+   * side of the progression gate twice, so they have met the lift, the hauls
+   * counter and a purchase before the map ever appears.
+   *
+   * EVERY ROUTE TO THE MAP ASKS THIS ONE QUESTION. openMap() refuses while it is
+   * false — enforced, not merely undrawn, exactly as the progression gate is — and
+   * the verbs that USED to name the map (backToMap(), leaveToMap()) keep their
+   * semantics and change only their DESTINATION: the prep screen, which is where
+   * a company with one mine belongs. js/advui.js and js/advhud.js ask
+   * isMapUnlocked() to decide whether to draw a map route at all, so a locked map
+   * is invisible rather than dead.
+   *
+   * THE NOTICE IS ONE-TIME BY CONSTRUCTION. `mapTaught` is set from this same
+   * derived answer at startCompany() — so a company that ALREADY qualifies when
+   * it loads is marked taught and is never nagged — and checkMapUnlock() can
+   * therefore only ever fire on the transition, inside the session that caused
+   * it. The fact that persists is the LEVEL PURCHASE, which buyLevel() has
+   * written and flushed before the notice is armed; a reload re-derives "already
+   * open" and the box can never come back. No new save field, no re-nag.
+   * ================================================================== */
+
+  /** Levels the STARTER mine must be holding before the field opens. */
+  var MAP_LEVELS_TO_OPEN = 3;
+
+  /* "The player has already been told." Derived at startCompany(), set the
+   * moment the transition is caught. Deliberately NOT saved — see the note. */
+  var mapTaught = false;
+  /* The notice no screen has shown yet. Cleared by whichever one shows it. */
+  var mapNotice = false;
+  var evMapOpen = { mineId: '', levels: 0 };
+
+  /**
+   * IS THE WORLD MAP AVAILABLE TO THIS COMPANY? The one question every map route
+   * asks, and the only place the rule lives.
+   *
+   * Cheap enough to call from a painter: one ownership read, plus one pass over a
+   * catalogue of seven mines in the case where the starter is not finished.
+   */
+  function isMapUnlocked() {
+    var starter = firstMineId();
+    /* THE THRESHOLD IS "THREE, OR EVERYTHING THIS MINE HAS", WHICHEVER COMES
+     * FIRST — and that second half is not decoration, it is the deadlock guard.
+     * Old Creek sells exactly three levels so the two are the same number today;
+     * a starter mine with two would otherwise lock the map behind a rung that
+     * does not exist, and the only other way out is buying a second mine's
+     * rights ON the map. A catalogue that cannot answer at all (a stub build,
+     * where levelCount is 0) leaves the door open rather than shut: there is
+     * nothing to earn, so there is nothing to withhold. */
+    var have = starter ? levelCount(starter) : 0;
+    if (!(have > 0)) return true;
+    var need = have < MAP_LEVELS_TO_OPEN ? have : MAP_LEVELS_TO_OPEN;
+    if (ownedLevels(starter) >= need) return true;
+
+    /* ...OR THE COMPANY HAS BOUGHT ITSELF A SECOND PLACE TO DIG. `price > 0` is
+     * what "bought" means: every free mine is held by definition (startCompany()
+     * grants anything that costs nothing), so testing ownership alone would
+     * unlock the map for every company ever created. */
+    var all = (SM.mines && SM.mines.getAll) ? SM.mines.getAll() : null;
+    if (all && all.length) {
+      for (var i = 0; i < all.length; i++) {
+        var m = all[i];
+        if (!m || m.id === starter) continue;
+        if (m.price > 0 && ownsRights(m.id)) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * WHERE A COMPANY LIVES BETWEEN RUNS. The map once it is earned, the prep
+   * screen until then. backToMap() and leaveToMap() both land here.
+   */
+  function homeState() { return isMapUnlocked() ? 'map' : 'prep'; }
+
+  /**
+   * Test the transition and, if it has just happened, ARM THE NOTICE.
+   *
+   * Called from the two verbs that can move either half of the rule — buyLevel()
+   * and buyRights(). Idempotent: `mapTaught` is set BEFORE the notice is armed
+   * and is true from load for any company that already qualifies, so this fires
+   * at most once per company, ever.
+   */
+  function checkMapUnlock() {
+    if (state === 'off') return false;
+    if (mapTaught) return false;
+    if (!isMapUnlocked()) return false;
+    mapTaught = true;
+    mapNotice = true;
+    var starter = firstMineId();
+    evMapOpen.mineId = starter || '';
+    evMapOpen.levels = starter ? ownedLevels(starter) : 0;
+    SM.events.emit('map:unlocked', evMapOpen);
+    return true;
+  }
+
+  /**
+   * The one-time "the field is open" notice waiting to be shown, as a REUSED
+   * {mineId, name, levels}, or null. The screen that shows it calls
+   * clearMapNotice(). Nothing needs to be persisted first: the notice is armed
+   * only by a purchase that is already written and flushed, and a reload
+   * re-derives "already open" and marks it taught without ever raising a box.
+   */
+  var mapNoticeOut = { mineId: '', name: '', levels: 0 };
+  function getMapNotice() {
+    if (!mapNotice) return null;
+    var starter = firstMineId();
+    var def = resolveMine(starter);
+    mapNoticeOut.mineId = starter || '';
+    mapNoticeOut.name = def ? String(def.name || def.id) : '';
+    mapNoticeOut.levels = starter ? ownedLevels(starter) : 0;
+    return mapNoticeOut;
+  }
+
+  function clearMapNotice() { mapNotice = false; return true; }
+
   /**
    * Rebuild `levels` if the mine in context, the levels owned in it, or the
    * door's x has changed since the last call. Everything else about a band is
@@ -1143,6 +1301,12 @@ SM.adv = (function () {
     evLiftBought.mineId = def.id;
     SM.events.emit('lift:bought', evLiftBought);
     flushSave();
+    /* ...AND THE FIELD MAY HAVE JUST OPENED WITH IT. The third level of the
+     * starter mine is the last thing that mine has to sell, and buying it is
+     * what unlocks the world map (see THE MAP IS EARNED). Tested AFTER the
+     * purchase is written and flushed, so the fact the notice announces is
+     * already on disk before any screen is told to draw it. */
+    checkMapUnlock();
     return true;
   }
 
@@ -1644,7 +1808,8 @@ SM.adv = (function () {
    *   sellAtDoor()    bank the hold AND the secured ledger, roll the day
    *   refuelAtDoor()  fill the tank at the SURFACE price
    *   rideTo(L)       change level map, hold intact
-   *   leaveToMap()    end the expedition and go back to the world map
+   *   leaveToMap()    end the expedition and go back out to the world map —
+   *                   or to PREPARE DESCENT, while the map is still locked
    *
    * WHY SELLING ROLLS THE DAY. It is the same transaction a surface sale was —
    * one visit to the door with a load is one day's work — and the day counter is
@@ -1858,7 +2023,13 @@ SM.adv = (function () {
     bankRun('door', true);        // null when there was nothing to bank
     teardownRun();
     results = null;               // the results screen is for STRANDS only
-    setState('map');
+    /* ...AND OUT TO WHEREVER THIS COMPANY LIVES BETWEEN RUNS (see THE MAP IS
+     * EARNED). The verb keeps every one of its semantics — it still ends the
+     * expedition and still banks anything aboard on the way — and only the
+     * screen it lands on moves: PREPARE DESCENT while the map is locked, because
+     * that is the surface for a company with one mine. `mineDef` and `selectedId`
+     * survive teardownRun(), so prep opens on the mine just left. */
+    setState(homeState());
     flushSave();
     return true;
   }
@@ -2449,10 +2620,43 @@ SM.adv = (function () {
     }
     clearHold();
     tank = 0;
+
+    /* THE MAP IS EARNED, AND THIS IS WHERE THE ANSWER IS FIRST READ.
+     *
+     * `mapTaught` is seeded from the derived rule so that a company which
+     * ALREADY qualifies — three levels deep in the starter mine, or holding a
+     * second mine's rights — is marked as having been told, and can never be
+     * nagged by a notice about a door it has been using for hours. Only a
+     * company that crosses the line while playing gets the box. */
+    mapTaught = isMapUnlocked();
+    mapNotice = false;
+
+    /* ...AND WHERE A NEW COMPANY LANDS. One mine means one decision, and it is
+     * not "which mine": it is fill the tank and go down. The map is a screen
+     * about choosing between claims, so it waits until there are claims to
+     * choose between. selectMine() sets the mine in context, the lift table and
+     * the level the descent will default to — everything the map used to
+     * establish on the way through — and lands on 'prep' itself. */
+    if (mapTaught) { setState('map'); return; }
+    if (selectMine(firstMineId())) return;
+    /* CANNOT HAPPEN: the starter mine is price 0 and its rights were just
+     * granted above. If a build ever manages it anyway, the map is the escape
+     * hatch — an empty chart is recoverable, a blank screen is not. */
     setState('map');
   }
 
-  function openMap() { if (isActive() && state !== 'mine' && !shopHold) setState('map'); }
+  /**
+   * THE WORLD MAP, AND IT IS A DOOR THAT CAN BE LOCKED (see THE MAP IS EARNED).
+   * Enforced here rather than only in the painters, so a stale panel, a console
+   * poke or the next screen to be written cannot walk a one-mine company onto a
+   * chart it has not earned. -> bool, so a caller can tell a refusal from a move.
+   */
+  function openMap() {
+    if (!isActive() || state === 'mine' || shopHold) return false;
+    if (!isMapUnlocked()) return false;
+    setState('map');
+    return true;
+  }
 
   /* =====================================================================
    * THE WORKSHOP, FROM INSIDE THE LIFT
@@ -2542,7 +2746,23 @@ SM.adv = (function () {
     return true;
   }
 
-  function backToMap() { openMap(); }
+  /**
+   * GO HOME — wherever home is for this company. The map once it is earned, and
+   * PREPARE DESCENT until then (see THE MAP IS EARNED).
+   *
+   * The name is kept because three screens call it and because what it MEANS has
+   * not changed: "leave this screen for the place between runs". Only the
+   * destination moved. -> bool.
+   */
+  function backToMap() {
+    if (isMapUnlocked()) return openMap();
+    /* The mine in context, the last one dug, or the starter — in that order, so
+     * this is right whether it is called from the workshop, from a strand's
+     * results screen, or from a company that has only ever seen one mine. */
+    var def = getMine();
+    var id = (def && def.id) || selectedId || runMineId || firstMineId();
+    return selectMine(id);
+  }
 
   /** -> prep, if the rights are held. */
   function selectMine(mineId) {
@@ -3511,6 +3731,11 @@ SM.adv = (function () {
     evRights.price = price;
     SM.events.emit('adv:rights', evRights);
     flushSave();
+    /* A SECOND MINE IS THE OTHER HALF OF THE RULE (see THE MAP IS EARNED). In
+     * ordinary play this is a no-op — rights are bought ON the map, so the
+     * company was past the gate before it got here — but the rule has two
+     * clauses and both of them are tested where they can become true. */
+    checkMapUnlock();
     return true;
   }
 
@@ -3784,7 +4009,8 @@ SM.adv = (function () {
      *                 -> the sale record, or null when there was nothing to sell
      * refuelAtDoor()  fill the tank at the SURFACE price. -> {units, cost}|null
      * getDoorFuelQuote()  REUSED {units, cost} for what that fill would cost
-     * leaveToMap()    end the expedition: banks anything aboard, then -> map
+     * leaveToMap()    end the expedition: banks anything aboard, then -> map,
+     *                 or -> prep while the map is locked (THE MAP IS EARNED)
      * getDistanceToExitM()  getDistanceToExit() in metres, for gauges
      * getExitLevel()  the level you would run for (= getLevel(): one door)
      * ownedLevels(id) how many levels this company holds in a mine, level 1
@@ -3839,6 +4065,29 @@ SM.adv = (function () {
     clearUnlockNotice: clearUnlockNotice,
     haulsFrom: haulsFrom,
     getHaulsNeeded: function () { return HAULS_TO_REVEAL; },
+
+    /* --- THE MAP IS EARNED (see the note above openMap's neighbours) ------
+     * The world map is not a screen a new company has: it is what owning the
+     * whole of the starter mine buys. One derived rule, one owner, and every
+     * route to the map asking the same question rather than re-deriving it.
+     *
+     * isMapUnlocked()  may the map be reached AT ALL? True once the company
+     *                  holds MAP_LEVELS_TO_OPEN (3) levels in the starter mine,
+     *                  or rights in any mine it had to pay for. DERIVED from
+     *                  ownership every time it is called — there is no flag, so
+     *                  it cannot go stale and needs no migration. A painter that
+     *                  gets false must not draw a map route at all.
+     * getMapNotice()   the one-time "the field is open" box waiting to be shown,
+     *                  as a REUSED {mineId, name, levels}, or null. The screen
+     *                  that draws it calls clearMapNotice(). Armed only on the
+     *                  transition, and only inside the session that caused it: a
+     *                  company that already qualifies at load is marked taught,
+     *                  so this can never re-nag across a reload.
+     * map:unlocked {mineId, levels} is the event
+     */
+    isMapUnlocked: isMapUnlocked,
+    getMapNotice: getMapNotice,
+    clearMapNotice: clearMapNotice,
 
     /* --- THE RAILS -----------------------------------------------------
      * getCheckpoints(L)     LIVE [{k, outM, x, y, price, owned}] for level L of

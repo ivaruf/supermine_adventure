@@ -292,6 +292,21 @@ SM.advui = (function () {
     return null;
   }
 
+  /**
+   * MAY THIS COMPANY REACH THE WORLD MAP? js/adv.js owns the rule (see THE MAP
+   * IS EARNED there): the map is what owning the whole of the starter mine buys,
+   * and until then PREPARE DESCENT is the home between runs.
+   *
+   * EVERY MAP ROUTE ON THESE SCREENS ASKS THIS, and a screen that gets false
+   * does not draw the route at all — a dead plate is a worse answer than no
+   * plate, and the map's own verbs refuse anyway. Feature-detected to TRUE, so a
+   * build whose adv.js predates the rule behaves exactly as it always did.
+   */
+  function mapUnlocked() {
+    if (SM.adv && SM.adv.isMapUnlocked) return !!SM.adv.isMapUnlocked();
+    return true;
+  }
+
   /* =====================================================================
    * THE LIFT — READING THE LEVEL LIST ACROSS THE SEAM
    * ---------------------------------------------------------------------
@@ -1557,7 +1572,14 @@ SM.advui = (function () {
      * is a live expedition parked under this screen. See buildGarage(). */
     var held = !!(SM.adv && SM.adv.isShopHold && SM.adv.isShopHold());
     if (els.garageLift) els.garageLift.style.display = held ? '' : 'none';
-    if (els.garageMap) els.garageMap.style.display = held ? 'none' : '';
+    if (els.garageMap) {
+      els.garageMap.style.display = held ? 'none' : '';
+      /* ...AND THE PLATE NAMES WHERE IT ACTUALLY GOES. adv.backToMap() means
+       * "out to the place between runs" and that is PREPARE DESCENT until the
+       * map is earned (js/adv.js's THE MAP IS EARNED), so the label follows the
+       * destination rather than promising a chart the company has not got. */
+      els.garageMap.textContent = mapUnlocked() ? 'BACK TO THE MAP' : 'PREPARE DESCENT';
+    }
 
     /* BACK TO MINE only exists when there is somewhere to go back to, and it
      * says whether the tank can actually do it — the alternative is a button
@@ -1885,8 +1907,41 @@ SM.advui = (function () {
 
     els.descend = button(s.foot, 'sm-btn-primary sm-btn-big sm-av-descend', 'DESCEND');
     onTap(els.descend, onDescend);
-    onTap(button(s.foot, 'sm-av-quiet', 'BACK'), function () {
-      if (SM.adv && SM.adv.backToMap) SM.adv.backToMap();
+
+    /* --- THIS SCREEN IS THE HOME NOW, UNTIL THE MAP IS EARNED -------------
+     * js/adv.js's THE MAP IS EARNED: a new company lands here, leaves the mine
+     * back to here, and does not see the world map until it owns the whole of
+     * the starter mine. So for that stretch this footer has to be a HOME screen's
+     * footer and not a sub-screen's, which means two changes and only two.
+     *
+     * THE WORKSHOP DOOR MOVES HERE WITH IT. It has always lived on whichever
+     * screen was home (the map's footer carries it, and the lift menu carries it
+     * mid-run); without this, a company that has not earned the map could only
+     * reach the workshop by descending first, which turns "fit the drill you
+     * just saved for" into a round trip through a mine. It is hidden again once
+     * the map is open, because the map is home again and already has it — one
+     * door, one place, never two.
+     *
+     * AND BACK BECOMES THE WAY OUT OF THE GAME. There is nothing behind this
+     * screen to go back TO while the map is locked, and a BACK that goes nowhere
+     * is the worst button on any screen. So it says TITLE SCREEN and does what
+     * the map's own quiet plate does — the ledger is already saved, so it is a
+     * safe exit to the slot picker and not a discarded company. See paintPrep()
+     * for both swaps; the handler asks the question fresh on every tap, so it
+     * cannot be left pointing at the wrong verb by a repaint that did not run. */
+    els.prepShop = button(s.foot, '', 'WORKSHOP');
+    onTap(els.prepShop, function () {
+      if (SM.adv && SM.adv.openGarage) SM.adv.openGarage();
+    });
+
+    els.prepBack = button(s.foot, 'sm-av-quiet', 'BACK');
+    onTap(els.prepBack, function () {
+      if (!SM.adv) return;
+      if (mapUnlocked()) {
+        if (SM.adv.backToMap) SM.adv.backToMap();
+        return;
+      }
+      if (SM.adv.close) SM.adv.close();
     });
   }
 
@@ -2090,8 +2145,25 @@ SM.advui = (function () {
   function onBuyLevel(i, L) {
     var ok = !!(SM.adv && SM.adv.buyLevel && SM.adv.buyLevel(i));
     if (ok) {
-      toast('LEVEL OPENED', levelLabel(L) + '   ·   ' + bandText(L) +
-                            (widthText(L) ? ('   ·   ' + widthText(L)) : ''), 2.6);
+      /* THE FIELD MAY HAVE OPENED ON THIS TAP, and if it has, that is the bigger
+       * news (js/adv.js's THE MAP IS EARNED). Its home is the gold box in the
+       * lift — which is where this purchase is usually made — but it can be made
+       * from THIS screen too, and a notice that only ever appears in a place the
+       * player may not go next is a notice that can be missed entirely. So the
+       * pending box is taken here as a toast: same fact, same moment, in this
+       * screen's own chrome, and cleared at the source so the lift does not
+       * repeat it. The BACK plate turns into the route the toast is talking
+       * about on the refresh() below. */
+      var mn = (SM.adv && SM.adv.getMapNotice) ? SM.adv.getMapNotice() : null;
+      if (mn) {
+        toast('THE FIELD IS OPEN',
+              'Every level here is yours — the world map is open. BACK takes you out to it.',
+              4.0);
+        if (SM.adv.clearMapNotice) SM.adv.clearMapNotice();
+      } else {
+        toast('LEVEL OPENED', levelLabel(L) + '   ·   ' + bandText(L) +
+                              (widthText(L) ? ('   ·   ' + widthText(L)) : ''), 2.6);
+      }
       if (SM.effects && SM.effects.screenFlash) SM.effects.screenFlash(0.10, 255, 210, 120);
       // The new level is almost certainly where the player now wants to start.
       prepLevel = i;
@@ -2168,6 +2240,13 @@ SM.advui = (function () {
      * of the expedition and the player commits to it with one tap. */
     var cost = descendCost();
     els.descend.textContent = cost > 0 ? ('DESCEND  ·  ' + money(cost)) : 'DESCEND';
+
+    /* THE FOOTER IS ONE OF TWO SHAPES — see buildPrep(). Home screen while the
+     * map is locked (WORKSHOP + TITLE SCREEN), and the sub-screen it has always
+     * been once the map is open (BACK, to the chart). */
+    var toMap = mapUnlocked();
+    if (els.prepShop) els.prepShop.style.display = toMap ? 'none' : '';
+    if (els.prepBack) els.prepBack.textContent = toMap ? 'BACK' : 'TITLE SCREEN';
   }
 
   function onDescend() {
@@ -2620,6 +2699,13 @@ SM.advui = (function () {
       if (need > 0) els.resFuel2.removeAttribute('disabled');
       else els.resFuel2.setAttribute('disabled', 'disabled');
     }
+    /* THE WAY OFF THIS SCREEN THAT IS NOT A DESCENT, and it is not always the
+     * map (js/adv.js's THE MAP IS EARNED). It is KEPT rather than hidden while
+     * the map is locked, because it is the only plate here that always works: a
+     * player who stranded broke, with a dry tank and nothing secured, has SELL,
+     * REFUEL and BACK TO MINE all greyed, and this is what walks them back to
+     * PREPARE DESCENT instead of leaving them on a dead screen. */
+    if (els.resMap) els.resMap.textContent = mapUnlocked() ? 'MAP' : 'PREPARE DESCENT';
 
     /* WHICHEVER STEP IS NEXT WEARS THE BRIGHT PLATE. Bank what survived, fill
      * the tank, go back down for the pile — in that order, so the screen always

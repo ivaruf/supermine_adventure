@@ -209,6 +209,11 @@ SM.advhud = (function () {
   var shopTrip = false;
   var liftUnlockName = '';
   var liftUnlockPrice = 0;
+  /* THE FIELD-IS-OPEN NOTICE, same shape and same one-panel-session life as the
+   * level one above it: adv.js hands it over once (SM.adv.getMapNotice) and this
+   * holds it until the player leaves the cage. false = no box. */
+  var liftMapOpen = false;
+  var liftMapName = '';
 
   /* =====================================================================
    * DOM helpers — the ui.js discipline, one cache per module
@@ -601,6 +606,24 @@ SM.advhud = (function () {
     els.unlock = el('div', 'sm-ah-unlock', els.lift);
     els.unlockTitle = el('div', 'sm-ah-unlock-title', els.unlock, '');
     els.unlockBody = el('div', 'sm-ah-unlock-body', els.unlock, '');
+
+    /* --- ...AND THE OTHER DOOR THAT OPENS DOWN HERE ----------------------
+     * THE FIELD IS OPEN (js/adv.js's THE MAP IS EARNED). Buying the starter
+     * mine's last level is what unlocks the world map, and that purchase happens
+     * on the row four pixels below this box — so the news lands in the same
+     * place, in the same gold, one panel session, at the moment it becomes true.
+     * It is the LEAVE plate at the foot of this panel that it is about, which is
+     * the other reason it belongs in the lift rather than on a meta screen.
+     *
+     * A SECOND BOX AND NOT A SHARED ONE. The two notices answer different
+     * questions ("the lift will go deeper" / "there is somewhere else to dig")
+     * and, although the ladder makes them near-impossible to raise on the same
+     * visit, one box cannot show two messages and the loser would be lost for
+     * good. Same class, so they are the same object as far as the eye is
+     * concerned. */
+    els.mapOpen = el('div', 'sm-ah-unlock', els.lift);
+    els.mapOpenTitle = el('div', 'sm-ah-unlock-title', els.mapOpen, '');
+    els.mapOpenBody = el('div', 'sm-ah-unlock-body', els.mapOpen, '');
 
     els.liftList = el('div', 'sm-ah-lift-list', els.lift);
     /* The panel text. Where every reason lives: what SELL would bank, why
@@ -1234,8 +1257,17 @@ SM.advhud = (function () {
     if (els.doorShop) setText('dshopv', els.doorShop.smVal, cheapestPart());
 
     /* LEAVE is the one plate whose VALUE line changes, because the confirm has to
-     * be visible somewhere and the label is not allowed to move. */
-    setText('dmapv', els.doorMap.smVal, mapArmed > 0 ? 'CONFIRM' : 'TO THE MAP');
+     * be visible somewhere and the label is not allowed to move.
+     *
+     * ...AND IT SAYS WHERE IT PUTS YOU, which is not always the map now (see
+     * js/adv.js's THE MAP IS EARNED). Until the company has earned the chart,
+     * LEAVE ends the expedition at PREPARE DESCENT — the surface for a company
+     * with one mine — and promising a map that is not there would be the one lie
+     * this panel cannot afford. The VERB is unchanged either way: it still banks
+     * whatever is aboard on the way out. */
+    var mapOut = !a.isMapUnlocked || !!a.isMapUnlocked();
+    setText('dmapv', els.doorMap.smVal,
+            mapArmed > 0 ? 'CONFIRM' : (mapOut ? 'TO THE MAP' : 'TO THE SURFACE'));
     setClass('dmaparm', els.doorMap, 'sm-ah-door-armed', mapArmed > 0);
   }
 
@@ -1302,6 +1334,8 @@ SM.advhud = (function () {
      * permanently, for that rung, for the crime of tapping WORKSHOP while it was
      * on screen. `shopTrip` is that one exception and nothing else sets it. */
     if (liftUnlock && !shopTrip) { liftUnlock = 0; liftSig = ''; }
+    // ...and the field-is-open box lives and dies by exactly the same rule.
+    if (liftMapOpen && !shopTrip) { liftMapOpen = false; liftSig = ''; }
   }
 
   function refreshLift() {
@@ -1368,6 +1402,20 @@ SM.advhud = (function () {
       }
     }
 
+    /* THE FIELD-IS-OPEN NOTICE, taken and cleared the same way. adv.js arms it
+     * only on the transition and only for a company that has not already been
+     * told, so there is nothing to guard here beyond taking it. */
+    if (a.getMapNotice) {
+      var mn = a.getMapNotice();
+      if (mn) {
+        liftMapOpen = true;
+        liftMapName = String(mn.name || '').toUpperCase();
+        liftSig = '';
+        if (a.clearMapNotice) a.clearMapNotice();
+        if (SM.sound && SM.sound.play) SM.sound.play('sparkle');
+      }
+    }
+
     var cash = num(a.getCash && a.getCash(), 0);
     var i, L, nextI = -1;
     for (i = 0; i < levels.length; i++) {
@@ -1389,7 +1437,8 @@ SM.advhud = (function () {
      * BUY greys out on cash, which the player can change from this very panel;
      * the gate is in it because it changes which rows EXIST. */
     var sig = at + '/' + levels.length + '/' + nextI + '/' + (cash >= nextPrice ? 'y' : 'n') +
-              '/' + (gateOpen ? 'g' : '-') + '/' + liftUnlock + '/';
+              '/' + (gateOpen ? 'g' : '-') + '/' + liftUnlock + '/' +
+              (liftMapOpen ? 'm' : '-') + '/';
     for (i = 0; i < levels.length; i++) {
       L = levels[i];
       if (!L) continue;
@@ -1415,6 +1464,19 @@ SM.advhud = (function () {
               fmt(liftUnlock) + ' — ' + liftUnlockName + ' is now for sale at $' +
               fmt(liftUnlockPrice) + '. Buy it below, then ride down: richer rock, ' +
               'same lift.');
+    }
+
+    /* AND THE FIELD, WHICH IS THE OTHER THING THAT CAN OPEN DOWN HERE. It names
+     * the mine that is finished, says where the way out now goes, and stops —
+     * the map's own screen can sell the map. */
+    setClass('mapopenon', els.mapOpen, 'sm-ah-unlock-on', liftMapOpen);
+    if (liftMapOpen) {
+      setText('mapopent', els.mapOpenTitle, 'THE FIELD IS OPEN');
+      setText('mapopenb', els.mapOpenBody,
+              'You own every level ' + (liftMapName || 'this mine') + ' has to sell, ' +
+              'and word travels. The world map is yours from here: other claims, ' +
+              'harder rock, richer ground — and rights to buy when the ledger can ' +
+              'stand it. LEAVE takes you out to it.');
     }
 
     var used = 0, r, lvl;

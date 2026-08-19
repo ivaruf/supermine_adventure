@@ -93,7 +93,18 @@
 //         Touches vehicle/effects/sound/advhud/adv/advui + style-adventure.css.
 //         No save format change and no asset list change, so the list below is
 //         unchanged; the bump is what gets a cached client the new code.
-const VERSION = 'v2.4.0';
+// v2.5.0  THE WARNING MOVES ONTO THE MACHINE, AND THE MAP BECOMES A REWARD.
+//         A refused mineral now raises its message in WORLD SPACE over the rig —
+//         "UPGRADE DRILL TO MINE SILVER" — where the player is actually looking,
+//         and while that wall owns the story the generic ram-damage caption
+//         stands down, so "hull damage" can no longer bury the real lesson.
+//         AND the new-game flow starts at PREPARE DESCENT, not the world map:
+//         a fresh company lands on the starter mine's prep screen, and the map
+//         only opens once three levels of the starter mine are owned — announced
+//         by a one-time notice in the lift, in the same voice as the level gate.
+//         No save format change and no asset list change; the bump is what gets
+//         a cached client the new flow.
+const VERSION = 'v2.5.0';
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 

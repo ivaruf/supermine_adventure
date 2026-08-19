@@ -495,6 +495,7 @@ load-bearing parts:
 SM.adv.isActive() / isInMine() / isDriving() / holdsSim() / getState()
 SM.adv.open() / close() / restart() / update(dt) / renderWorld(ctx)
 SM.adv.startCompany(i) / openMap() / openGarage() / selectMine(id) / enterMine(id, L)
+SM.adv.isMapUnlocked() / getMapNotice() / clearMapNotice()   // §7d
 SM.adv.closeShop() / isShopHold()      // the workshop, opened from the lift
 SM.adv.getFuel/getFuelCap/getCargo/getCargoCap/getCargoPct/getHeat/getIntegrity
 SM.adv.getCash/getDay/getDepthM/getManifest/fragValue(matIndex)
@@ -559,6 +560,7 @@ Payload shapes are exact. Anything that can fire more than a few times a second
 | `adv:damage` | `{integrity, source}` | adv |
 | `lift:bought` / `lift:ride` | see adv.js | adv |
 | `lift:unlocked` | `{level, price, mineId}` — the progression gate opened on that level. Fires ONCE per rung, ever | adv |
+| `map:unlocked` | `{mineId, levels}` — THE FIELD OPENED: the starter mine is fully bought, so the world map and every route to it exist from here. Fires ONCE per company, ever | adv |
 | `lift:docking` / `lift:entered` / `lift:undocking` / `lift:exited` | `{level, reason}` — see adv.js | adv |
 | `rail:bought` / `rail:deposit` / `rail:fuel` | see adv.js (dormant) | adv |
 | `drill:blocked` | `{x, y, matIndex, hardness, cap, seal}` — HEARTBEAT: still stuck. Re-fires while the grind lasts | vehicle |
@@ -790,6 +792,44 @@ level k+1 is revealed  <=>  qualifying hauls from level k >= HAULS_TO_REVEAL (3)
 * Owned by `js/adv.js`; `js/advhud.js` (the lift menu) and `js/advui.js` (the
   prep screen) both read `offered` off the level entries and neither re-derives
   the rule.
+
+### 7d. THE MAP IS EARNED — a new company starts at PREPARE DESCENT
+
+**Owner's rule:** *"when you start a new game I do not want to start at the map —
+I would like to start at PREPARE DESCENT — and I would like for the map to be
+available only after you have unlocked at least 3 levels in the starter mine."*
+
+`startCompany()` therefore lands on **prep**, not on the map: it calls
+`selectMine(firstMineId())`, which establishes everything the map used to
+establish on the way through (mine in context, lift table, default level). A
+fresh record already carries the starter mine's rights (`save.freshRecord()`),
+so nothing else is granted.
+
+```
+mapUnlocked  <=>  ownedLevels(starter) >= 3 (or every level it has, if fewer)
+             OR   rights held in any mine whose price > 0
+```
+
+* **DERIVED, NEVER STORED.** No new save field and no migration: ownership is
+  already persisted and already validated, so an existing company is correct the
+  moment it loads. The second clause keeps old saves sane — a company that bought
+  Red Ridge and never finished Old Creek keeps its map.
+* **`openMap()` REFUSES while it is false**, enforced exactly as the progression
+  gate is. It is the only door: the other two verbs keep their semantics and
+  change only their destination. `backToMap()` and `leaveToMap()` (which still
+  banks anything aboard) land on **prep** while the map is locked.
+* **Pre-unlock, prep is the home screen** and its footer says so: WORKSHOP moves
+  onto it (the workshop door has always lived on whichever screen is home) and
+  BACK becomes **TITLE SCREEN**. Post-unlock both revert and BACK means the map
+  again. The garage's and the results screen's map plates relabel to PREPARE
+  DESCENT rather than hiding, so no screen can become a dead end.
+* **The notice is one-time by construction.** `mapTaught` is seeded from the same
+  derived answer at `startCompany()`, so a company that already qualifies at load
+  is never nagged, and `checkMapUnlock()` can only fire on the transition. The
+  fact that persists is the level purchase, written and flushed by `buyLevel()`
+  before the box is armed. `getUnlockNotice()`'s twin is `getMapNotice()`, shown
+  as a second gold box in the lift (`js/advhud.js`) and as a toast if the
+  purchase was made on the prep screen instead.
 
 ### The interface
 
