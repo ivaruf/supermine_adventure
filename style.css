@@ -2144,6 +2144,109 @@ html, body {
   color: rgba(255, 255, 255, 0.20);
 }
 
+/* ---------------------------------------------------------------------------
+ * TESTER MODE — revealed by the title-gate cheat code (see ui.js)
+ * ---------------------------------------------------------------------------
+ * The button sits in the title's bottom-right corner, quiet until the code
+ * lands; the panel is a modal card over the title with its own backdrop.
+ * Both live INSIDE .sm-start, so .sm-start-off dismisses them with the title.
+ * ------------------------------------------------------------------------ */
+.sm-start-tester {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right, 0px));
+  bottom: max(10px, env(safe-area-inset-bottom, 0px));
+  padding: 7px 13px;
+  font-size: 9.5px;
+  letter-spacing: 2px;
+  color: var(--sm-cyan);
+  border-color: rgba(102, 226, 255, 0.40);
+  background: rgba(10, 14, 20, 0.72);
+}
+.sm-start-tester.sm-tester-pop { animation: sm-tester-pop 0.45s ease-out; }
+@keyframes sm-tester-pop {
+  0%   { transform: scale(0.6); opacity: 0; }
+  60%  { transform: scale(1.08); }
+  100% { transform: none; opacity: 1; }
+}
+.sm-tester {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 6, 10, 0.72);
+}
+.sm-tester.sm-tester-on { display: flex; }
+.sm-tester-card {
+  width: min(440px, calc(100vw - 32px));
+  background: var(--sm-panel);
+  border: 1px solid var(--sm-border);
+  border-radius: var(--sm-radius);
+  padding: 16px 18px 18px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.7);
+}
+.sm-tester-title {
+  font-family: var(--sm-mono);
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 4px;
+  color: var(--sm-cyan);
+}
+.sm-tester-note {
+  margin-top: 6px;
+  font-family: var(--sm-mono);
+  font-size: 8.5px;
+  letter-spacing: 1.6px;
+  line-height: 1.6;
+  color: var(--sm-dim);
+}
+.sm-tester-slot {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--sm-border);
+  border-radius: var(--sm-radius);
+  background: rgba(10, 13, 18, 0.6);
+}
+.sm-tester-info { flex: 1 1 auto; min-width: 0; }
+.sm-tester-name {
+  font-family: var(--sm-mono);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #fff;
+}
+.sm-tester-stats {
+  margin-top: 3px;
+  font-family: var(--sm-mono);
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  color: var(--sm-dim);
+  font-variant-numeric: tabular-nums;
+}
+.sm-tester-cash {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--sm-gold);
+  border-color: rgba(255, 194, 31, 0.45);
+}
+.sm-tester-cash:disabled { opacity: 0.35; cursor: default; }
+.sm-tester-acts {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sm-tester-go { flex: 1 1 auto; }
+.sm-tester-quiet { opacity: 0.8; }
+@media (prefers-reduced-motion: reduce) {
+  .sm-start-tester.sm-tester-pop { animation: none; }
+}
+
 /* Freestyle: no countdown panel at all. The centred column closes the gap by
    itself — that is the whole reason it is a flex column. */
 .sm-notimer .sm-clockwrap { display: none; }

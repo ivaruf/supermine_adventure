@@ -254,6 +254,15 @@ SM.save = (function () {
   var UNALPHA = null;          // char code -> index, built once below
 
   var A = SM.config.ADV;
+  /* THE TESTER SLOT — one extra, hidden slot for TESTER MODE (see ui.js's
+   * title-gate cheat code). It rides the same array, the same validator and
+   * the same persistence as the three player slots, but listSlots() never
+   * reports it, so no player-facing picker can see or touch it. An older
+   * build reading the same key simply ignores the extra entry (its init
+   * clamps to SAVE_SLOTS), so this is forward- and backward-compatible. */
+  var TESTER_SLOT = A.SAVE_SLOTS;
+  var SLOT_COUNT = A.SAVE_SLOTS + 1;   // player slots + the tester slot
+
   var slots = [];          // index -> record or null
   var active = -1;         // currently loaded slot, -1 = none
   var record = null;       // LIVE record for the active slot
@@ -846,7 +855,7 @@ SM.save = (function () {
   function init() {
     var i;
     slots = [];
-    for (i = 0; i < A.SAVE_SLOTS; i++) slots.push(null);
+    for (i = 0; i < SLOT_COUNT; i++) slots.push(null);
     active = -1;
     record = null;
     dirty = false;
@@ -858,7 +867,7 @@ SM.save = (function () {
         var parsed = null;
         try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
         if (parsed && parsed.slots && parsed.slots.length) {
-          var n = parsed.slots.length < A.SAVE_SLOTS ? parsed.slots.length : A.SAVE_SLOTS;
+          var n = parsed.slots.length < SLOT_COUNT ? parsed.slots.length : SLOT_COUNT;
           for (i = 0; i < n; i++) slots[i] = validateRecord(parsed.slots[i]);
         }
       }
@@ -931,10 +940,42 @@ SM.save = (function () {
     return out;
   }
 
+  /** The tester slot's card, in listSlots()'s shape. Never part of listSlots:
+   *  the player-facing picker must stay three slots wide. */
+  function testerSummary() {
+    var r = slots[TESTER_SLOT];
+    if (!r) return { index: TESTER_SLOT, empty: true, company: '', day: 0, cash: 0, tier: 0, mines: 0 };
+    return {
+      index: TESTER_SLOT,
+      empty: false,
+      company: r.company,
+      day: r.day,
+      cash: r.cash,
+      tier: (TESTER_SLOT === active && SM.rig && SM.rig.getMachineTier)
+        ? SM.rig.getMachineTier() : tierOfRig(r.rig),
+      mines: ownedIn(r)
+    };
+  }
+
+  /** TESTER MODE's money tap: add `delta` dollars to a STORED slot's ledger.
+   *  Title-screen tool only — js/adv.js caches cash while a campaign is live
+   *  and re-reads record.cash in startCompany(), so granting from the title
+   *  (campaign off) can never desync the live ledger. -> the new balance. */
+  function grantCash(slot, delta) {
+    var i = Math.floor(num(slot, -1, -1, TESTER_SLOT));
+    if (i < 0 || !slots[i]) return 0;
+    var c = Math.floor(num(slots[i].cash, 0, 0, MAX_CASH) + num(delta, 0));
+    if (c < 0) c = 0;
+    if (c > MAX_CASH) c = MAX_CASH;
+    slots[i].cash = c;
+    flush();
+    return c;
+  }
+
   /** Create a company in `slot`, make it active, and persist. -> the record. */
   function newGame(slot, companyName) {
     try {
-      var i = Math.floor(num(slot, -1, -1, A.SAVE_SLOTS - 1));
+      var i = Math.floor(num(slot, -1, -1, TESTER_SLOT));
       if (i < 0) return null;
       if (SM.rig && SM.rig.reset) SM.rig.reset();
       var rec = freshRecord(companyName);
@@ -951,7 +992,7 @@ SM.save = (function () {
   /** Make an existing slot active. -> true if it loaded. */
   function load(slot) {
     try {
-      var i = Math.floor(num(slot, -1, -1, A.SAVE_SLOTS - 1));
+      var i = Math.floor(num(slot, -1, -1, TESTER_SLOT));
       if (i < 0 || !slots[i]) return false;
       active = i;
       record = slots[i];
@@ -967,7 +1008,7 @@ SM.save = (function () {
   /** Wipe a slot. Refuses nothing; the confirm lives in the UI. */
   function erase(slot) {
     try {
-      var i = Math.floor(num(slot, -1, -1, A.SAVE_SLOTS - 1));
+      var i = Math.floor(num(slot, -1, -1, TESTER_SLOT));
       if (i < 0) return;
       slots[i] = null;
       if (active === i) { active = -1; record = null; }
@@ -1262,6 +1303,11 @@ SM.save = (function () {
     newGame: newGame,
     load: load,
     erase: erase,
+
+    /* --- TESTER MODE (ui.js's title-gate cheat; see TESTER_SLOT above) --- */
+    TESTER_SLOT: TESTER_SLOT,
+    testerSummary: testerSummary,
+    grantCash: grantCash,
     getActiveSlot: getActiveSlot,
     isLoaded: isLoaded,
     get: get,

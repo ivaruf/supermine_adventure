@@ -61,7 +61,19 @@ SM.ui = (function () {
    * config.js because config.js is frozen, and ui.js is the only module that
    * ever displays it. Replaced at runtime by whatever the SERVICE WORKER
    * reports — this is only the fallback for a file:// or first-visit load. */
-  var GAME_VERSION    = 'v2.7.0';
+  var GAME_VERSION    = 'v2.8.0';
+
+  /* TESTER MODE — the title-gate cheat code, old-school. Typed on the title
+   * screen it reveals the TESTER MODE button; the unlock persists in
+   * localStorage so a tester enters it once per device, not once per launch.
+   * NOTE Enter is the 9th key AND the title's own start key — the tracker
+   * swallows it while the sequence is genuinely under way (see onTitleKey). */
+  var TESTER_CODE = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown',
+                     'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight',
+                     'Enter', 'Shift'];
+  var TESTER_FLAG = 'supermine.adventure.tester';
+  var TESTER_GRANT = 1000000;    // dollars per tap of the money button
+  var TESTER_NAME = 'TEST RIG';  // the tester company's fixed name
 
   var C = SM.config;
 
@@ -80,6 +92,12 @@ SM.ui = (function () {
   // it does not spend a DOM write per step on a node nobody can see. Measured:
   // 60 mutations a second, on a phone, for nothing.
   var hudSmall = false;
+
+  /* --- TESTER MODE state --- */
+  var testerUnlocked = false;   // the code has been entered (persisted)
+  var testerOpen = false;       // the tester panel is up over the title
+  var codeAt = 0;               // progress through TESTER_CODE
+  var wipeTimer = 0;            // two-tap confirm on WIPE
 
   var lastStrings = {};
 
@@ -111,6 +129,10 @@ SM.ui = (function () {
 
     /* PERMANENT. There is only one mode now — see the header note. */
     root.classList.add('sm-adv');
+
+    /* Entered once per device: the tester unlock survives reloads. */
+    try { testerUnlocked = localStorage.getItem(TESTER_FLAG) === '1'; }
+    catch (e) { testerUnlocked = false; }
 
     buildTitle();
 
@@ -205,11 +227,185 @@ SM.ui = (function () {
 
     els.version = el('div', 'sm-start-version', els.start, GAME_VERSION);
 
+    buildTester();
+
     /* CLICK, not pointerdown. A pointerdown+click pair on the same element
      * fires twice, and the second one arrived after the overlay had already
      * been taken down — which is how the campaign used to get opened twice. */
     els.start.addEventListener('click', beginAdventure);
     els.startBtn.addEventListener('click', beginAdventure);
+  }
+
+  /* ---------------------------------------------------------------------
+   * TESTER MODE — the cheat-code door and the panel behind it
+   * ---------------------------------------------------------------------
+   * Everything here lives ON the title overlay, because that is the only
+   * screen where no company is live: the +$1M button writes straight into
+   * the STORED tester record (SM.save.grantCash), and js/adv.js re-reads
+   * record.cash in startCompany(), so the grant can never desync a ledger.
+   *
+   * EVERY CLICK IN HERE MUST NOT REACH THE OVERLAY — els.start's own click
+   * handler starts the game. The panel stops propagation once, at its root,
+   * which covers every button inside it.
+   * ------------------------------------------------------------------ */
+  function buildTester() {
+    els.testerBtn = el('button', 'sm-btn sm-start-tester', els.start, 'TESTER MODE');
+    els.testerBtn.setAttribute('type', 'button');
+    if (!testerUnlocked) els.testerBtn.style.display = 'none';
+    els.testerBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      openTester();
+    });
+
+    els.tester = el('div', 'sm-tester', els.start);
+    els.tester.addEventListener('click', function (e) {
+      e.stopPropagation();      // nothing in here may start the campaign...
+      if (e.target === els.tester) closeTester();   // ...and the backdrop closes
+    });
+
+    var card = el('div', 'sm-tester-card', els.tester);
+    el('div', 'sm-tester-title', card, 'TESTER MODE');
+    el('div', 'sm-tester-note', card,
+      'A SEPARATE SLOT FOR TESTING — THE THREE COMPANY SLOTS ARE NEVER TOUCHED');
+
+    var slot = el('div', 'sm-tester-slot', card);
+    var info = el('div', 'sm-tester-info', slot);
+    els.testerName = el('div', 'sm-tester-name', info, 'EMPTY');
+    els.testerStats = el('div', 'sm-tester-stats', info, '');
+    els.testerCash = el('button', 'sm-btn sm-tester-cash', slot, '+ $1 000 000');
+    els.testerCash.setAttribute('type', 'button');
+    els.testerCash.addEventListener('click', function (e) {
+      e.preventDefault();
+      if (!(SM.save && SM.save.grantCash)) return;
+      SM.save.grantCash(SM.save.TESTER_SLOT, TESTER_GRANT);
+      if (SM.sound && SM.sound.play) SM.sound.play('ui');
+      paintTester();
+    });
+
+    var acts = el('div', 'sm-tester-acts', card);
+    els.testerGo = el('button', 'sm-btn sm-btn-primary sm-tester-go', acts, 'NEW TEST COMPANY');
+    els.testerGo.setAttribute('type', 'button');
+    els.testerGo.addEventListener('click', function (e) {
+      e.preventDefault();
+      if (!(SM.save && SM.save.testerSummary)) return;
+      if (SM.save.testerSummary().empty) {
+        SM.save.newGame(SM.save.TESTER_SLOT, TESTER_NAME);
+        if (SM.save.flush) SM.save.flush();
+        if (SM.sound && SM.sound.play) SM.sound.play('ui');
+        paintTester();          // stays in the menu: grant cash, then continue
+      } else {
+        enterTester();
+      }
+    });
+    els.testerWipe = el('button', 'sm-btn sm-tester-quiet', acts, 'WIPE');
+    els.testerWipe.setAttribute('type', 'button');
+    els.testerWipe.addEventListener('click', function (e) {
+      e.preventDefault();
+      if (!wipeTimer) {
+        /* Two taps, like every destructive verb in the campaign. */
+        els.testerWipe.textContent = 'WIPE FOR GOOD?';
+        wipeTimer = setTimeout(function () {
+          wipeTimer = 0;
+          els.testerWipe.textContent = 'WIPE';
+        }, 2600);
+        return;
+      }
+      clearTimeout(wipeTimer);
+      wipeTimer = 0;
+      els.testerWipe.textContent = 'WIPE';
+      if (SM.save && SM.save.erase) SM.save.erase(SM.save.TESTER_SLOT);
+      if (SM.save && SM.save.flush) SM.save.flush();
+      paintTester();
+    });
+    els.testerBack = el('button', 'sm-btn sm-tester-quiet', acts, 'BACK');
+    els.testerBack.setAttribute('type', 'button');
+    els.testerBack.addEventListener('click', function (e) {
+      e.preventDefault();
+      closeTester();
+    });
+  }
+
+  function moneyStr(n) {
+    n = Math.floor(n > 0 ? n : 0);
+    return '$' + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  }
+
+  function paintTester() {
+    var s = (SM.save && SM.save.testerSummary) ? SM.save.testerSummary() : null;
+    var empty = !s || s.empty;
+    setText('tstName', els.testerName, empty ? 'EMPTY' : String(s.company || TESTER_NAME));
+    setText('tstStats', els.testerStats, empty
+      ? 'NO TEST COMPANY YET'
+      : 'DAY ' + s.day + '   ·   ' + moneyStr(s.cash) +
+        '   ·   MK ' + s.tier + '   ·   ' + s.mines + ' MINES');
+    setText('tstGo', els.testerGo, empty ? 'NEW TEST COMPANY' : 'CONTINUE');
+    els.testerCash.disabled = empty;
+    els.testerWipe.style.display = empty ? 'none' : '';
+  }
+
+  function openTester() {
+    if (!els.tester) return;
+    testerOpen = true;
+    paintTester();
+    els.tester.classList.add('sm-tester-on');
+    if (SM.sound && SM.sound.play) SM.sound.play('ui');
+  }
+
+  function closeTester() {
+    testerOpen = false;
+    if (els.tester) els.tester.classList.remove('sm-tester-on');
+  }
+
+  /** Feed one key to the sequence tracker. -> true if the key was consumed
+   *  (matched mid-sequence and must not reach the title's own handlers). */
+  function trackTesterCode(k) {
+    if (testerOpen) return false;              // the panel owns the keyboard
+    if (k === TESTER_CODE[codeAt]) {
+      codeAt++;
+      if (codeAt >= TESTER_CODE.length) {
+        codeAt = 0;
+        unlockTester();
+        return true;
+      }
+      /* Only Enter needs swallowing: it is the one mid-sequence key the
+       * title itself acts on, and by position 9 the player has typed eight
+       * correct arrows — this is the code, not a launch. */
+      return k === 'Enter';
+    }
+    codeAt = (k === TESTER_CODE[0]) ? 1 : 0;   // a miss can restart the run
+    return false;
+  }
+
+  function unlockTester() {
+    testerUnlocked = true;
+    try { localStorage.setItem(TESTER_FLAG, '1'); } catch (e) { /* session-only then */ }
+    if (els.testerBtn) {
+      els.testerBtn.style.display = '';
+      els.testerBtn.classList.remove('sm-tester-pop');
+      els.testerBtn.classList.add('sm-tester-pop');
+    }
+    if (SM.sound && SM.sound.play) SM.sound.play('ui');
+  }
+
+  /**
+   * Enter the campaign with the TESTER company. Mirrors beginAdventure() —
+   * same latch order, same gesture note — then skips the slot picker by
+   * loading the tester slot and handing straight over to the state machine,
+   * exactly the way js/advui.js's own CONTINUE does it.
+   */
+  function enterTester() {
+    if (!titleUp) return;
+    if (!(SM.save && SM.save.load && SM.adv && SM.adv.open && SM.adv.startCompany)) return;
+    if (!SM.save.load(SM.save.TESTER_SLOT)) return;
+
+    titleUp = false;
+    closeTester();
+    if (SM.sound && SM.sound.play) SM.sound.play('ui');
+    if (SM.input && SM.input.noteGesture) SM.input.noteGesture();
+    hideTitle();
+    SM.adv.open();           // arms the campaign ('slots')...
+    SM.adv.startCompany();   // ...and adopts the loaded record ('map'/'prep')
   }
 
   /**
@@ -264,6 +460,15 @@ SM.ui = (function () {
     if (!titleUp || !e) return;
     if (els.update && e.target === els.update) return;
     var k = e.key;
+    /* The cheat tracker sees every key first; a consumed key (the sequence's
+     * own Enter) must not fall through and start the game. */
+    if (trackTesterCode(k)) { e.preventDefault(); return; }
+    if (testerOpen) {
+      /* The tester panel owns the keyboard: Escape closes it, and Enter and
+       * Space must not start a campaign underneath an open menu. */
+      if (k === 'Escape') closeTester();
+      return;
+    }
     if (k !== 'Enter' && k !== ' ' && k !== 'Spacebar') return;
     beginAdventure(e);
   }
@@ -282,6 +487,9 @@ SM.ui = (function () {
   function beginAdventure(e) {
     if (e && e.preventDefault) e.preventDefault();
     if (!titleUp) return;
+    /* A click outside an open tester panel closes the panel — it must never
+     * fall through the backdrop and launch the campaign. */
+    if (testerOpen) { closeTester(); return; }
     if (!SM.adv || !SM.adv.open) return;
 
     titleUp = false;
@@ -296,6 +504,7 @@ SM.ui = (function () {
 
   function showTitle() {
     titleUp = true;
+    closeTester();               // never resurface the title with a stale panel
     if (els.start) els.start.classList.remove('sm-start-off');
   }
 
