@@ -145,6 +145,10 @@ SM.advhud = (function () {
           '<path d="M6.6 10.8h10.8v9.6H6.6z"/><path d="m7.4 3.6 9.2 7.2M16.6 3.6 7.4 10.8"/>',
     abort: '<path d="M12 3.2 21 19.4H3z"/><path d="M12 9v5"/>' +
            '<circle cx="12" cy="16.8" r="1.1" fill="currentColor" stroke="none"/>',
+    /* Quitting the game itself: the shaft, and an arrow riding up it. A door
+       would be the obvious pick and the obvious pick is wrong down here. */
+    surface: '<path d="M4.6 20.4V6.6h6.4v13.8"/><path d="M17.6 20.4V9.6"/>' +
+             '<path d="m14.1 13.1 3.5-3.5 3.5 3.5"/>',
     sound_on: '<path d="M4.4 9.4h3.3l4.9-4.1v13.4l-4.9-4.1H4.4z"/>' +
               '<path d="M15.7 9.2a3.9 3.9 0 0 1 0 5.6"/><path d="M18.3 6.5a7.6 7.6 0 0 1 0 11"/>',
     sound_off: '<path d="M4.4 9.4h3.3l4.9-4.1v13.4l-4.9-4.1H4.4z"/>' +
@@ -714,6 +718,32 @@ SM.advhud = (function () {
       if (SM.adv && SM.adv.abort) SM.adv.abort();
       if (SM.adv && SM.adv.close) SM.adv.close();
     });
+
+    /* Leaving the GAME, which is a third thing again: not the run, not the
+     * expedition. Built only when the arcade's exit.js actually loaded — it is
+     * another repo's file and is allowed to be missing, and a quit button that
+     * cannot quit is worse than none. Two-tap like the others on this card,
+     * because quitting mid-descent drops the hold exactly as aborting does.
+     * What it SAYS depends on how the page was opened: a button must not offer
+     * to close a tab that no script is allowed to close. */
+    if (window.ArcadeExit) {
+      var quitWord = window.ArcadeExit.verb({
+        arcade: 'BACK TO ARCADE',
+        app: 'SHUT DOWN',
+        tab: 'SHUT DOWN',
+      });
+      els.btnQuit = menuButton(card, 'sm-ah-quit', ICONS.surface, quitWord);
+      armConfirm(els.btnQuit, quitWord, 'CONFIRM — LOSE THE HOLD', function () {
+        window.ArcadeExit.quit().then(function (how) {
+          // Refused means the browser would not close a tab it did not open.
+          // Say so where the button was, rather than looking dead.
+          if (how !== 'refused') return;
+          var label = els.btnQuit.querySelector('.sm-pause-label');
+          if (label) label.textContent = 'CLOSE THIS TAB YOURSELF';
+          els.btnQuit.disabled = true;
+        });
+      });
+    }
   }
 
   function statCell(parent, label, value) {

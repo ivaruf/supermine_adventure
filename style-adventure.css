@@ -598,6 +598,25 @@
   border-color: rgba(255, 200, 190, 0.6);
 }
 
+/* Leaving the game itself, under a hairline that separates it from the three
+   buttons about this expedition. The quietest thing on the card on purpose —
+   and it still arms like the others, because quitting mid-descent drops the
+   hold exactly as aborting does. Armed, it borrows the same red. */
+.sm-btn.sm-ah-quit {
+  margin-top: 15px;
+  padding-top: 16px;
+  border: 0;
+  border-top: 1px solid rgba(142, 155, 171, 0.16);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--sm-dim);
+}
+.sm-btn.sm-ah-quit:hover:not(:disabled),
+.sm-btn.sm-ah-quit:focus-visible { color: #cfe0ef; background: rgba(142, 155, 171, 0.08); }
+.sm-btn.sm-ah-quit.sm-ah-armed { color: #ffd8d2; background: rgba(255, 90, 72, 0.16); }
+.sm-btn.sm-ah-quit:disabled { color: var(--sm-dimmer); cursor: default; }
+
 /* ===========================================================================
  * 3b. THE RAIL LAYOUT — COMPACT AND PORTRAIT
  * ---------------------------------------------------------------------------
