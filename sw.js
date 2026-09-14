@@ -114,7 +114,18 @@
 //         the first pockets a new company cracks are coal and copper, not the
 //         mineral the whole early game is priced around finding later. One
 //         additive save field; no asset list change.
-const VERSION = 'v2.8.3'; // the strata caption read an undeclared `top`: fatal inside a cross-origin frame
+// v2.9.0  A DOOR ON THE SCREEN YOU ARRIVE ON, AND THREE SLOTS YOU CAN REACH.
+//         BACK TO ARCADE moves onto the title gate (js/ui.js buildArcadeExit),
+//         where the pause card's copy of it could never help anybody who had not
+//         started a descent — the title, the slot picker, the map, the workshop
+//         and the prep screen had no way out of the game at all, which inside
+//         the arcade's iframe means no way out full stop. And the company
+//         picker's rows no longer squash: three flex children with the default
+//         flex-shrink were being crushed under their own content on a landscape
+//         phone, and .sm-panel's overflow:hidden then clipped CONTINUE and ERASE
+//         clean off all three. Presentation only; no save format, no module
+//         contract and no asset list change.
+const VERSION = 'v2.9.0'; // a way out of the game from the screen you land on
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 

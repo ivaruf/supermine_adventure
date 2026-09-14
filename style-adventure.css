@@ -1101,6 +1101,21 @@
 }
 .sm-av-body::-webkit-scrollbar { width: 4px; }
 .sm-av-body::-webkit-scrollbar-thumb { background: rgba(126, 140, 158, 0.35); border-radius: 2px; }
+
+/* A SCROLLING COLUMN HAS TO SCROLL, NOT SQUASH.
+ * These three screens are lists of .sm-panel rows, and a flex child's default
+ * flex-shrink is 1 — so when the rows do not fit, the browser shrinks each one
+ * below its own content instead of overflowing, the body never gets anything
+ * to scroll, and .sm-panel's overflow:hidden quietly clips whatever fell off
+ * the bottom of each row. On a 390px-tall landscape phone that was CONTINUE
+ * and ERASE on all three company slots: visible as two slivers of yellow,
+ * reachable by nothing. Pin them at their natural height and the body scrolls,
+ * which is what it was built to do. (The map and the garage are deliberately
+ * NOT in this list: above 760px their bodies turn into a ROW and the two
+ * columns there are meant to shrink — see the wide-screen block below.) */
+.sm-av-slots > .sm-av-body > *,
+.sm-av-prep > .sm-av-body > *,
+.sm-av-results > .sm-av-body > * { flex-shrink: 0; }
 .sm-av-foot {
   flex: 0 0 auto;
   display: flex;
@@ -1988,6 +2003,39 @@
 .sm-adv .sm-btn:not(.sm-iconbtn):disabled::before,
 .sm-adv .sm-btn:not(.sm-iconbtn)[disabled]::before {
   opacity: 0.25;
+}
+
+/* --- and the ONE button that opts out of it ----------------------------
+ * BACK TO ARCADE on the title gate is the only control on any screen here
+ * that is not the game: it leaves. A gold hazard plate in the top-left corner
+ * shouts as loudly as START does in the middle, which is the wrong order of
+ * importance on the screen a player arrives at. So it keeps the plate's shape
+ * and the mine's gold, quietly, on the dark it is sitting on.
+ *
+ * It lives HERE rather than beside its geometry in style.css because the rule
+ * above is `.sm-adv .sm-btn:not(.sm-iconbtn)` — three classes, in the later of
+ * the two stylesheets — so a colour written in style.css never gets a look in.
+ * `.sm-adv .sm-btn.sm-start-quit` ties on specificity and wins on order. */
+.sm-adv .sm-btn.sm-start-quit {
+  color: rgba(255, 194, 31, 0.82);
+  background: rgba(10, 14, 20, 0.72);
+  border-color: rgba(255, 194, 31, 0.30);
+  text-shadow: none;
+}
+/* The hazard sliver is what says "machinery"; a door is not machinery. */
+.sm-adv .sm-btn.sm-start-quit::before { content: none; }
+.sm-adv .sm-btn.sm-start-quit:hover:not(:disabled),
+.sm-adv .sm-btn.sm-start-quit:focus-visible {
+  color: var(--sm-gold);
+  border-color: rgba(255, 194, 31, 0.6);
+}
+/* The adventure-wide disabled rule greys a GOLD plate; this one is already
+   dark, so it says its piece in the text instead. */
+.sm-adv .sm-btn.sm-start-quit:disabled {
+  filter: none;
+  opacity: 1;
+  color: var(--sm-dimmer);
+  border-color: var(--sm-border);
 }
 
 /* DESCEND keeps its own rule as the canonical source of the treatment above. */

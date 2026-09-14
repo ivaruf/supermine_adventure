@@ -227,6 +227,7 @@ SM.ui = (function () {
 
     els.version = el('div', 'sm-start-version', els.start, GAME_VERSION);
 
+    buildArcadeExit();
     buildTester();
 
     /* CLICK, not pointerdown. A pointerdown+click pair on the same element
@@ -234,6 +235,59 @@ SM.ui = (function () {
      * been taken down — which is how the campaign used to get opened twice. */
     els.start.addEventListener('click', beginAdventure);
     els.startBtn.addEventListener('click', beginAdventure);
+  }
+
+  /* ---------------------------------------------------------------------
+   * THE WAY OUT OF THE GAME, ON THE SCREEN YOU ARRIVE ON
+   * ---------------------------------------------------------------------
+   * advhud.js has carried this on the pause card since the arcade learned to
+   * frame us, and that covers a player who is underground. It does not cover
+   * anybody else: the pause card is behind a run, and the title gate, the slot
+   * picker, the world map, the workshop and the prep screen had nothing to
+   * press at all. Inside the arcade's iframe there is no tab strip and no
+   * visible back button either, so that was a room with no door — the FLOOR
+   * pill is the launcher's safety net for a game that never heard of exit.js,
+   * not for one that loads it and then hides the way out behind a descent.
+   *
+   * ONE DOOR, IN ONE PLACE. It goes here rather than on all five meta screens
+   * because every one of them already routes back here in a tap or two (the
+   * map, the slots and the prep screen all carry TITLE SCREEN), and two
+   * different ways out of the same game is how they end up disagreeing.
+   *
+   * Built only when the arcade's exit.js actually loaded: it is another repo's
+   * file and is allowed to be missing, and a quit button that cannot quit is
+   * worse than none. What it SAYS is exit.js's answer, because a button must
+   * not offer to close a tab that no script is allowed to close.
+   *
+   * DELIBERATELY SILENT, unlike its twin on the pause card. This is the one
+   * screen where the audio graph has not been unlocked yet — the START gesture
+   * is what does that — and spinning up an AudioContext to click on the way
+   * out of the game would be the only thing it ever got used for.
+   * ------------------------------------------------------------------ */
+  function buildArcadeExit() {
+    if (!window.ArcadeExit) return;
+
+    var word = window.ArcadeExit.verb({
+      arcade: 'BACK TO ARCADE',
+      app: 'SHUT DOWN',
+      tab: 'SHUT DOWN',
+    });
+    els.startQuit = el('button', 'sm-btn sm-start-quit', els.start, word);
+    els.startQuit.setAttribute('type', 'button');
+    els.startQuit.addEventListener('click', function (e) {
+      e.preventDefault();
+      /* els.start's own click handler starts the campaign, and this button is
+       * sitting on top of it. Leaving must never launch a run on the way. */
+      e.stopPropagation();
+      els.startQuit.blur();
+      window.ArcadeExit.quit().then(function (how) {
+        // Refused means the browser would not close a tab it did not open.
+        // Say so where the button is, rather than leaving it looking dead.
+        if (how !== 'refused') return;
+        els.startQuit.textContent = 'CLOSE THIS TAB YOURSELF';
+        els.startQuit.disabled = true;
+      });
+    });
   }
 
   /* ---------------------------------------------------------------------

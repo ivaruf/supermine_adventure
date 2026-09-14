@@ -2144,6 +2144,26 @@ html, body {
   color: rgba(255, 255, 255, 0.20);
 }
 
+/* THE WAY OUT, top left — the corner you came in by, opposite the tester plate.
+   Pinned to the overlay for the same reason the build stamp is: the panel in
+   the middle scrolls on a short phone and a door must not scroll away. See
+   buildArcadeExit() in js/ui.js for when it exists at all — it is absent
+   entirely unless ../arcade/exit.js answered.
+
+   ONLY THE GEOMETRY IS HERE. Its colour lives in style-adventure.css, next to
+   the rule it has to argue with: `.sm-adv .sm-btn:not(.sm-iconbtn)` paints
+   every button in this game a gold hazard plate, and that selector is both
+   more specific than a bare class AND in the later file, so a colour written
+   here would simply never apply. Measured, not assumed. */
+.sm-start-quit {
+  position: absolute;
+  left: max(14px, env(safe-area-inset-left, 0px));
+  top: max(12px, env(safe-area-inset-top, 0px));
+  padding: 8px 14px;
+  font-size: 9.5px;
+  letter-spacing: 2px;
+}
+
 /* ---------------------------------------------------------------------------
  * TESTER MODE — revealed by the title-gate cheat code (see ui.js)
  * ---------------------------------------------------------------------------
