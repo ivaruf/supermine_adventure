@@ -114,7 +114,7 @@
 //         the first pockets a new company cracks are coal and copper, not the
 //         mineral the whole early game is priced around finding later. One
 //         additive save field; no asset list change.
-const VERSION = 'v2.8.2'; // quit from the pause menu: back to the arcade, or close
+const VERSION = 'v2.8.3'; // the strata caption read an undeclared `top`: fatal inside a cross-origin frame
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 

@@ -3621,21 +3621,18 @@ SM.advterrain = (function () {
         ctx.stroke();
       }
 
-      // Layer name, once, at its ceiling. Anchored to the middle of the VIEW:
-      // in a 520-metre-wide mine a caption at x = 0 is a caption the player
-      // usually cannot see.
-      if (top > vTop - 60 && top < vBot + 60 && top > A.MINE_CEILING_Y) {
-        ctx.strokeStyle = 'rgba(255,196,64,0.22)';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(vLeft, top); ctx.lineTo(vRight, top);
-        ctx.stroke();
-        ctx.font = 'bold 26px ui-sans-serif, system-ui, Arial, sans-serif';
-        ctx.fillStyle = 'rgba(255,222,150,0.16)';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(L.name, (vLeft + vRight) * 0.5, top - 26);
-      }
+      /* NO LAYER CAPTION. There used to be one here — the stratum's name in
+       * 26px over an amber line at its ceiling — and when the depth ladder went
+       * (one stratum per level, above) the `top` it hung off lost its
+       * declaration and nobody noticed, because an undeclared `top` is
+       * `window.top` and comparing a Window to a number is a quiet NaN: the
+       * caption simply never drew again. Inside a CROSS-ORIGIN frame it is not
+       * quiet. Coercing a cross-origin Window throws a SecurityError, this
+       * function runs after the rock fill and before the deposits, the machine
+       * and the darkness, so a locally served arcade framing the live game
+       * showed rock and nothing else on every frame (2026-09-14). The level is
+       * named on the door's board and in the HUD; the caption is not missed,
+       * and the honest fix is the deletion, not a new `top`. */
     }
   }
 
