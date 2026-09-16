@@ -125,13 +125,16 @@
 //         phone, and .sm-panel's overflow:hidden then clipped CONTINUE and ERASE
 //         clean off all three. Presentation only; no save format, no module
 //         contract and no asset list change.
-const VERSION = 'v2.9.0'; // a way out of the game from the screen you land on
+const VERSION = 'v2.9.1'; // cached shells learn the arcade moved to gophercloud.games
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 
 const ASSETS = [
   './',
   './index.html',
+  // Has to be IN the cache, not merely deployed: the players this rescues
+  // are the ones whose browser has stopped asking this origin for anything.
+  './moved.js',
   './manifest.webmanifest',
   './style.css',
   './style-adventure.css',
