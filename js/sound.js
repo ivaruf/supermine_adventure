@@ -24,10 +24,10 @@
  *   one: the engine drone and the cutter, the two permanently-running nodes
  *   that hum under every second of a descent whether or not anything is
  *   happening. That is this mine's soundtrack, so that is what the `music` key
- *   governs, and the panel calls the row THE RIG because that is what a player
+ *   governs, and the panel calls the row ENGINE because that is what a player
  *   hears. Everything discrete — rock cracking, collapses, the refusal, the
- *   loot ladder, the cab's own blips — is the `sfx` key, and the panel calls it
- *   THE ROCK.
+ *   loot ladder, the cab's own blips — is the `sfx` key, and the panel calls
+ *   it EFFECTS.
  *
  *   The line is "would this still be making a noise if you stopped moving", and
  *   it is the useful line: the drone and the rasp are the fatiguing part, the
@@ -52,8 +52,8 @@
  *   SM.sound.play(name, opts?)   'break' 'crunch' 'hit' 'impact' 'clank'
  *                                'refuse' 'collect' 'sparkle' 'ui'
  *   SM.sound.setMuted(b) / toggleMute() / isMuted()
- *   SM.sound.getMusicVolume() / setMusicVolume(0..1)   -- THE RIG
- *   SM.sound.getSfxVolume()   / setSfxVolume(0..1)     -- THE ROCK
+ *   SM.sound.getMusicVolume() / setMusicVolume(0..1)   -- ENGINE
+ *   SM.sound.getSfxVolume()   / setSfxVolume(0..1)     -- EFFECTS
  *   SM.sound.preview('music' | 'sfx')  -- audition one side while dragging
  *
  * PAUSE
@@ -231,7 +231,7 @@ SM.sound = (function () {
    * Both sliders live on the TITLE GATE, and that is the one screen where
    * neither side is making a sound of its own: main.js holds the fixed step
    * until the first gesture, update() is what drives engGain and grindGain, and
-   * nothing is cutting rock behind an overlay anyway. Without this, THE RIG in
+   * nothing is cutting rock behind an overlay anyway. Without this, ENGINE in
    * particular would be a control you drag in silence and only discover the
    * effect of two minutes later, six hundred metres down.
    *

@@ -136,7 +136,7 @@
 //         gate and the pause card alike. No save format, no module contract
 //         and no asset list change — js/ui.js, js/sound.js, js/advhud.js and
 //         style.css only, all of them already in the list below.
-const VERSION = 'v2.10.0'; // two volumes instead of one switch, and a corner to reach them from
+const VERSION = 'v2.10.1'; // the volume rows say music-and-effects like everywhere else
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 

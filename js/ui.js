@@ -17,7 +17,7 @@
  *    plain — see buildTitle(), which is where the real splash goes.
  *
  * 1b. THE CORNER CLUSTER AND THE SOUND PANEL hang off that gate: a speaker
- *    that opens two volume sliders (THE RIG and THE ROCK), and a plate that
+ *    that opens two volume sliders (ENGINE and EFFECTS), and a plate that
  *    fills the screen. They are here rather than in a module of their own
  *    because index.html is frozen and this file already builds every control
  *    on this screen — and the screen toggle is deliberately NOT in a file
@@ -427,9 +427,9 @@ SM.ui = (function () {
    *
    * WHY TWO SLIDERS AND NOT ONE SWITCH. The mine had a single mute: you could
    * kill the whole thing or live with it, and there was no way to keep the
-   * engine down while the rock still answered. THE RIG is the drone and the
+   * engine down while the rock still answered. ENGINE is the drone and the
    * cutter — the two permanently-running nodes that hum under every second of a
-   * descent. THE ROCK is everything discrete: deposits cracking, collapses, the
+   * descent. EFFECTS is everything discrete: deposits cracking, collapses, the
    * refusal, the loot ladder, the cab's own blips. js/sound.js's header carries
    * the full argument, including why this game's `music` key governs an engine.
    *
@@ -453,12 +453,25 @@ SM.ui = (function () {
     el('div', 'sm-sound-kicker', card, 'CAB SPEAKERS');
     el('div', 'sm-sound-title', card, 'SOUND');
 
-    els.volMusic = volumeRow(card, 'sm-vol-rig', 'THE RIG');
-    els.volSfx = volumeRow(card, 'sm-vol-rock', 'THE ROCK');
+    /* ENGINE and EFFECTS, not THE RIG and THE ROCK. A player reaching for a
+     * volume is not reading for flavour — they are looking for which of two
+     * sliders is the one they want — and a label that has to be decoded from
+     * the hint underneath costs them exactly that. The fiction keeps the hint
+     * line, where it explains instead of obstructing.
+     *
+     * The first row is ENGINE and NOT "music", which is the one place this
+     * game departs from every other in the hub. There is no music down here:
+     * the rhythm grid died with the time-attack zones, and the continuous
+     * layer this slider actually governs is the drone and the cutter. A row
+     * labelled MUSIC would be naming something that does not exist, which is
+     * worse than being the odd one out. js/sound.js's header carries the full
+     * argument, including why the stored key is still `vol.music.v1`. */
+    els.volMusic = volumeRow(card, 'sm-vol-rig', 'ENGINE');
+    els.volSfx = volumeRow(card, 'sm-vol-rock', 'EFFECTS');
 
     el('div', 'sm-sound-hint', card,
-      'THE RIG IS THE ENGINE AND THE CUTTER — THE NOISE THAT NEVER STOPS WHILE ' +
-      'YOU DRIVE. THE ROCK IS EVERYTHING IT BREAKS, AND EVERY ORE THAT GOES IN ' +
+      'ENGINE IS THE DRONE AND THE CUTTER — THE NOISE THAT NEVER STOPS WHILE ' +
+      'YOU DRIVE. EFFECTS IS EVERYTHING IT BREAKS, AND EVERY ORE THAT GOES IN ' +
       'THE HOLD. DRAG EITHER ONE AND YOU WILL HEAR IT.');
 
     /* Just BACK. A panel's way out is not a place in the fiction and does not

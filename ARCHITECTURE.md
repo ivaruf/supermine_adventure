@@ -464,8 +464,8 @@ SM.sound.play(name)   // 'break' 'crunch' 'hit' 'impact' 'clank'
 SM.sound.setMuted(b) / toggleMute() / isMuted() / isReady() / getBedLevel()
 
 // Two persisted attenuators under the existing master, 0..1 each.
-SM.sound.getMusicVolume() / setMusicVolume(v)   // THE RIG: engine + cutter
-SM.sound.getSfxVolume()   / setSfxVolume(v)     // THE ROCK: every one-shot
+SM.sound.getMusicVolume() / setMusicVolume(v)   // ENGINE: engine + cutter
+SM.sound.getSfxVolume()   / setSfxVolume(v)     // EFFECTS: every one-shot
 SM.sound.preview('music' | 'sfx')               // audition one side on drag
 ```
 
@@ -473,8 +473,9 @@ Stored as `supermine_adventure.vol.music.v1` and
 `supermine_adventure.vol.sfx.v1`, both defaulting to 1.0. **This game has no
 music** — the rhythm grid died with the time-attack zones — so the hub's
 `music` key governs the only continuous layer it has: the engine drone and the
-grinder, the two permanently-running nodes. The title gate calls that row THE
-RIG and the one-shot row THE ROCK. The two gains sit between the buses and
+grinder, the two permanently-running nodes. The title gate calls that row ENGINE
+and the one-shot row EFFECTS — plain words, because a player reaching for a
+volume is looking for which slider is theirs, not reading for flavour. The two gains sit between the buses and
 master, so `C.SOUND_MASTER_GAIN`, the mute, the pause duck and the limiter are
 all downstream and unchanged. The mute is still session-only and always has
 been — there is no persisted mute key, so there was nothing to migrate.
