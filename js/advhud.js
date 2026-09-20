@@ -727,10 +727,14 @@ SM.advhud = (function () {
      * What it SAYS depends on how the page was opened: a button must not offer
      * to close a tab that no script is allowed to close. */
     if (window.ArcadeExit) {
+      /* PLAIN WORDS, and the same ones ui.js puts on the title gate — this is
+       * the same button on a second screen, and two labels for one way out is
+       * how they come to disagree. BACK TO ARCADE when framed or when a tab
+       * can navigate there, CLOSE when we are an installed app closing our own
+       * window. `tab` is legacy in exit.js and is not passed. */
       var quitWord = window.ArcadeExit.verb({
         arcade: 'BACK TO ARCADE',
-        app: 'SHUT DOWN',
-        tab: 'SHUT DOWN',
+        app: 'CLOSE',
       });
       els.btnQuit = menuButton(card, 'sm-ah-quit', ICONS.surface, quitWord);
       armConfirm(els.btnQuit, quitWord, 'CONFIRM — LOSE THE HOLD', function () {

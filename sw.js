@@ -125,7 +125,18 @@
 //         phone, and .sm-panel's overflow:hidden then clipped CONTINUE and ERASE
 //         clean off all three. Presentation only; no save format, no module
 //         contract and no asset list change.
-const VERSION = 'v2.9.1'; // cached shells learn the arcade moved to gophercloud.games
+// v2.9.1  Cached shells learn the arcade moved to gophercloud.games.
+// v2.10.0 A CORNER AND A MIXING DESK. The title gate grows a top-right cluster
+//         — a speaker that opens a sound panel, and a plate that fills the
+//         screen — and the one mute switch becomes two levels, THE RIG (the
+//         engine and the cutter) and THE ROCK (everything discrete), persisted
+//         under supermine_adventure.vol.music.v1 / .vol.sfx.v1 and defaulting
+//         to 1.0 so nobody's mix changes. The way out of the game is plain
+//         words now: BACK TO ARCADE, or CLOSE when installed, on the title
+//         gate and the pause card alike. No save format, no module contract
+//         and no asset list change — js/ui.js, js/sound.js, js/advhud.js and
+//         style.css only, all of them already in the list below.
+const VERSION = 'v2.10.0'; // two volumes instead of one switch, and a corner to reach them from
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 

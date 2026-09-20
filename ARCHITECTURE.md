@@ -462,7 +462,22 @@ SM.sound.init() / update(dt) / reset()
 SM.sound.play(name)   // 'break' 'crunch' 'hit' 'impact' 'clank'
                       // 'refuse' 'collect' 'sparkle' 'ui'
 SM.sound.setMuted(b) / toggleMute() / isMuted() / isReady() / getBedLevel()
+
+// Two persisted attenuators under the existing master, 0..1 each.
+SM.sound.getMusicVolume() / setMusicVolume(v)   // THE RIG: engine + cutter
+SM.sound.getSfxVolume()   / setSfxVolume(v)     // THE ROCK: every one-shot
+SM.sound.preview('music' | 'sfx')               // audition one side on drag
 ```
+
+Stored as `supermine_adventure.vol.music.v1` and
+`supermine_adventure.vol.sfx.v1`, both defaulting to 1.0. **This game has no
+music** — the rhythm grid died with the time-attack zones — so the hub's
+`music` key governs the only continuous layer it has: the engine drone and the
+grinder, the two permanently-running nodes. The title gate calls that row THE
+RIG and the one-shot row THE ROCK. The two gains sit between the buses and
+master, so `C.SOUND_MASTER_GAIN`, the mute, the pause duck and the limiter are
+all downstream and unchanged. The mute is still session-only and always has
+been — there is no persisted mute key, so there was nothing to migrate.
 
 Subscribes to `game:paused` and ducks the engine and grinder **buses** to zero,
 then back on resume. Those two are the only nodes that keep sounding without
@@ -477,7 +492,15 @@ SM.ui.showTitle() / leaveAdventure()   // SM.adv.close() calls the latter
 SM.ui.isTitleUp() / getRoot()
 ```
 
-Three jobs and no more: the **title gate**, the **layout switch**
+Four jobs now. The **title gate**, which since the corner cluster landed also
+owns the **top-right pair** (a speaker that opens the sound panel, and a plate
+that fills the screen) and the **sound panel** behind the speaker. Both are
+built here because `index.html` is frozen and this file already builds every
+control on that screen; the screen toggle is deliberately not in a file named
+for its API — see the section header for the blocklist that decided that. The
+cluster belongs to the title and leaves with it: from the first descent the
+top-right corner is `advhud`'s `.sm-ah-btns`, and two clusters cannot have one
+corner. Then the **layout switch**
 (`applyCompact()` publishes `sm-compact` / `sm-tiny` / `sm-portrait` on
 `#ui-root`, and the entire phone layout hangs off those three classes — nothing
 else sets them), and the **PWA** registration with its opt-in UPDATE READY

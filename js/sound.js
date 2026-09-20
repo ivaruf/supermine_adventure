@@ -5,14 +5,35 @@
  *
  * SIGNAL PATH
  *   engineBus ─┐
- *   grindBus  ─┼─> master (gain, muted here) ─> limiter (compressor) ─> out
- *   sfxBus    ─┘
+ *              ├─> musicGain ─┐
+ *   grindBus  ─┘              ├─> master (mute lives here) ─> limiter ─> out
+ *   sfxBus ─────> sfxGain ────┘
  *
  * A FOURTH BUS USED TO HANG OFF MASTER: `rhythmBus`, feeding a 16th-note grid
  * that thickened as a time-attack run escalated through its zones. It is gone
  * with the zones, and so is the sustained overdrive layer that rode the engine
  * bus. What is left is the excavation itself — the drone, the grinder, and the
  * one-shots the rock makes — which is what a mine should sound like.
+ *
+ * WHY THE SPLIT IS WHERE IT IS, AND WHY `musicGain` CARRIES AN ENGINE
+ *   The hub asks every game for two persisted levels, kept under
+ *   <slug>.vol.music.v1 and <slug>.vol.sfx.v1. THIS GAME HAS NO MUSIC — the
+ *   paragraph above is the whole story: the rhythm grid died with the zones and
+ *   nothing replaced it. So the choice was a MUSIC slider that does nothing, or
+ *   one name for the thing this game actually has a continuous layer of. It has
+ *   one: the engine drone and the cutter, the two permanently-running nodes
+ *   that hum under every second of a descent whether or not anything is
+ *   happening. That is this mine's soundtrack, so that is what the `music` key
+ *   governs, and the panel calls the row THE RIG because that is what a player
+ *   hears. Everything discrete — rock cracking, collapses, the refusal, the
+ *   loot ladder, the cab's own blips — is the `sfx` key, and the panel calls it
+ *   THE ROCK.
+ *
+ *   The line is "would this still be making a noise if you stopped moving", and
+ *   it is the useful line: the drone and the rasp are the fatiguing part, the
+ *   cracks and the ladder are the part you are playing for. The two gains sit
+ *   BETWEEN the buses and master, so C.SOUND_MASTER_GAIN, the mute, the pause
+ *   duck and the limiter are all downstream and do exactly what they did.
  *
  * WHY THE HOT EVENTS ONLY INCREMENT COUNTERS
  *   material:destroyed fires ~150x per step and resource:collected ~30x.
@@ -31,6 +52,9 @@
  *   SM.sound.play(name, opts?)   'break' 'crunch' 'hit' 'impact' 'clank'
  *                                'refuse' 'collect' 'sparkle' 'ui'
  *   SM.sound.setMuted(b) / toggleMute() / isMuted()
+ *   SM.sound.getMusicVolume() / setMusicVolume(0..1)   -- THE RIG
+ *   SM.sound.getSfxVolume()   / setSfxVolume(0..1)     -- THE ROCK
+ *   SM.sound.preview('music' | 'sfx')  -- audition one side while dragging
  *
  * PAUSE
  *   Subscribes to `game:paused` and ducks the engine and grinder BUSES to
@@ -71,6 +95,33 @@ SM.sound = (function () {
   var GRIND_ATTACK     = 6.0;
   var GRIND_RELEASE    = 2.6;
 
+  /* --- the two volumes, and where they are kept -------------------------
+   * Hub CLAUDE.md §6: <slug>.<thing>.v<n>, stored 0..1, every read and every
+   * write wrapped — private mode and a full quota are both real, and neither is
+   * a reason for the mine to stop making a noise. See the header for why the
+   * `music` key governs the engine and the cutter in a game with no music.
+   *
+   * THERE IS NO MUTE KEY TO MIGRATE, and that is worth saying out loud rather
+   * than leaving as an absence somebody re-derives. This game's mute has always
+   * been session-only: `muted` starts false on every load, the 'm' key and the
+   * HUD speaker flip it, and nothing has ever written it down. So there is no
+   * "a player who muted stays muted" case to carry across — and inventing a key
+   * for it now would be a second, competing idea of silence sitting next to two
+   * sliders that already express one.
+   *
+   * DEFAULT 1.0 BOTH. These gains multiply a mix that was already balanced by
+   * hand (ENGINE_GAIN, GRIND_GAIN, SFX_GAIN, C.SOUND_MASTER_GAIN and the
+   * limiter), so anything below 1.0 here would silently re-mix the game for
+   * every existing player on the first launch after this release. A slider that
+   * starts at the top and only comes down is exactly what an attenuator is. */
+  var MUSIC_KEY        = 'supermine_adventure.vol.music.v1';
+  var SFX_KEY          = 'supermine_adventure.vol.sfx.v1';
+  var DEFAULT_MUSIC    = 1.0;
+  var DEFAULT_SFX      = 1.0;
+
+  // Seconds of REAL time between two auditions of the same side — see preview().
+  var PREVIEW_GAP      = 0.11;
+
   var C = SM.config;
 
   /* =====================================================================
@@ -78,10 +129,17 @@ SM.sound = (function () {
    * ================================================================== */
   var actx = null;
   var master = null, limiter = null;
+  var musicGain = null, sfxGain = null;
   var sfxBus = null, engineBus = null, grindBus = null;
   var dead = false;              // audio permanently unavailable
 
   var muted = false;
+  /* Read from storage at module load, BEFORE any graph exists, so the very
+   * first node built already carries the player's level and nothing has to be
+   * corrected after the fact — which is how a live graph clicks on boot. */
+  var musicVol = DEFAULT_MUSIC;
+  var sfxVol = DEFAULT_SFX;
+  var previewLast = { music: -999, sfx: -999 };
   var paused = false;
   var unlocked = false;
   var voices = 0;
@@ -110,6 +168,118 @@ SM.sound = (function () {
   var subscribed = false;
 
   /* =====================================================================
+   * VOLUMES — two persisted attenuators, read once at load
+   * ================================================================== */
+  function clamp01(v) {
+    v = Number(v);
+    if (!(v >= 0)) return 0;        // also catches NaN, which `< 0` would not
+    return v > 1 ? 1 : v;
+  }
+
+  function readVolume(key, fallback) {
+    try {
+      if (!window.localStorage) return fallback;
+      var raw = window.localStorage.getItem(key);
+      if (raw === null || raw === '') return fallback;
+      var n = Number(raw);
+      // A key somebody else wrote, or a half-finished write, must not be able
+      // to silence the mine — an unparseable value falls back to the default.
+      if (!isFinite(n)) return fallback;
+      return clamp01(n);
+    } catch (e) {
+      return fallback;             // private mode: the defaults still play
+    }
+  }
+
+  function writeVolume(key, value) {
+    try {
+      if (!window.localStorage) return;
+      window.localStorage.setItem(key, String(value));
+    } catch (e) {
+      // Quota, or a locked-down browser. The level is already live in the
+      // graph; it simply will not survive a reload, which is not worth a word
+      // on screen.
+    }
+  }
+
+  musicVol = readVolume(MUSIC_KEY, DEFAULT_MUSIC);
+  sfxVol = readVolume(SFX_KEY, DEFAULT_SFX);
+
+  /** Glide a gain rather than jumping it: a step change on a live graph clicks,
+   *  and a slider drag is a hundred step changes in a row. */
+  function rampGain(node, value) {
+    if (!node || !actx) return;
+    try { node.gain.setTargetAtTime(value, actx.currentTime, 0.015); }
+    catch (e) { node.gain.value = value; }
+  }
+
+  function setMusicVolume(v) {
+    musicVol = clamp01(v);
+    writeVolume(MUSIC_KEY, musicVol);
+    rampGain(musicGain, musicVol);
+  }
+
+  function setSfxVolume(v) {
+    sfxVol = clamp01(v);
+    writeVolume(SFX_KEY, sfxVol);
+    rampGain(sfxGain, sfxVol);
+  }
+
+  /**
+   * AUDITION ONE SIDE, so a slider can be heard while it is being set.
+   *
+   * Both sliders live on the TITLE GATE, and that is the one screen where
+   * neither side is making a sound of its own: main.js holds the fixed step
+   * until the first gesture, update() is what drives engGain and grindGain, and
+   * nothing is cutting rock behind an overlay anyway. Without this, THE RIG in
+   * particular would be a control you drag in silence and only discover the
+   * effect of two minutes later, six hundred metres down.
+   *
+   * IT DELIBERATELY DOES NOT GO THROUGH play(). play() rate-limits on `clock`,
+   * and `clock` only advances inside update() — which main.js is not calling at
+   * the title. The first audition would stamp lastPlayed[name] with a clock
+   * that never moves again and every later one would be swallowed, so the
+   * slider would make exactly one noise per session. This throttles on
+   * actx.currentTime, which is wall time and the only clock running up there.
+   *
+   * It also LIFTS THE MUTE, because the alternative is a control that does
+   * nothing and says nothing about why. Moving a volume slider is the player
+   * stating how loud they want a thing; a kill switch left over from earlier in
+   * the session should not outrank that. advhud's speaker repaints itself off
+   * the `sound:muted` event, so the two can never disagree.
+   *
+   * The RIG audition goes out on engineBus and grindBus — the two buses that
+   * slider governs — and not on musicGain directly, so what you hear is the
+   * real path. Those two are the buses setPaused() ducks, which is harmless
+   * here: the panel only opens from the title, where nothing is paused.
+   */
+  function preview(which) {
+    unlock();
+    if (!actx) return;
+    if (muted) setMuted(false);
+
+    var now = actx.currentTime;
+    var last = previewLast[which];
+    if (last !== undefined && now - last < PREVIEW_GAP) return;
+    previewLast[which] = now;
+    if (!canVoice(true)) return;
+
+    if (which === 'music') {
+      // The grinder's own two bands and one chug of the drone: this is the
+      // machine, on the machine's buses, rather than a beep standing in for it.
+      noiseBurst(0.26, 880, 1.1, 0.30, 'bandpass', 0, grindBus);
+      noiseBurst(0.20, 3200, 7.0, 0.10, 'bandpass', 0, grindBus);
+      tone(66, 52, 0.28, 0.26, 'sawtooth', 0, engineBus);
+    } else {
+      // A deposit cracking: the noise this game makes for a living. The 'break'
+      // recipe, with the randomness pinned so a drag is a steady rhythm rather
+      // than a rockfall.
+      noiseBurst(0.10, 700, 1.5, 0.42);
+      tone(118, 62, 0.14, 0.16, 'sine');
+    }
+  }
+
+  /* =====================================================================
    * CONTEXT
    * ================================================================== */
   function ensureContext() {
@@ -133,9 +303,15 @@ SM.sound = (function () {
       master.gain.value = muted ? 0 : C.SOUND_MASTER_GAIN;
       master.connect(limiter);
 
-      sfxBus = actx.createGain();    sfxBus.gain.value = SFX_GAIN;    sfxBus.connect(master);
-      engineBus = actx.createGain(); engineBus.gain.value = 1;        engineBus.connect(master);
-      grindBus = actx.createGain();  grindBus.gain.value = 1;         grindBus.connect(master);
+      // The two slider gains sit BETWEEN the buses and master, so the mute, the
+      // master trim and the limiter are all downstream of them and keep
+      // behaving exactly as they did before the split.
+      musicGain = actx.createGain(); musicGain.gain.value = musicVol; musicGain.connect(master);
+      sfxGain = actx.createGain();   sfxGain.gain.value = sfxVol;     sfxGain.connect(master);
+
+      sfxBus = actx.createGain();    sfxBus.gain.value = SFX_GAIN;    sfxBus.connect(sfxGain);
+      engineBus = actx.createGain(); engineBus.gain.value = 1;        engineBus.connect(musicGain);
+      grindBus = actx.createGain();  grindBus.gain.value = 1;         grindBus.connect(musicGain);
 
       buildNoise();
       buildEngine();
@@ -245,7 +421,12 @@ SM.sound = (function () {
     node.onended = function () { if (voices > 0) voices--; };
   }
 
-  function noiseBurst(dur, freq, q, gain, type, delay) {
+  /* `dest` defaults to sfxBus, which is where every burst in the game proper
+   * goes — the routing audit for the slider split found no voice on the wrong
+   * bus here, because with the rhythm grid gone there is only one destination
+   * left for a one-shot. The parameter exists for preview(), which has to be
+   * able to put the cutter's rasp on the cutter's own bus. */
+  function noiseBurst(dur, freq, q, gain, type, delay, dest) {
     if (!actx) return;
     var src = actx.createBufferSource();
     src.buffer = noiseBuffer;
@@ -257,7 +438,7 @@ SM.sound = (function () {
     var t = actx.currentTime + (delay || 0);
     g.gain.setValueAtTime(gain, t);
     g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
-    src.connect(f); f.connect(g); g.connect(sfxBus);
+    src.connect(f); f.connect(g); g.connect(dest || sfxBus);
     // Random playback offset so repeated hits never sound identical. Clamped
     // so the burst can never run off the end of the buffer and go silent.
     var maxOff = noiseBuffer.duration - dur - 0.05;
@@ -637,6 +818,14 @@ SM.sound = (function () {
     setMuted: setMuted,
     toggleMute: toggleMute,
     isMuted: isMuted,
+    /* The two sliders. Read as 0..1; the panel does its own 0..100 arithmetic,
+     * because a percentage is a presentation decision and this module has no
+     * other opinion about it. */
+    getMusicVolume: function () { return musicVol; },
+    setMusicVolume: setMusicVolume,
+    getSfxVolume: function () { return sfxVol; },
+    setSfxVolume: setSfxVolume,
+    preview: preview,
     reset: reset,
     isReady: function () { return unlocked && !!actx; },
     /** Introspection: the ducked bus levels, so "the beds actually stop" is a
