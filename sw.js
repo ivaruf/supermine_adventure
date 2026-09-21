@@ -148,7 +148,7 @@
 //         the arcade's copy of exit.js, which no bump here could refresh), and
 //         the way out is now drawn off framed()/standalone() rather than an
 //         offers() an older cached exit.js has never heard of.
-const VERSION = 'v2.11.0'; // the corner plates are fixed to the page, and we serve only our own cache
+const VERSION = 'v2.11.1'; // the exit-fullscreen glyph is symmetric again — its bottom-left arm pointed the wrong way
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 
