@@ -136,7 +136,19 @@
 //         gate and the pause card alike. No save format, no module contract
 //         and no asset list change — js/ui.js, js/sound.js, js/advhud.js and
 //         style.css only, all of them already in the list below.
-const VERSION = 'v2.10.1'; // the volume rows say music-and-effects like everywhere else
+// v2.11.0 THE CORNER BELONGS TO THE PAGE. The sound and fullscreen plates were
+//         ornaments of the title gate and existed on one screen out of seven;
+//         they are fixed chrome now, in the same place on the slots, the map,
+//         the workshop, prep, results and underground, with the sound panel
+//         moved out of the title overlay to follow them. The run's own mute
+//         and PAUSE move inboard rather than away. Opening the mixer during a
+//         descent pauses it and closing it lands on PAUSED, never on a mine
+//         that has been standing still. Two cache faults go with it: this
+//         worker was answering out of ANY cache on the origin (so it served
+//         the arcade's copy of exit.js, which no bump here could refresh), and
+//         the way out is now drawn off framed()/standalone() rather than an
+//         offers() an older cached exit.js has never heard of.
+const VERSION = 'v2.11.0'; // the corner plates are fixed to the page, and we serve only our own cache
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 
@@ -206,8 +218,19 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   if (new URL(request.url).origin !== self.location.origin) return;
 
+  /* `cacheName: CACHE` IS LOAD-BEARING AND WAS MISSING. A bare caches.match()
+     searches EVERY cache on the origin, and every game in this hub shares one
+     — so this was free to answer out of the arcade's cache, or SUPERMINE's. It
+     did: ../arcade/exit.js is precached by the ARCADE, and the copy it holds is
+     the copy this game kept getting, out of a cache no VERSION bump here can
+     ever reach. The game then ran new code against an old exit.js and the way
+     out could vanish inside the arcade, which is the one place it has to be.
+     Scoped to our own cache, a miss falls through to the network below and the
+     answer is at worst fresh. This is the same mistake the cleanup filter
+     above is documented to avoid: the slug is on the cache name, and then
+     nothing asks for it. */
   event.respondWith(
-    caches.match(request, { ignoreSearch: true }).then((hit) => {
+    caches.match(request, { cacheName: CACHE, ignoreSearch: true }).then((hit) => {
       if (hit) return hit;
       return fetch(request).then((res) => {
         if (res.ok && res.type === 'basic') {
@@ -215,7 +238,12 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE).then((c) => c.put(request, copy));
         }
         return res;
-      }).catch(() => (request.mode === 'navigate' ? caches.match('./index.html') : undefined));
+      }).catch(() => (request.mode === 'navigate'
+        // Scoped for the same reason as the lookup above: offline, the shell we
+        // fall back to must be OUR shell and not whichever game on this origin
+        // happens to have an './index.html' cached.
+        ? caches.match('./index.html', { cacheName: CACHE })
+        : undefined));
     })
   );
 });

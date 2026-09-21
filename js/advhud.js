@@ -50,8 +50,10 @@
  *     BOTTOM EDGE  one line: DEPTH · FUNDS · HULL · HEAT, inside the
  *                  safe-area inset, BELOW where a thumb sits on the stick.
  *     ABOVE IT     the scanner contact, between the rails.
- *     TOP EDGE     nothing but the sound and pause plates in the corner. The
- *                  shaft, and the daylight at the end of it, is clear.
+ *     TOP EDGE     nothing but icon plates in the corner: ui.js's permanent
+ *                  pair (sound, fullscreen) on the corner itself and this
+ *                  HUD's own mute and PAUSE on the row directly beneath them.
+ *                  The shaft, and the daylight at the end of it, is clear.
  *
  *   WIDE — THE STACK, UNCHANGED. At 1440x900 the stack is a 560 px column
  *   pinned top-LEFT while the machine is centred: it never covers the shaft,
@@ -665,7 +667,15 @@ SM.advhud = (function () {
     els.rideTitle = el('div', 'sm-ah-ride-title', els.rideInner, '');
     els.rideSub = el('div', 'sm-ah-ride-sub', els.rideInner, '');
 
-    /* --- top-right controls --------------------------------------------- */
+    /* --- the RUN's two controls, inboard of the page's two ---------------
+     * ui.js owns the corner itself now: its sound and fullscreen plates are
+     * fixed there on every screen and never leave. These two are different in
+     * kind — silence this instant, and stop the run — and they exist only
+     * while a run does, so they give the corner up and sit inside it. Wide
+     * that means one row of four reading fullscreen, sound, pause, mute from
+     * the right edge inwards; on a phone there is no width for four across the
+     * top, so they drop to the row beneath instead and the page's pair stays
+     * on the corner. Both arrangements are in style-adventure.css. */
     var btns = el('div', 'sm-ah-btns', root);
     els.btns = btns;
     /* Own class names, NOT ui.js's sm-btn-sound / sm-btn-pause: both HUDs are
@@ -720,13 +730,17 @@ SM.advhud = (function () {
     });
 
     /* Leaving the GAME, which is a third thing again: not the run, not the
-     * expedition. Built only when the arcade's exit.js actually loaded — it is
-     * another repo's file and is allowed to be missing, and a quit button that
-     * cannot quit is worse than none. Two-tap like the others on this card,
-     * because quitting mid-descent drops the hold exactly as aborting does.
-     * What it SAYS depends on how the page was opened: a button must not offer
-     * to close a tab that no script is allowed to close. */
-    if (window.ArcadeExit) {
+     * expedition. Built only when there is somewhere to go back TO — a
+     * launcher behind us, or an installed window that can close itself. That
+     * is asked through exit.js's framed()/standalone() and NOT through its
+     * newer offers(), because exit.js is another repo's file, the copy that
+     * answers may be older than this line, and a guard built on a name that
+     * old copy has never heard of fails CLOSED — the way out disappearing
+     * inside the arcade, which is the one place it has to be. Two-tap like
+     * the others on this card, because quitting mid-descent drops the hold
+     * exactly as aborting does. What it SAYS depends on how the page was
+     * opened: a button must not offer to close a tab no script may close. */
+    if (exitOffered()) {
       /* PLAIN WORDS, and the same ones ui.js puts on the title gate — this is
        * the same button on a second screen, and two labels for one way out is
        * how they come to disagree. BACK TO ARCADE when framed or when a tab
@@ -754,6 +768,19 @@ SM.advhud = (function () {
     var cell = el('div', 'sm-cell', parent);
     el('div', 'sm-cell-label', cell, label);
     return el('div', 'sm-cell-value', cell, value);
+  }
+
+  /** Whether to draw a way out at all — a deliberate copy of ui.js's own, for
+   *  the reason ICONS is a copy of its glyphs: neither module exports it, and
+   *  four lines is cheaper than a new cross-module contract between the title
+   *  gate and the in-mine HUD. The two must agree, so if one changes, change
+   *  both. The full argument for framed()/standalone() over offers() is beside
+   *  the call site above and in ui.js. */
+  function exitOffered() {
+    var x = window.ArcadeExit;
+    if (!x || !x.framed || !x.standalone) return false;
+    try { return !!(x.framed() || x.standalone()); }
+    catch (e) { return false; }   // a cross-origin parent is not a crash
   }
 
   /**
@@ -837,6 +864,13 @@ SM.advhud = (function () {
    */
   function onKeyDown(e) {
     if (!e || !visible) return;
+    /* THE MIXER TAKES THE KEY FIRST. ui.js's sound panel is permanent chrome
+     * and opens over a live descent, so underground one Escape would otherwise
+     * be answered twice: ui.js closing the panel and this handler RESUMING the
+     * run behind it — a mine back in motion under a scrim the player is still
+     * looking at. Opening that panel pauses us on purpose (see ui.js's
+     * openSound); leaving it is not the gesture that undoes that. */
+    if (SM.ui && SM.ui.isSoundOpen && SM.ui.isSoundOpen()) return;
     var k = e.key;
     if (k === 'Escape' || k === 'Esc' || k === 'p' || k === 'P') {
       e.preventDefault();

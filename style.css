@@ -2165,7 +2165,7 @@ html, body {
 }
 
 /* ===========================================================================
- * THE CORNER CLUSTER — top right of the title gate, opposite the door
+ * THE CORNER CLUSTER — PERMANENT, AND FIXED TO THE PAGE
  * ---------------------------------------------------------------------------
  * Two plates: the speaker that opens the sound panel, and the one that fills
  * the screen. They are the same `.sm-iconbtn` gold-on-dark plate with the same
@@ -2173,26 +2173,40 @@ html, body {
  * — that stripe is what keeps a 42px button from reading as generic mobile
  * chrome, and it is why these are NOT dressed like .sm-start-quit beside them.
  *
- * Pinned to the OVERLAY, not to .sm-start-inner, for the reason .sm-start-quit
- * and the build stamp are: the column in the middle scrolls on a short phone,
- * and neither the way out nor the way to the volume may scroll away with it.
+ * THEY NEVER GO ANYWHERE. This was `position: absolute` inside .sm-start,
+ * which made it an ornament of the title gate: it existed on one screen out of
+ * seven, and fullscreen was unreachable from the slot picker onwards. It is a
+ * child of #ui-root now and `position: fixed`, so the same two plates are in
+ * the same place on the title, in the slots, on the map, in the workshop, on
+ * prep, on results and underground.
  *
- * Mirrors the door's insets exactly, so the two corners sit on one line and
- * clear the same notch. (#ui-root already pads by the safe area; the max() is
- * belt and braces for a browser reporting an inset larger than the padding box
- * can absorb.)
+ * Z-INDEX 30 IS THE WHOLE POINT. This game's layers run: stick 3, instruments
+ * 6, lift panel 7, the run's own plates 8, the ride wipe 9, the meta screens
+ * 14, the pause card 17, the toast 19, the title 20, and the sound panel 28.
+ * These outlive every one of them, so nothing any of them does may cover them
+ * — including the panel this cluster opens, which is what lets the speaker be
+ * a real toggle (see buildCorner() in js/ui.js).
+ *
+ * WHERE IT SITS. Exactly where the in-mine pair used to: --sm-top-y down and
+ * --sm-gutter in, so the two pairs line up as one row on a wide screen and as
+ * one column on a phone. It no longer mirrors .sm-start-quit's insets — the
+ * door is 4px lower on the title and that is the right trade, because this
+ * cluster shares a row with the run's plates on six screens and shares a line
+ * with the door on one.
+ *
+ * SAFE AREAS ARE ARITHMETIC NOW, not inheritance: `fixed` positions against
+ * the viewport, so #ui-root's padding does not apply and both insets are added
+ * back here. pointer-events too — #ui-root is pointer-events:none, and this
+ * used to inherit `auto` from .sm-start.
  * ======================================================================== */
 .sm-corner {
-  position: absolute;
-  top: max(12px, env(safe-area-inset-top, 0px));
-  right: max(14px, env(safe-area-inset-right, 0px));
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + var(--sm-top-y));
+  right: calc(env(safe-area-inset-right, 0px) + var(--sm-gutter));
   display: flex;
   gap: 8px;
-  /* .sm-start-inner is up to 880px wide and centred, so on a desktop window it
-     reaches under this corner. It is positioned (relative) and earlier in the
-     DOM, which is already enough — this says so out loud rather than leaving
-     the cluster's clickability resting on source order. */
-  z-index: 2;
+  pointer-events: auto;
+  z-index: 30;
 }
 /* THE `hidden` ATTRIBUTE HAS TO WIN HERE, AND ON ITS OWN IT DOES NOT. The UA
    sheet's `[hidden] { display: none }` loses to any author rule, and
@@ -2204,10 +2218,19 @@ html, body {
 /* ===========================================================================
  * THE SOUND PANEL — two levels and a way back
  * ---------------------------------------------------------------------------
- * A modal card over the title with its own backdrop, the same shape as the
- * tester panel below and built inside .sm-start for the same reason: one class
- * on the overlay dismisses the lot. Above everything else on that overlay,
- * because while it is up it is the only thing on screen.
+ * A modal card with its own backdrop, the same shape as the tester panel
+ * below. IT IS NO LONGER INSIDE .sm-start: the speaker that opens it is on
+ * every screen now, and a panel that the title overlay's `.sm-start-off` could
+ * take down with it would have made that speaker a button that does nothing on
+ * six screens out of seven. It is a child of #ui-root, like the cluster.
+ *
+ * Z 28: over the title (20), the toast (19), the pause card (17), the meta
+ * screens (14) and the whole in-mine HUD — while it is up it is the only thing
+ * on screen. BELOW .sm-corner (30) on purpose, so the speaker that opened it
+ * stays lit above its own scrim and a second press closes it.
+ *
+ * Still `absolute` rather than `fixed`, so the scrim covers #ui-root's padding
+ * box exactly as it did inside the overlay — one less thing to re-measure.
  * ======================================================================== */
 .sm-sound {
   position: absolute;
@@ -2219,7 +2242,7 @@ html, body {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.22s ease;
-  z-index: 3;
+  z-index: 28;
 }
 .sm-sound-on { opacity: 1; pointer-events: auto; }
 

@@ -16,14 +16,19 @@
  *    one gesture and then hand the screen to SM.adv.open(). It is deliberately
  *    plain — see buildTitle(), which is where the real splash goes.
  *
- * 1b. THE CORNER CLUSTER AND THE SOUND PANEL hang off that gate: a speaker
- *    that opens two volume sliders (ENGINE and EFFECTS), and a plate that
- *    fills the screen. They are here rather than in a module of their own
- *    because index.html is frozen and this file already builds every control
- *    on this screen — and the screen toggle is deliberately NOT in a file
- *    named for its API, which would be blocked across the whole of github.io
- *    by a blocker's default list. See buildCorner() and the FILLING THE SCREEN
- *    section for both arguments in full.
+ * 1b. THE CORNER CLUSTER AND THE SOUND PANEL are built here and belong to the
+ *    PAGE, not to that gate: a speaker that opens two volume sliders (ENGINE
+ *    and EFFECTS), and a plate that fills the screen. Both are appended to
+ *    #ui-root and fixed above every other layer, so they are in the same place
+ *    on the title, in the slot picker, on the map, in the workshop, on the
+ *    prep screen, on results and underground. They used to hang off the title
+ *    overlay and leave with it, which made fullscreen unreachable on six
+ *    screens out of seven. They are in THIS file rather than a module of their
+ *    own because index.html is frozen and this file already builds every
+ *    control on this screen — and the screen toggle is deliberately NOT in a
+ *    file named for its API, which would be blocked across the whole of
+ *    github.io by a blocker's default list. See buildCorner() and the FILLING
+ *    THE SCREEN section for both arguments in full.
  *
  * 2. THE LAYOUT SWITCH.  applyCompact() publishes `sm-compact` / `sm-tiny` /
  *    `sm-portrait` on #ui-root, and style-adventure.css hangs the entire phone
@@ -74,7 +79,7 @@ SM.ui = (function () {
    * behind (v2.8.0 against sw.js's v2.9.1), which only ever shows on a
    * file:// or first-visit load — exactly the two cases where nobody can
    * check it against anything, so a wrong number there is worse than none. */
-  var GAME_VERSION    = 'v2.10.0';
+  var GAME_VERSION    = 'v2.11.0';
 
   /* TESTER MODE — the title-gate cheat code, old-school. Typed on the title
    * screen it reveals the TESTER MODE button; the unlock persists in
@@ -289,10 +294,13 @@ SM.ui = (function () {
     buildArcadeExit();
     buildCorner();
     buildTester();
-    /* LAST, so it paints over the tester card as well as the title. The two
-     * never open together — each of the openers closes the other — but DOM
-     * order is the cheaper guarantee than a z-index argument between two
-     * absolutely positioned siblings inside the same overlay. */
+    /* The cluster and the panel are built HERE, with the rest of this screen's
+     * controls, but they are appended to #ui-root rather than to the overlay —
+     * they outlive it now. DOM order no longer decides what paints over what
+     * (advhud and advui append to the same root long after this runs), so both
+     * carry a real z-index; see .sm-corner and .sm-sound in style.css. The
+     * tester card is still a child of the overlay and still never opens
+     * alongside the mixer — each opener closes the other. */
     buildSoundPanel();
 
     /* CLICK, not pointerdown. A pointerdown+click pair on the same element
@@ -319,18 +327,43 @@ SM.ui = (function () {
    * map, the slots and the prep screen all carry TITLE SCREEN), and two
    * different ways out of the same game is how they end up disagreeing.
    *
-   * Built only when the arcade's exit.js actually loaded: it is another repo's
-   * file and is allowed to be missing, and a quit button that cannot quit is
-   * worse than none. What it SAYS is exit.js's answer, because a button must
-   * not offer to close a tab that no script is allowed to close.
+   * Built only when there is somewhere to go back TO — exitOffered() below,
+   * not a bare `window.ArcadeExit`: that file is another repo's and is allowed
+   * to be missing, and a player who typed this address never came from the
+   * arcade and should not be handed a door into it. What it SAYS is exit.js's
+   * answer, because a button must not offer to close a tab no script may close.
    *
    * DELIBERATELY SILENT, unlike its twin on the pause card. This is the one
    * screen where the audio graph has not been unlocked yet — the START gesture
    * is what does that — and spinning up an AudioContext to click on the way
    * out of the game would be the only thing it ever got used for.
    * ------------------------------------------------------------------ */
+  /**
+   * WHETHER TO DRAW A WAY OUT AT ALL, which is not the same question as
+   * whether quit() could do something. In a plain tab it could — the arcade is
+   * a URL and a navigation always works — but somebody who typed this game's
+   * address, or followed a link to it, never came from the arcade and may
+   * never have heard of it. So: a launcher behind us, or an installed window
+   * that can genuinely close itself.
+   *
+   * ASKED THROUGH framed()/standalone() AND NOT THROUGH offers(), even though
+   * offers() exists in exit.js and says exactly this in one call. exit.js is
+   * ANOTHER REPOSITORY'S FILE and the copy that answers may be older than this
+   * line: it is fetched from /arcade/, and a service worker on this shared
+   * origin can hand back a version cached long before offers() was written. A
+   * guard built on the new name fails CLOSED when that happens — the way out
+   * silently disappears, inside the arcade, where it is the one control that
+   * matters. These two predicates have been in exit.js since it existed.
+   */
+  function exitOffered() {
+    var x = window.ArcadeExit;
+    if (!x || !x.framed || !x.standalone) return false;
+    try { return !!(x.framed() || x.standalone()); }
+    catch (e) { return false; }   // a cross-origin parent is not a crash
+  }
+
   function buildArcadeExit() {
-    if (!window.ArcadeExit) return;
+    if (!exitOffered()) return;
 
     /* PLAIN WORDS, NOT THE MINE'S. A way out of the game is not a place in the
      * fiction, so it does not get a name from one: BACK TO ARCADE when the
@@ -362,13 +395,11 @@ SM.ui = (function () {
   }
 
   /* ---------------------------------------------------------------------
-   * THE CORNER CLUSTER — top right of the title gate
+   * THE CORNER CLUSTER — PERMANENT CHROME, FIXED TO THE PAGE
    * ---------------------------------------------------------------------
    * Two square plates: the speaker that opens the sound panel, and the plate
-   * that fills the screen. They take the corner opposite the door (BACK TO
-   * ARCADE is top-left, TESTER MODE bottom-right), because the two things here
-   * that are about the HARDWARE rather than about the mine belong together and
-   * belong away from the way out.
+   * that fills the screen. The two things here that are about the HARDWARE
+   * rather than about the mine, together, in the corner opposite the door.
    *
    * THE SPEAKER IS NOT A MUTE BUTTON and carries no slash. advhud's speaker
    * mutes; this one opens a panel, and the two must not look like the same
@@ -376,35 +407,51 @@ SM.ui = (function () {
    * gold-on-dark plate with the hazard sliver — which is what keeps a 42px
    * button from reading as generic mobile chrome.
    *
-   * IT BELONGS TO THE TITLE GATE, and it leaves with it. That is deliberate and
-   * it is forced: from the moment a descent starts, the top-right corner is
-   * advhud's `.sm-ah-btns` pair (speaker and PAUSE), and two clusters cannot
-   * have one corner. The meta screens between the two — slots, map, workshop,
-   * prep — carry nothing there either, on the same argument buildArcadeExit()
-   * makes above: every one of them is a tap or two from this screen, and two
-   * places to set one volume is how they end up disagreeing.
+   * IT USED TO BELONG TO THE TITLE GATE and leave with it, which meant it
+   * existed on exactly one screen out of seven: not in the slot picker, not on
+   * the map, not in the workshop, not on the prep screen, not on results, and
+   * not underground — where filling the glass matters most. A control that
+   * goes away when the screen changes is not a corner; it is a menu item that
+   * happens to sit in one. So it is a CHILD OF #ui-root now, `position: fixed`
+   * and above every layer this game has (see .sm-corner in style.css), and the
+   * same two plates are in the same place on all seven.
    *
-   * SAFE AREAS need no arithmetic beyond the max() below: #ui-root already pads
-   * itself by all four insets, and this mirrors .sm-start-quit's insets exactly
-   * so the door and the cluster sit on one line.
+   * WHAT IT SHARES THE CORNER WITH. From the first descent, advhud's
+   * `.sm-ah-btns` pair — mute and PAUSE — is in this corner too, and it stays:
+   * those answer different questions (silence this instant; stop the run) and
+   * they exist only while a run does. They move INBOARD instead. Wide, the
+   * four sit in one row and read, from the right edge inwards: fullscreen,
+   * sound, pause, mute — the page's pair outermost. On a phone there is no
+   * room for four across the top without eating the instrument bar, so the
+   * run's pair drops to the row beneath and the reading is top-down instead:
+   * the page's pair on the corner, the run's directly under it. Both
+   * arrangements live in style-adventure.css beside .sm-ah-btns.
+   *
+   * SAFE AREAS ARE ARITHMETIC NOW, not inheritance: `fixed` positions against
+   * the viewport, so #ui-root's padding no longer applies and .sm-corner adds
+   * both insets back by hand. It no longer lines up with .sm-start-quit in the
+   * opposite corner — it lines up with the run's plates instead, which is the
+   * row it has to share on six screens out of seven.
    * ------------------------------------------------------------------ */
   function buildCorner() {
-    els.corner = el('div', 'sm-corner', els.start);
-    /* THE 8px GAP BETWEEN THE TWO PLATES IS PART OF THIS DIV, and a tap that
-     * lands in it would otherwise bubble to els.start and begin a descent. The
-     * plates stop propagation themselves; this catches the crack between them
-     * and any padding a future rule adds around them. */
+    els.corner = el('div', 'sm-corner', root);
+    /* Nothing above this cluster starts a descent any more — it is no longer
+     * inside els.start, and it paints above it — but the crack between the two
+     * plates is still a click on a container, and swallowing it costs one
+     * line. Kept as insurance against whatever ends up under here next. */
     els.corner.addEventListener('click', function (e) { e.stopPropagation(); });
 
     els.mixBtn = iconButton(els.corner, 'sm-btn-mix', UI_ICONS.sound_on, 'Sound');
     els.mixBtn.setAttribute('aria-expanded', 'false');
     els.mixBtn.addEventListener('click', function (e) {
       e.preventDefault();
-      /* els.start's own click handler starts the campaign, and this plate is
-       * sitting on top of it. Opening the mixer must never launch a descent. */
       e.stopPropagation();
       els.mixBtn.blur();
-      openSound();
+      /* A TOGGLE, because the plate now paints ABOVE the panel it opens. It
+       * used to vanish under the sound panel's scrim, so "press it again" was
+       * not a gesture that existed; now it is the obvious one, and
+       * aria-expanded has been claiming it all along. */
+      if (soundOpen) closeSound(); else openSound();
     });
 
     /* HIDDEN IN THE MARKUP THIS BUILDS, and un-hidden by initScreenToggle()
@@ -419,11 +466,18 @@ SM.ui = (function () {
   /* ---------------------------------------------------------------------
    * THE SOUND PANEL — two levels and a way back
    * ---------------------------------------------------------------------
-   * A modal card over the title with its own backdrop, built the way the tester
-   * panel beside it is built and for the same reasons: it lives INSIDE
-   * .sm-start, so `.sm-start-off` dismisses it with the title, and it stops
-   * click propagation once at its root, which covers every control inside it.
-   * Tapping the backdrop closes it, exactly as the tester's does.
+   * A modal card with its own backdrop. IT IS A CHILD OF #ui-root, NOT OF
+   * .sm-start, and that moved with the speaker: while it lived inside the
+   * title overlay, `.sm-start-off` took it down with the title, so the panel
+   * could only ever be seen from the one screen the old cluster was on. With
+   * the plate on all seven screens that arrangement would have turned the
+   * speaker into a button that silently does nothing on six of them, which is
+   * worse than not having it. It is a sibling of the title and of the meta
+   * screens now, above both (see .sm-sound in style.css).
+   *
+   * It still stops click propagation once at its root, which covers every
+   * control inside it, and tapping the backdrop still closes it — exactly as
+   * the tester panel's does.
    *
    * WHY TWO SLIDERS AND NOT ONE SWITCH. The mine had a single mute: you could
    * kill the whole thing or live with it, and there was no way to keep the
@@ -442,7 +496,7 @@ SM.ui = (function () {
    * wall time instead and is the one thing on this screen that has to be heard.
    * ------------------------------------------------------------------ */
   function buildSoundPanel() {
-    els.soundPanel = el('div', 'sm-sound', els.start);
+    els.soundPanel = el('div', 'sm-sound', root);
     els.soundPanel.addEventListener('click', function (e) {
       e.stopPropagation();          // nothing in here may start the campaign...
       if (e.target === els.soundPanel) closeSound();   // ...and the backdrop closes
@@ -580,9 +634,38 @@ SM.ui = (function () {
     });
   }
 
+  /**
+   * The mixing panel.
+   *
+   * NO STATE GUARD, and that is the point of this release. The speaker used to
+   * exist on the title gate alone, so "where can this be opened from" never
+   * had to be asked; now the plate is on all seven screens and a guard that
+   * let it fire from one of them would make it a button that silently does
+   * nothing on the other six.
+   *
+   * WHERE "BACK" GOES NEEDS NO BOOKKEEPING. The panel is an overlay with its
+   * own scrim, not a screen in a state machine, so closing it reveals whatever
+   * it was opened over, by construction. Escape and BACK both route through
+   * closeSound(), so they cannot leave by different doors. What does have to
+   * be arranged is the state underneath it:
+   *
+   * UNDERGROUND, THE MINE STOPS. Opening a panel over a live descent would
+   * leave the rig driving into rock behind the scrim on a tank that keeps
+   * burning, and closing it would drop the player back into a machine they
+   * have not been watching. So a run is PAUSED on the way in — through
+   * advhud's own card, not a bare setPaused(), so what is revealed when the
+   * scrim goes is PAUSED with RESUME under the thumb rather than a mine that
+   * looks live and is not. openPause() refuses itself when the HUD is not
+   * visible or a pause is already up, so this is safe on the title gate, on
+   * every meta screen, and from the pause card itself.
+   *
+   * IT DOES NOT RESUME ON THE WAY OUT, deliberately. Coming back to a paused
+   * mine is the asymmetry; coming back to a moving one would be the bug.
+   */
   function openSound() {
     if (!els.soundPanel || soundOpen) return;
     closeTester();               // one menu at a time over the title
+    if (SM.advhud && SM.advhud.openPause) SM.advhud.openPause();
     soundOpen = true;
     /* The panel is built once and reopened many times, so it repaints from the
      * module on the way up rather than trusting whatever the DOM was last left
@@ -595,6 +678,8 @@ SM.ui = (function () {
     try { els.soundBack.focus(); } catch (e) { /* focus is optional */ }
   }
 
+  /** DELIBERATELY DOES NOT RESUME — see openSound(). If a descent was paused
+   *  on the way in, the pause card is what appears when this scrim goes. */
   function closeSound() {
     if (!els.soundPanel || !soundOpen) return;
     soundOpen = false;
@@ -909,9 +994,29 @@ SM.ui = (function () {
    *     into a synthetic click, and the second call simply returns.
    */
   function onTitleKey(e) {
-    if (!titleUp || !e) return;
-    if (els.update && e.target === els.update) return;
+    if (!e) return;
     var k = e.key;
+    /* THE SOUND PANEL OWNS THE KEYBOARD WHILE IT IS UP, AND IT TAKES IT BEFORE
+     * THE `titleUp` GATE. That gate is the first line of this handler because
+     * everything below it is the title's business — but the panel is not the
+     * title's any more, it opens from all seven screens, and behind the gate
+     * its Escape key was simply never delivered on six of them. Underground it
+     * was worse than lost: advhud's own Escape handler would have taken it and
+     * RESUMED the run with the mixer still over it, which is why that handler
+     * now asks isSoundOpen() before it acts. One key, one meaning, wherever
+     * the panel is.
+     *
+     * The rest of the reason this block comes early has not changed: Enter and
+     * Space must not start a descent out from under an open menu when focus is
+     * on BACK, and the arrows a player nudges a slider with must not be
+     * quietly feeding the cheat tracker while they do it. The sliders stop
+     * propagation one level lower for input.js's sake — see volumeRow(). */
+    if (soundOpen) {
+      if (k === 'Escape' || k === 'Esc') { e.preventDefault(); closeSound(); }
+      return;
+    }
+    if (!titleUp) return;
+    if (els.update && e.target === els.update) return;
     /* ENTER AND SPACE BELONG TO WHATEVER BUTTON HAS FOCUS, not to the overlay
        underneath it. The UPDATE plate got this by name on the line above, back
        when it was the only other focusable thing on the screen. It is not any
@@ -926,18 +1031,6 @@ SM.ui = (function () {
     if ((k === 'Enter' || k === ' ' || k === 'Spacebar') &&
         e.target && e.target !== els.startBtn &&
         e.target.tagName && e.target.tagName.toLowerCase() === 'button') return;
-    /* THE SOUND PANEL OWNS THE KEYBOARD WHILE IT IS UP, and it takes it BEFORE
-     * the cheat tracker rather than after. Three things depend on that order:
-     * Escape has to close the panel (there is no pause menu up here to take
-     * it), Enter and Space must not start a descent out from under an open
-     * menu when the focus is on BACK, and the arrows a player nudges a slider
-     * with must not be quietly feeding the cheat sequence while they do it.
-     * The sliders stop propagation one level lower for input.js's sake — see
-     * volumeRow(). */
-    if (soundOpen) {
-      if (k === 'Escape' || k === 'Esc') { e.preventDefault(); closeSound(); }
-      return;
-    }
     /* The cheat tracker sees every key first; a consumed key (the sequence's
      * own Enter) must not fall through and start the game. */
     if (trackTesterCode(k)) { e.preventDefault(); return; }
@@ -988,9 +1081,10 @@ SM.ui = (function () {
   }
 
   function hideTitle() {
-    /* The panel is a child of the overlay, so the fade takes it away on its
-     * own — but `soundOpen` would stay true and showTitle() would bring it
-     * straight back up over the title the next time the player surfaced. */
+    /* THE PANEL IS NO LONGER A CHILD OF THE OVERLAY, so the fade does not take
+     * it away any more — this call is what does, and it is now the only thing
+     * that does. Without it the mixer would still be over the screen when the
+     * first descent began underneath it. */
     closeSound();
     if (els.start) els.start.classList.add('sm-start-off');
   }
@@ -1202,6 +1296,11 @@ SM.ui = (function () {
     showTitle: showTitle,
     leaveAdventure: leaveAdventure,
     isTitleUp: function () { return titleUp; },
+    /* Asked by js/advhud.js's Escape handler, which shares the key with this
+     * file's. The mixer is permanent chrome and opens over a live descent, so
+     * underground both handlers would otherwise answer one Escape: this one
+     * closing the panel, that one resuming the run behind it. */
+    isSoundOpen: function () { return soundOpen; },
     getRoot: function () { return root; }
   };
 })();
