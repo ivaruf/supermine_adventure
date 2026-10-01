@@ -148,7 +148,7 @@
 //         the arcade's copy of exit.js, which no bump here could refresh), and
 //         the way out is now drawn off framed()/standalone() rather than an
 //         offers() an older cached exit.js has never heard of.
-const VERSION = 'v2.11.1'; // the exit-fullscreen glyph is symmetric again — its bottom-left arm pointed the wrong way
+const VERSION = 'v2.11.2'; // a tablet no longer selects the HUD or opens Copy / Look Up mid-drive (js/touch-guard.js)
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 
@@ -181,6 +181,7 @@ const ASSETS = [
   './js/advui.js',
   './js/adv.js',
   './js/main.js',
+  './js/touch-guard.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
