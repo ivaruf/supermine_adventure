@@ -2440,6 +2440,80 @@ textarea,
 }
 
 /* ---------------------------------------------------------------------------
+ * THE LANGUAGE ROW — js/i18n.js langRow(), in the sound panel and on the pause
+ * card (hub CLAUDE.md §2, "Two languages, Norwegian first")
+ * ---------------------------------------------------------------------------
+ * Laid out as a third row of the sound panel on purpose: the caption takes the
+ * same 78px gutter as ENGINE and EFFECTS, so all three controls start at one x
+ * (§2's "one logical group is laid out as one"). The two buttons are equals —
+ * `1 1 0`, not auto, or ENGLISH would come out wider than NORSK and look like
+ * the one that matters. The chosen one wears the gold the gauges fill with,
+ * read off aria-pressed so what is lit and what is announced cannot drift.
+ * The flags are the hub's art at a fixed height, with a hairline so the white
+ * of the Norwegian cross does not dissolve into a light plate.
+ * ---------------------------------------------------------------------------*/
+.sm-lang {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.sm-lang-label {
+  flex: 0 0 78px;
+  font-family: var(--sm-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--sm-dim);
+  text-align: left;
+}
+.sm-lang-seg {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+}
+.sm-btn.sm-lang-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  letter-spacing: 1.6px;
+  color: var(--sm-dim);
+}
+.sm-btn.sm-lang-btn[aria-pressed="true"] {
+  color: var(--sm-gold);
+  border-color: rgba(255, 194, 31, 0.6);
+  box-shadow:
+    inset 0 1px 0 var(--sm-edge-hi),
+    inset 0 -2px 0 var(--sm-edge-lo),
+    0 0 12px rgba(255, 194, 31, 0.28);
+}
+.sm-btn.sm-lang-btn:focus-visible {
+  outline: 2px solid var(--sm-cyan);
+  outline-offset: 2px;
+}
+.sm-flag {
+  flex: 0 0 auto;
+  width: auto;
+  height: 14px;
+  border-radius: 1px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+}
+.sm-lang-name { white-space: nowrap; }
+@media (max-height: 560px) {
+  .sm-lang { margin-top: 8px; }
+  .sm-btn.sm-lang-btn { min-height: 38px; padding: 6px 8px; }
+}
+.sm-tiny .sm-lang-label { flex-basis: 66px; letter-spacing: 1.2px; }
+.sm-tiny .sm-lang { gap: 9px; }
+.sm-tiny .sm-btn.sm-lang-btn { gap: 6px; padding: 6px; letter-spacing: 1px; }
+
+/* ---------------------------------------------------------------------------
  * TESTER MODE — revealed by the title-gate cheat code (see ui.js)
  * ---------------------------------------------------------------------------
  * The button sits in the title's bottom-right corner, quiet until the code

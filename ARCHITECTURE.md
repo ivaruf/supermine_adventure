@@ -93,6 +93,17 @@ between (say) camera and vehicle are fine.
 | 19 | `js/adv.js` | `SM.adv` | the state machine and the ledger |
 | 20 | `js/main.js` | `SM.main` | boots the game |
 
+**Before all of them, in `<head>`: `js/i18n.js` → `window.I18N`** (not on
+`SM`). It is the hub-wide language contract (games/CLAUDE.md §2, "Two
+languages"): `t(key, ...args)`, `getLang()`, `setLang()`, `paintStatic()`,
+plus `langRow()` for the Språk/Language row the sound panel and the pause card
+both carry. Bokmål unless `arcade.lang.v1` says `"en"`. Every word a player
+reads goes through `I18N.t`; a switch repaints `[data-i18n]` nodes and then
+fires `arcade:lang` on `document`, which every module that writes text at
+runtime listens for and re-renders what it is showing — never changing screen,
+closing a panel or unpausing. Data-table text (mine, part and ore names) is
+resolved through getters, so call sites read `.name` exactly as before.
+
 Two stylesheets, both required: `style.css` is the base layer (palette,
 `.sm-panel`, `.sm-btn`, `.sm-cell`, `.sm-stripe`, the title overlay, every
 `--sm-*` custom property) and `style-adventure.css` is everything above it.

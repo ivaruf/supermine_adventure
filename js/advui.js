@@ -84,13 +84,18 @@ SM.advui = (function () {
    * is shadowed the moment the real getter returns something sane. */
   var FALLBACK_FUEL_PRICE = 1;
 
-  var COMPANY_NAMES = [
-    'DEEP ROCK LTD', 'IRONMOUTH MINING', 'BLACKSEAM & CO',
-    'HOLLOW HILL CO', 'GRANITE UNION', 'LOWLIGHT DIGGING'
-  ];
+  /* SUGGESTED company names, in the player's language: slots.name1..6 in
+   * js/i18n.js. A suggestion is only ever a pre-filled field — once it is
+   * signed it is the company's NAME, stored as typed and never translated. */
+  var COMPANY_NAMES = 6;
+  function companyName(i) { return tr('slots.name' + (1 + ((i | 0) % COMPANY_NAMES))); }
 
   /* ---------------------------------------------------------------------
    * THE EIGHT PARTS, AS THE WORKSHOP DRAWS THEM
+   *
+   * `title`, `blurb` and `stat` are js/i18n.js KEYS, not words: they are
+   * resolved through tr() at paint time, so a language switch reaches the
+   * workshop on its next repaint rather than being frozen in at load.
    *
    * `lx`/`ly` are the hotspot's position in the MACHINE'S OWN LOCAL SPACE, as
    * a multiple of its half-width and of its body length — not as a percentage
@@ -104,30 +109,30 @@ SM.advui = (function () {
    * hotspot is the number the game actually uses.
    * ------------------------------------------------------------------ */
   var PARTS = [
-    { key: 'drill',   title: 'DRILL',   lx: 0,     ly: -0.86, unit: '',
-      blurb: 'Harder rock, faster. Every tier crosses a real hardness threshold.',
-      stat: 'POWER',  get: function () { return rigNum('getDrillPower', 0); } },
-    { key: 'lights',  title: 'LIGHTS',  lx: -1.28, ly: -0.50, unit: ' m',
-      blurb: 'The cavern you cannot see is the cavern you drive into.',
-      stat: 'REACH',  get: function () { return rigNum('getLightRadius', 0) * MPU; } },
-    { key: 'scanner', title: 'SCANNER', lx: 1.28,  ly: -0.50, unit: ' m',
-      blurb: 'Reads ore signatures through rock you have not touched yet.',
-      stat: 'RANGE',  get: function () { return rigNum('getScanRange', 0) * MPU; } },
-    { key: 'engine',  title: 'ENGINE',  lx: 0,     ly: 0.10,  unit: '',
-      blurb: 'Speed, and the shove to push loose debris out of the way.',
-      stat: 'SPEED',  get: function () { return rigNum('getSpeed', 0); } },
-    { key: 'tracks',  title: 'TRACKS',  lx: -1.05, ly: 0.14,  unit: '',
-      blurb: 'Grip and turn rate. A digger that cannot turn cannot come back.',
-      stat: 'TURN',   get: function () { return rigNum('getTurnRate', 0); } },
-    { key: 'cooling', title: 'COOLING', lx: 1.05,  ly: 0.14,  unit: '',
-      blurb: 'The deep is hot. Cooling is what makes the bottom survivable.',
-      stat: 'SHED',   get: function () { return rigNum('getHeatShed', 0); } },
-    { key: 'fuel',    title: 'FUEL',    lx: -0.78, ly: 0.62,  unit: 'u',
-      blurb: 'Every extra unit is another minute you can spend down there.',
-      stat: 'TANK',   get: function () { return rigNum('getFuelCap', 0); } },
-    { key: 'cargo',   title: 'CARGO',   lx: 0.78,  ly: 0.62,  unit: 'u',
-      blurb: 'Fewer return trips. The hold is the whole reason to go down.',
-      stat: 'HOLD',   get: function () { return rigNum('getCargoCap', 0); } }
+    { key: 'drill',   title: 'shop.part.drill',   lx: 0,     ly: -0.86, unit: '',
+      blurb: 'shop.partBlurb.drill',
+      stat: 'shop.partStat.drill',  get: function () { return rigNum('getDrillPower', 0); } },
+    { key: 'lights',  title: 'shop.part.lights',  lx: -1.28, ly: -0.50, unit: ' m',
+      blurb: 'shop.partBlurb.lights',
+      stat: 'shop.partStat.lights',  get: function () { return rigNum('getLightRadius', 0) * MPU; } },
+    { key: 'scanner', title: 'shop.part.scanner', lx: 1.28,  ly: -0.50, unit: ' m',
+      blurb: 'shop.partBlurb.scanner',
+      stat: 'shop.partStat.scanner',  get: function () { return rigNum('getScanRange', 0) * MPU; } },
+    { key: 'engine',  title: 'shop.part.engine',  lx: 0,     ly: 0.10,  unit: '',
+      blurb: 'shop.partBlurb.engine',
+      stat: 'shop.partStat.engine',  get: function () { return rigNum('getSpeed', 0); } },
+    { key: 'tracks',  title: 'shop.part.tracks',  lx: -1.05, ly: 0.14,  unit: '',
+      blurb: 'shop.partBlurb.tracks',
+      stat: 'shop.partStat.tracks',   get: function () { return rigNum('getTurnRate', 0); } },
+    { key: 'cooling', title: 'shop.part.cooling', lx: 1.05,  ly: 0.14,  unit: '',
+      blurb: 'shop.partBlurb.cooling',
+      stat: 'shop.partStat.cooling',   get: function () { return rigNum('getHeatShed', 0); } },
+    { key: 'fuel',    title: 'shop.part.fuel',    lx: -0.78, ly: 0.62,  unit: 'u',
+      blurb: 'shop.partBlurb.fuel',
+      stat: 'shop.partStat.fuel',   get: function () { return rigNum('getFuelCap', 0); } },
+    { key: 'cargo',   title: 'shop.part.cargo',   lx: 0.78,  ly: 0.62,  unit: 'u',
+      blurb: 'shop.partBlurb.cargo',
+      stat: 'shop.partStat.cargo',   get: function () { return rigNum('getCargoCap', 0); } }
   ];
 
   var MPU = (SM.config && SM.config.ADV) ? SM.config.ADV.METERS_PER_UNIT : 0.1;
@@ -195,6 +200,47 @@ SM.advui = (function () {
 
   function money(n) { return '$' + fmt(n); }
 
+  /* ---------------------------------------------------------------------
+   * WORDS. Every sentence on these screens comes out of js/i18n.js through
+   * tr(), and a node whose text never changes after build carries its key in
+   * data-i18n, so I18N.paintStatic() repaints it on a language switch without
+   * this module lifting a finger. Everything painted from state is simply
+   * re-painted — see onLang() at the bottom of the file.
+   * ------------------------------------------------------------------ */
+  function tr(key) {
+    if (window.I18N && I18N.t) return I18N.t.apply(null, arguments);
+    return key;
+  }
+
+  /** el() for text that is a fixed key: written now, repainted by paintStatic. */
+  function elT(tag, cls, parent, key) {
+    var n = el(tag, cls, parent, tr(key));
+    n.setAttribute('data-i18n', key);
+    return n;
+  }
+
+  /** button() for a plate whose label never changes with state. */
+  function buttonT(parent, cls, key) {
+    var b = button(parent, cls, tr(key));
+    b.setAttribute('data-i18n', key);
+    return b;
+  }
+
+  /** Optional key -> words, or `fallback` when the table has no such key. */
+  function trOr(key, fallback) {
+    if (window.I18N && I18N.has && !I18N.has(key)) return fallback;
+    var w = tr(key);
+    return (w === key) ? fallback : w;
+  }
+
+  /** A region's name, in the player's language. The ENGLISH name from the
+   *  catalogue stays the region's identity (its save key, its coastline seed,
+   *  its terrain art) — only what is printed changes. */
+  function regionName(name) {
+    var slug = String(name || 'Uncharted').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    return trOr('map.region.' + slug, String(name || ''));
+  }
+
   function num(v, dflt) {
     return (typeof v === 'number' && v === v && v !== Infinity && v !== -Infinity) ? v : dflt;
   }
@@ -232,19 +278,25 @@ SM.advui = (function () {
    * and it disarms on a timer so a stale CONFIRM is never left sitting there.
    */
   function confirmTap(node, label, confirmLabel, fn) {
+    /* `label` and `confirmLabel` are i18n KEYS, read on every write, so an
+     * armed plate re-labelled by a language switch still disarms into the
+     * new language rather than the one it was built in. */
     var armed = false, t = 0;
+    node.smRelabel = function () {
+      node.textContent = tr(armed ? confirmLabel : label);
+    };
     function disarm() {
       armed = false;
       if (t) { clearTimeout(t); t = 0; }
       node.classList.remove('sm-av-armed');
-      node.textContent = label;
+      node.textContent = tr(label);
     }
     node.smDisarm = disarm;
     onTap(node, function () {
       if (!armed) {
         armed = true;
         node.classList.add('sm-av-armed');
-        node.textContent = confirmLabel;
+        node.textContent = tr(confirmLabel);
         t = setTimeout(disarm, CONFIRM_MS);
         return;
       }
@@ -275,7 +327,7 @@ SM.advui = (function () {
       dispOut.name = String(m.name || m.id);
       dispOut.color = (m.colors && m.colors[0]) ? m.colors[0] : dispOut.color;
     } else {
-      dispOut.name = String(matId === undefined ? 'UNKNOWN' : matId);
+      dispOut.name = String(matId === undefined ? tr('aui.unknown') : matId);
     }
     return dispOut;
   }
@@ -356,7 +408,7 @@ SM.advui = (function () {
     for (var k = 0; k < tbl.length; k++) {
       var L = tbl[k] || {};
       var top = num(L.depthTopM, num(L.depthM, 0));
-      out.push({ i: k + 1, name: L.name || ('LEVEL ' + (k + 1)),
+      out.push({ i: k + 1, name: L.name || (tr('menu.level') + ' ' + (k + 1)),
                  depthTopM: top, depthBotM: num(L.depthBotM, top), depthM: top,
                  price: num(L.price, 0), widthU: num(L.widthU, 0),
                  owned: (k + 1) <= owned,
@@ -425,7 +477,7 @@ SM.advui = (function () {
   function levelLabel(L) {
     if (!L) return '';
     if (L.name) return String(L.name).toUpperCase();
-    return 'LEVEL ' + num(L.i, 0);
+    return tr('menu.level') + ' ' + num(L.i, 0);
   }
 
   /** "0–135 m" — the band, because a level IS a band now. */
@@ -440,7 +492,7 @@ SM.advui = (function () {
   function widthText(L) {
     var w = L ? num(L.widthU, 0) : 0;
     if (!(w > 0)) return '';
-    return fmt(Math.round(w * MPU)) + ' m WIDE';
+    return tr('aui.wide', fmt(Math.round(w * MPU)));
   }
 
   /* =====================================================================
@@ -458,7 +510,7 @@ SM.advui = (function () {
     el('div', 'sm-stripe', led);
     els.ledCompany = el('div', 'sm-av-led-co', led, 'SUPERMINE');
     var ledRight = el('div', 'sm-av-led-right', led);
-    els.ledDay = el('div', 'sm-av-led-cell', ledRight, 'DAY 1');
+    els.ledDay = el('div', 'sm-av-led-cell', ledRight, tr('aui.day', '1'));
     els.ledTier = el('div', 'sm-av-led-cell', ledRight, 'MK I');
     els.ledCash = el('div', 'sm-av-led-cash', ledRight, '$0');
 
@@ -475,12 +527,14 @@ SM.advui = (function () {
     els.toastSub = el('div', 'sm-av-toast-sub', els.toast, '');
   }
 
-  /** A screen shell: header, scrolling body, and a footer that never scrolls. */
+  /** A screen shell: header, scrolling body, and a footer that never scrolls.
+   *  `kicker` and `title` are i18n keys. The results screen re-words both from
+   *  state on every paint, which overwrites what paintStatic wrote. */
   function makeScreen(key, kicker, title) {
     var s = el('div', 'sm-av-screen sm-av-' + key, els.stage);
     var head = el('div', 'sm-av-head', s);
-    var k = el('div', 'sm-av-kicker', head, kicker);
-    var t = el('div', 'sm-av-title', head, title);
+    var k = elT('div', 'sm-av-kicker', head, kicker);
+    var t = elT('div', 'sm-av-title', head, title);
     var body = el('div', 'sm-av-body', s);
     var foot = el('div', 'sm-av-foot', s);
     screens[key] = { node: s, kicker: k, title: t, body: body, foot: foot };
@@ -491,10 +545,12 @@ SM.advui = (function () {
    * SLOTS
    * ------------------------------------------------------------------ */
   function buildSlots() {
-    var s = makeScreen('slots', 'THREE COMPANIES · ONE LEDGER EACH', 'MINING COMPANIES');
+    var s = makeScreen('slots', 'slots.kicker', 'slots.title');
     var n = (SM.config && SM.config.ADV) ? SM.config.ADV.SAVE_SLOTS : 3;
     for (var i = 0; i < n; i++) slotRows.push(makeSlotRow(s.body, i));
-    onTap(button(s.foot, '', 'TITLE SCREEN'), function () {
+    /* BACK, not TITLE SCREEN: a way back says Back in every game of the hub
+     * (games/CLAUDE.md §2, "Menus speak plainly"); where it goes is obvious. */
+    onTap(buttonT(s.foot, '', 'menu.back'), function () {
       if (SM.adv && SM.adv.close) SM.adv.close();
     });
   }
@@ -504,13 +560,13 @@ SM.advui = (function () {
     r.node = el('div', 'sm-panel sm-av-slot', parent);
     el('div', 'sm-stripe', r.node);
     var top = el('div', 'sm-av-slot-top', r.node);
-    r.no = el('div', 'sm-av-slot-no', top, 'SLOT ' + (i + 1));
-    r.name = el('div', 'sm-av-slot-name', top, 'EMPTY');
+    r.no = el('div', 'sm-av-slot-no', top, tr('slots.slot', i + 1));
+    r.name = el('div', 'sm-av-slot-name', top, tr('slots.empty'));
     r.stats = el('div', 'sm-av-slot-stats', r.node);
-    r.cash = statCell(r.stats, 'CASH', '$0');
-    r.day = statCell(r.stats, 'DAY', '1');
-    r.tier = statCell(r.stats, 'MACHINE', 'MK I');
-    r.mines = statCell(r.stats, 'MINES', '0');
+    r.cash = statCell(r.stats, 'slots.cash', '$0');
+    r.day = statCell(r.stats, 'slots.day', '1');
+    r.tier = statCell(r.stats, 'slots.machine', 'MK I');
+    r.mines = statCell(r.stats, 'slots.mines', '0');
 
     /* The name editor. Its keydown is stopped from reaching window, because
      * js/input.js (frozen) restarts the run on 'r' and mutes on 'm' — typing
@@ -520,7 +576,9 @@ SM.advui = (function () {
     r.input = el('input', 'sm-av-input', r.form);
     r.input.setAttribute('type', 'text');
     r.input.setAttribute('maxlength', '18');
-    r.input.setAttribute('placeholder', 'COMPANY NAME');
+    r.input.setAttribute('placeholder', tr('slots.namePh'));
+    r.input.setAttribute('data-i18n-ph', 'slots.namePh');
+    r.input.setAttribute('aria-label', tr('slots.namePh'));
     r.input.setAttribute('autocomplete', 'off');
     r.input.setAttribute('spellcheck', 'false');
     r.input.addEventListener('keydown', function (e) {
@@ -533,11 +591,11 @@ SM.advui = (function () {
       var v = r.input.value.toUpperCase();
       if (v !== r.input.value) r.input.value = v;
     }, false);
-    r.confirm = button(r.form, 'sm-btn-primary', 'SIGN THE PAPERS');
+    r.confirm = buttonT(r.form, 'sm-btn-primary', 'slots.sign');
     onTap(r.confirm, function () { startCompany(r); });
 
     var acts = el('div', 'sm-av-slot-acts', r.node);
-    r.primary = button(acts, 'sm-btn-primary', 'NEW COMPANY');
+    r.primary = button(acts, 'sm-btn-primary', tr('slots.new'));
     onTap(r.primary, function () {
       var list = safeSlots();
       if (list[i] && !list[i].empty) {
@@ -547,19 +605,20 @@ SM.advui = (function () {
         openNameEditor(i);
       }
     });
-    r.erase = confirmTap(button(acts, 'sm-av-quiet', 'ERASE'), 'ERASE', 'ERASE FOR GOOD', function () {
+    r.erase = confirmTap(button(acts, 'sm-av-quiet', tr('slots.erase')), 'slots.erase', 'slots.eraseConfirm', function () {
       if (SM.save && SM.save.erase) SM.save.erase(i);
       if (SM.save && SM.save.flush) SM.save.flush();
       nameEditing = -1;
       paintSlots();
-      toast('SLOT ERASED', 'Slot ' + (i + 1) + ' is empty again', 1.8);
+      toast(function () { return [tr('slots.erased'), tr('slots.erasedSub', i + 1)]; }, '', 1.8);
     });
     return r;
   }
 
+  /** `label` is an i18n key; the caption repaints itself on a switch. */
   function statCell(parent, label, value) {
     var cell = el('div', 'sm-cell', parent);
-    el('div', 'sm-cell-label', cell, label);
+    elT('div', 'sm-cell-label', cell, label);
     return el('div', 'sm-cell-value', cell, value);
   }
 
@@ -577,13 +636,13 @@ SM.advui = (function () {
     var r = slotRows[i];
     if (!r) return;
     if (!r.input.value) {
-      r.input.value = COMPANY_NAMES[(Math.random() * COMPANY_NAMES.length) | 0];
+      r.input.value = companyName((Math.random() * COMPANY_NAMES) | 0);
     }
     try { r.input.focus(); r.input.select(); } catch (e) { /* focus is optional */ }
   }
 
   function startCompany(r) {
-    var name = (r.input.value || '').trim() || COMPANY_NAMES[0];
+    var name = (r.input.value || '').trim() || companyName(0);
     if (SM.save && SM.save.newGame) SM.save.newGame(r.index, name);
     if (SM.save && SM.save.flush) SM.save.flush();
     nameEditing = -1;
@@ -606,7 +665,8 @@ SM.advui = (function () {
       var r = slotRows[i], d = list[i] || { empty: true };
       var empty = !!d.empty;
       r.node.classList[empty ? 'add' : 'remove']('sm-av-slot-empty');
-      r.name.textContent = empty ? 'EMPTY' : String(d.company || 'UNNAMED CO');
+      r.no.textContent = tr('slots.slot', i + 1);
+      r.name.textContent = empty ? tr('slots.empty') : String(d.company || tr('slots.unnamed'));
       r.cash.textContent = money(num(d.cash, 0));
       r.day.textContent = fmt(num(d.day, 1));
       r.tier.textContent = 'MK ' + roman(num(d.tier, 1));
@@ -614,7 +674,7 @@ SM.advui = (function () {
       r.stats.style.display = empty ? 'none' : '';
       r.erase.style.display = empty ? 'none' : '';
       if (r.erase.smDisarm) r.erase.smDisarm();
-      r.primary.textContent = empty ? 'NEW COMPANY' : 'CONTINUE';
+      r.primary.textContent = empty ? tr('slots.new') : tr('slots.continue');
       var editing = (nameEditing === i);
       r.form.style.display = editing ? '' : 'none';
       r.primary.style.display = editing ? 'none' : '';
@@ -631,7 +691,8 @@ SM.advui = (function () {
    * MAP
    * ------------------------------------------------------------------ */
   function buildMap() {
-    var s = makeScreen('map', 'MINING RIGHTS · CHOOSE YOUR GROUND', 'THE FIELD');
+    /* MAP, not THE FIELD: a screen is named for what it is (§2). */
+    var s = makeScreen('map', 'map.kicker', 'menu.map');
     els.map = el('div', 'sm-av-mapart', s.body);
     /* THE LAND IS DRAWN, not built out of divs. A canvas is what makes a
      * frozen shaft look frozen and a volcanic coast look volcanic — see
@@ -644,7 +705,7 @@ SM.advui = (function () {
     els.mapLight = el('div', 'sm-av-maplight', els.map);
     els.mapRegions = el('div', 'sm-av-regions', els.map);
     els.mapPins = el('div', 'sm-av-pins', els.map);
-    els.mapEmpty = el('div', 'sm-av-map-empty', els.map, 'NO SURVEY DATA');
+    els.mapEmpty = elT('div', 'sm-av-map-empty', els.map, 'map.noData');
 
     /* --- the mine card -------------------------------------------------- */
     var c = el('div', 'sm-panel sm-av-minecard', s.body);
@@ -655,10 +716,10 @@ SM.advui = (function () {
     els.cardRegion = el('div', 'sm-av-card-region', chead, '');
     els.cardBlurb = el('div', 'sm-av-card-blurb', c, '');
     var grid = el('div', 'sm-av-card-grid', c);
-    els.cardPrice = statCell(grid, 'MINING RIGHTS', '$0');
-    els.cardDrill = statCell(grid, 'REC. DRILL', '0');
-    els.cardDepth = statCell(grid, 'EST. DEPTH', '0 m');
-    els.cardBest = statCell(grid, 'DEEPEST RUN', '—');
+    els.cardPrice = statCell(grid, 'map.rights', '$0');
+    els.cardDrill = statCell(grid, 'map.recDrill', '0');
+    els.cardDepth = statCell(grid, 'map.estDepth', '0 m');
+    els.cardBest = statCell(grid, 'map.deepest', '—');
     /* THE PROFILE ROW. Two mines can cost nearly the same and be completely
      * different propositions — one with no heat in any layer and one that is a
      * gamble all the way down — and that difference is the most interesting
@@ -677,13 +738,13 @@ SM.advui = (function () {
     /* The mine's own action lives in the FOOTER, not in the card: the card is
      * the read, and a read can be long enough to scroll. BUY RIGHTS must never
      * be the thing that scrolled away. */
-    els.cardBtn = button(s.foot, 'sm-btn-primary sm-btn-big', 'BUY RIGHTS');
+    els.cardBtn = button(s.foot, 'sm-btn-primary sm-btn-big', '');
     onTap(els.cardBtn, onMineAction);
 
-    onTap(button(s.foot, '', 'WORKSHOP'), function () {
+    onTap(buttonT(s.foot, '', 'menu.workshop'), function () {
       if (SM.adv && SM.adv.openGarage) SM.adv.openGarage();
     });
-    onTap(button(s.foot, 'sm-av-quiet', 'TITLE SCREEN'), function () {
+    onTap(buttonT(s.foot, 'sm-av-quiet', 'menu.back'), function () {
       if (SM.adv && SM.adv.close) SM.adv.close();
     });
   }
@@ -740,7 +801,8 @@ SM.advui = (function () {
         if (mapSeen) newly.push(r);      // not on the very first paint
       }
       r.revealed = !!revealed[r.key];
-      r.label.textContent = r.revealed ? r.name.toUpperCase() : 'UNSURVEYED';
+      r.label.textContent = r.revealed ? regionName(r.name).toUpperCase() : tr('map.unsurveyed');
+      r.label.title = regionName(r.name);
       r.label.classList[r.revealed ? 'remove' : 'add']('sm-av-region-fog');
       r.label.classList[r.owned > 0 ? 'add' : 'remove']('sm-av-region-held');
     }
@@ -756,8 +818,8 @@ SM.advui = (function () {
       p.node.classList[(!owned && !afford) ? 'add' : 'remove']('sm-av-pin-far');
       p.node.classList[known ? 'remove' : 'add']('sm-av-pin-fog');
       p.node.classList[(selMine === m.id) ? 'add' : 'remove']('sm-av-pin-sel');
-      p.tag.textContent = owned ? 'HELD' : (num(m.price, 0) > 0 ? money(m.price) : 'FREE');
-      p.name.textContent = known ? String(m.name || m.id).toUpperCase() : 'UNCHARTED SITE';
+      p.tag.textContent = owned ? tr('map.pinHeld') : (num(m.price, 0) > 0 ? money(m.price) : tr('map.free'));
+      p.name.textContent = known ? String(m.name || m.id).toUpperCase() : tr('map.uncharted');
       /* What the ground IS, not just what it costs: known mines show their
        * depth, held mines show how much of the lift is bought. Both stay
        * blank on fogged ground (CSS hides them too, belt and braces). */
@@ -794,7 +856,9 @@ SM.advui = (function () {
   function celebrateRegion(r) {
     if (!r || !r.flash) return;
     retrigger(r.flash, 'sm-av-reveal-on');
-    toast('REGION SURVEYED', String(r.name).toUpperCase() + ' is on the chart', 3.2);
+    toast(function () {
+      return [tr('map.surveyed'), tr('map.surveyedSub', regionName(r.name).toUpperCase())];
+    }, '', 3.2);
     if (SM.sound && SM.sound.play) SM.sound.play('ui');
   }
 
@@ -904,8 +968,8 @@ SM.advui = (function () {
       box.style.width = ((r.x1 - r.x0) * 100) + '%';
       box.style.height = ((r.y1 - r.y0) * 100) + '%';
       r.box = box;
-      r.label = el('div', 'sm-av-region-label', box, r.name.toUpperCase());
-      r.label.title = r.name;
+      r.label = el('div', 'sm-av-region-label', box, regionName(r.name).toUpperCase());
+      r.label.title = regionName(r.name);
       // The survey sweep, parked and invisible until a region is revealed.
       r.flash = el('div', 'sm-av-reveal', box);
     }
@@ -1803,15 +1867,16 @@ SM.advui = (function () {
     var yours = rigNum('getDrillPower', 0);
 
     els.cardName.textContent = String(m.name || m.id).toUpperCase();
-    els.cardRegion.textContent = String(m.region || '').toUpperCase();
+    els.cardRegion.textContent = m.region ? regionName(m.region).toUpperCase() : '';
     els.cardBlurb.textContent = String(m.blurb || '');
-    els.cardPrice.textContent = owned ? 'HELD' : money(price);
+    els.cardPrice.textContent = owned ? tr('map.rightsHeld') : money(price);
     els.cardPrice.className = 'sm-cell-value' + (owned ? ' sm-av-good' : '');
-    els.cardDrill.textContent = rec > 0 ? (fmt(rec) + '+   YOURS ' + fmt(yours)) : ('YOURS ' + fmt(yours));
+    els.cardDrill.textContent = rec > 0 ? (fmt(rec) + '+   ' + tr('map.yours', fmt(yours)))
+                                        : tr('map.yours', fmt(yours));
     els.cardDrill.className = 'sm-cell-value' + ((rec > 0 && yours < rec) ? ' sm-av-bad' : '');
     els.cardDepth.textContent = fmt(num(m.depth, 0)) + ' m';
     els.cardBest.textContent = (mine && num(mine.deepestM, 0) > 0)
-      ? (fmt(mine.deepestM) + ' m' + (num(mine.visits, 0) ? ('  ·  ' + fmt(mine.visits) + ' RUNS') : ''))
+      ? (fmt(mine.deepestM) + ' m' + (num(mine.visits, 0) ? ('  ·  ' + tr('map.runs', num(mine.visits, 0), fmt(mine.visits))) : ''))
       : '—';
 
     paintProfile(m);
@@ -1820,8 +1885,8 @@ SM.advui = (function () {
     if (levels) {
       var lo = ownedCount(levels), lt = levels.length;
       var deep = levelAt(levels, deepestOwned(levels));
-      els.cardLift.textContent = 'LIFT   ' + fmt(lo) + ' OF ' + fmt(lt) + ' LEVELS' +
-        (deep ? ('   ·   DEEPEST ' + levelLabel(deep) + ' ' + bandText(deep)) : '');
+      els.cardLift.textContent = tr('map.liftLine', fmt(lo), fmt(lt)) +
+        (deep ? ('   ·   ' + tr('map.liftDeepest', levelLabel(deep) + ' ' + bandText(deep))) : '');
       els.cardLift.style.display = '';
     } else {
       els.cardLift.textContent = '';
@@ -1831,34 +1896,34 @@ SM.advui = (function () {
     /* "You can enter, but it will hurt" — the honest message, not a locked
      * door. Under-gunned is slow and expensive, never refused. */
     var warn = '';
-    if (rec > 0 && yours < rec * 0.7) warn = 'Your drill will stall in this rock. Expect to burn fuel for every metre.';
-    else if (rec > 0 && yours < rec) warn = 'Under-gunned for this ground. Workable, but slow and thirsty.';
+    if (rec > 0 && yours < rec * 0.7) warn = tr('map.warnStall');
+    else if (rec > 0 && yours < rec) warn = tr('map.warnWeak');
     // Endurance against depth: the other half of "can I get home from here?",
     // and the thing that actually separates two mines at the same price.
     var end = rigNum('getEndurance', 0);
     if (!warn && end > 0 && num(m.depth, 0) > 0) {
       var climb = num(m.depth, 0) / (rigNum('getSpeed', 200) * MPU);   // seconds, straight up
-      if (climb * 2.6 > end) warn = 'A full tank barely covers the round trip at this depth. Fit a bigger tank first.';
+      if (climb * 2.6 > end) warn = tr('map.warnTank');
     }
     els.cardWarn.textContent = warn;
     els.cardWarn.style.display = warn ? '' : 'none';
 
     els.cardRes.innerHTML = '';
-    chipRow(els.cardRes, 'COMMON', m.common);
-    chipRow(els.cardRes, 'RARE', m.rare);
+    chipRow(els.cardRes, tr('map.common'), m.common);
+    chipRow(els.cardRes, tr('map.rare'), m.rare);
     var haz = (m.hazards && m.hazards.length) ? m.hazards.join('  ·  ') : '';
-    els.cardHaz.textContent = haz ? ('HAZARDS   ' + haz.toUpperCase()) : '';
+    els.cardHaz.textContent = haz ? (tr('map.hazards') + '   ' + haz.toUpperCase()) : '';
     els.cardHaz.style.display = haz ? '' : 'none';
 
     var b = els.cardBtn;
     b.disabled = false;
     b.classList.remove('sm-av-cant');
     if (owned) {
-      b.textContent = 'PREPARE DESCENT';
+      b.textContent = tr('prep.title');
     } else if (cash >= price) {
-      b.textContent = 'BUY RIGHTS  ' + money(price);
+      b.textContent = tr('map.buy', money(price));
     } else {
-      b.textContent = 'NEED ' + money(price - cash) + ' MORE';
+      b.textContent = tr('map.need', money(price - cash));
       b.disabled = true;
       b.classList.add('sm-av-cant');
     }
@@ -1888,9 +1953,9 @@ SM.advui = (function () {
       if (num(L.hardnessScale, 1) > hard) hard = num(L.hardnessScale, 1);
     }
 
-    var heatWord = heat <= 0.001 ? 'NONE' : (heat < 0.35 ? 'MILD' : (heat < 0.7 ? 'HOT' : 'SEVERE'));
+    var heatWord = tr(heat <= 0.001 ? 'map.heat0' : (heat < 0.35 ? 'map.heat1' : (heat < 0.7 ? 'map.heat2' : 'map.heat3')));
     var heatTone = heat <= 0.001 ? 'good' : (heat < 0.7 ? 'warn' : 'bad');
-    var groundWord = hard <= 1.0 ? 'SOFT' : (hard < 1.12 ? 'FIRM' : 'HARD');
+    var groundWord = tr(hard <= 1.0 ? 'map.ground0' : (hard < 1.12 ? 'map.ground1' : 'map.ground2'));
     var groundTone = hard <= 1.0 ? 'good' : (hard < 1.12 ? 'warn' : 'bad');
 
     // The best thing in the ground, by price — what the trip is actually for.
@@ -1903,11 +1968,11 @@ SM.advui = (function () {
       }
     }
 
-    profileCell(box, 'HEAT', heatWord, heatTone);
-    profileCell(box, 'GROUND', groundWord, groundTone);
+    profileCell(box, tr('map.heat'), heatWord, heatTone);
+    profileCell(box, tr('map.ground'), groundWord, groundTone);
     if (payId) {
       var d = displayOf(payId);
-      var c = profileCell(box, 'PAYS FOR', d.name.toUpperCase(), '');
+      var c = profileCell(box, tr('map.pays'), d.name.toUpperCase(), '');
       c.style.setProperty('--sm-av-chip', d.color);
       c.classList.add('sm-av-prof-ore');
     }
@@ -1918,6 +1983,13 @@ SM.advui = (function () {
     el('span', 'sm-av-prof-label', cell, label);
     el('span', 'sm-av-prof-value', cell, value);
     return cell;
+  }
+
+  /** 'COAL, COPPER' — catalogue ids printed as the ore's display name. */
+  function oreNames(ids) {
+    var out = [];
+    for (var i = 0; i < ids.length; i++) out.push(displayOf(ids[i]).name);
+    return out.join(', ').toUpperCase();
   }
 
   function chipRow(parent, label, ids) {
@@ -1940,10 +2012,12 @@ SM.advui = (function () {
     }
     var ok = !!(SM.adv && SM.adv.buyRights && SM.adv.buyRights(m.id));
     if (ok) {
-      toast('RIGHTS ACQUIRED', String(m.name || m.id).toUpperCase() + ' is yours to dig', 2.4);
+      toast(function () {
+        return [tr('map.bought'), tr('map.boughtSub', String(m.name || m.id).toUpperCase())];
+      }, '', 2.4);
       refresh();
     } else {
-      toast('PURCHASE REFUSED', 'The ledger will not cover it', 2.0);
+      toast(function () { return [tr('aui.refused'), tr('aui.noMoney')]; }, '', 2.0);
     }
   }
 
@@ -1951,7 +2025,8 @@ SM.advui = (function () {
    * GARAGE
    * ------------------------------------------------------------------ */
   function buildGarage() {
-    var s = makeScreen('garage', 'THE WORKSHOP · EIGHT SUBASSEMBLIES', 'YOUR MACHINE');
+    /* WORKSHOP, not YOUR MACHINE: the screen is named for what it is (§2). */
+    var s = makeScreen('garage', 'shop.kicker', 'menu.workshop');
 
     var stage = el('div', 'sm-av-rig', s.body);
     els.rigStage = stage;
@@ -1968,8 +2043,8 @@ SM.advui = (function () {
     els.partBlurb = el('div', 'sm-av-card-blurb', d, '');
     els.partPips = el('div', 'sm-av-pips', d);
     var grid = el('div', 'sm-av-card-grid', d);
-    els.partStat = statCell(grid, 'FITTED', '0');
-    els.partNext = statCell(grid, 'NEXT TIER', '—');
+    els.partStat = statCell(grid, 'shop.fitted', '0');
+    els.partNext = statCell(grid, 'shop.next', '—');
     /* WHAT THE NEXT TIER LETS YOU DO. rig.js writes one line of sales copy per
      * tier and that line is the only thing the workshop should ever be
      * selling — a stat delta says "12% more drill", this says "the Rift locks
@@ -1977,7 +2052,7 @@ SM.advui = (function () {
     els.partSell = el('div', 'sm-av-warn sm-av-sell', d, '');
     els.partDelta = el('div', 'sm-av-sub sm-av-delta', d, '');
 
-    els.partBtn = button(s.foot, 'sm-btn-primary sm-btn-big', 'INSTALL');
+    els.partBtn = button(s.foot, 'sm-btn-primary sm-btn-big', tr('shop.install'));
     onTap(els.partBtn, onBuyPart);
 
     /* STRAIGHT BACK DOWN FROM HERE TOO.
@@ -1985,10 +2060,10 @@ SM.advui = (function () {
      * already working — so making the workshop a dead end that only exits to the
      * world map put the same detour back in that the extraction screen just
      * lost. Only offered when there is a mine to go back to. */
-    els.garageDive = button(s.foot, '', 'BACK TO MINE');
+    els.garageDive = buttonT(s.foot, '', 'aui.diveAgain');
     onTap(els.garageDive, onBackToMine);
 
-    els.garageMap = button(s.foot, '', 'BACK TO THE MAP');
+    els.garageMap = buttonT(s.foot, '', 'menu.back');
     onTap(els.garageMap, function () {
       if (SM.adv && SM.adv.backToMap) SM.adv.backToMap();
       else if (SM.adv && SM.adv.openMap) SM.adv.openMap();
@@ -2005,7 +2080,7 @@ SM.advui = (function () {
      * are refused by adv.js while a run is held (see the shopHold note there).
      * A greyed-out BACK TO MINE beside a live expedition would be the screen
      * asking a question that has no answer. */
-    els.garageLift = button(s.foot, 'sm-btn-primary sm-btn-big', 'BACK TO THE LIFT');
+    els.garageLift = buttonT(s.foot, 'sm-btn-primary sm-btn-big', 'menu.back');
     onTap(els.garageLift, function () {
       if (SM.adv && SM.adv.closeShop) SM.adv.closeShop();
     });
@@ -2023,14 +2098,15 @@ SM.advui = (function () {
   function makeHotspot(part) {
     var node = el('button', 'sm-av-hot', els.rigHots);
     node.setAttribute('type', 'button');
-    node.setAttribute('title', part.title);
+    node.setAttribute('title', tr(part.title));
+    node.setAttribute('data-i18n-label', part.title);
     // Position is written by drawRig(), which is the only place that knows the
     // garage transform. A sane default keeps them on-screen before the first
     // paint (e.g. if the canvas has no size yet).
     node.style.left = '50%';
     node.style.top = '50%';
     el('span', 'sm-av-hot-dot', node);
-    var lbl = el('span', 'sm-av-hot-lbl', node, part.title);
+    var lbl = elT('span', 'sm-av-hot-lbl', node, part.title);
     var lv = el('span', 'sm-av-hot-lv', node, '');
     onTap(node, function () {
       selPart = part.key;
@@ -2066,7 +2142,10 @@ SM.advui = (function () {
        * "out to the place between runs" and that is PREPARE DESCENT until the
        * map is earned (js/adv.js's THE MAP IS EARNED), so the label follows the
        * destination rather than promising a chart the company has not got. */
-      els.garageMap.textContent = mapUnlocked() ? 'BACK TO THE MAP' : 'PREPARE DESCENT';
+      /* ...it used to name its destination (BACK TO THE MAP / PREPARE DESCENT).
+       * It says BACK now, like every way back in the hub (§2), and adv's
+       * backToMap() still decides which of the two screens that is. */
+      els.garageMap.textContent = tr('menu.back');
     }
 
     /* BACK TO MINE only exists when there is somewhere to go back to, and it
@@ -2078,7 +2157,7 @@ SM.advui = (function () {
       els.garageDive.style.display = (id && !held) ? '' : 'none';
       if (id && !held) {
         // Label stays put; an empty tank just greys it out. See paintResFooter().
-        els.garageDive.textContent = 'BACK TO MINE';
+        els.garageDive.textContent = tr('aui.diveAgain');
         if (aboard < 1) els.garageDive.setAttribute('disabled', 'disabled');
         else els.garageDive.removeAttribute('disabled');
       }
@@ -2123,7 +2202,7 @@ SM.advui = (function () {
       var s = rec.stats[i];
       var av = a[s];
       if (typeof av !== 'number') continue;
-      var line = String(s).toUpperCase() + ' ' + trim1(av);
+      var line = trOr('shop.stat.' + s, String(s).toUpperCase()) + ' ' + trim1(av);
       if (b && typeof b[s] === 'number' && b[s] !== av) line += ' → ' + trim1(b[s]);
       out.push(line);
     }
@@ -2147,19 +2226,19 @@ SM.advui = (function () {
      * preferred over the local copy; the local copy is what keeps the screen
      * readable while Agent 2 is still building the table. */
     var rec = (SM.rig && SM.rig.getPart) ? SM.rig.getPart(p.key) : null;
-    var title = (rec && rec.title) ? rec.title : p.title;
-    var blurb = (rec && rec.blurb) ? rec.blurb : p.blurb;
+    var title = (rec && rec.title) ? rec.title : tr(p.title);
+    var blurb = (rec && rec.blurb) ? rec.blurb : tr(p.blurb);
 
     /* The FITTED tier's own name, when rig.js has one — 'WORN AUGER BIT' tells
      * the player what is bolted to their machine; 'MK I' tells them nothing. */
     var cur = tierInfo(p.key, tier);
     els.partName.textContent = String(title).toUpperCase();
-    els.partTier.textContent = 'FITTED: ' + (cur && cur.name ? String(cur.name).toUpperCase()
-                                                            : ('MK ' + roman(tier + 1)));
+    els.partTier.textContent = tr('shop.fittedName', cur && cur.name ? String(cur.name).toUpperCase()
+                                                                     : ('MK ' + roman(tier + 1)));
     els.partBlurb.textContent = blurb;
 
-    els.partStat.textContent = p.stat + '  ' + fmt(p.get()) + p.unit;
-    els.partNext.textContent = maxed ? 'FULLY UPGRADED' : (nextName ? String(nextName).toUpperCase() : 'NEXT TIER');
+    els.partStat.textContent = tr(p.stat) + '  ' + fmt(p.get()) + p.unit;
+    els.partNext.textContent = maxed ? tr('shop.maxed') : (nextName ? String(nextName).toUpperCase() : tr('shop.next'));
 
     // The pitch, and then the arithmetic under it.
     var sell = (!maxed && SM.rig && SM.rig.nextBlurb) ? SM.rig.nextBlurb(p.key) : null;
@@ -2191,7 +2270,7 @@ SM.advui = (function () {
     var b = els.partBtn;
     b.disabled = false;
     b.classList.remove('sm-av-cant');
-    b.textContent = (!maxed && cost >= 0) ? ('INSTALL  ' + money(cost)) : 'INSTALL';
+    b.textContent = (!maxed && cost >= 0) ? tr('shop.installCost', money(cost)) : tr('shop.install');
 
     var block = '';
     if (maxed || cost < 0) {
@@ -2202,14 +2281,14 @@ SM.advui = (function () {
       /* RUNNING GEAR BEFORE POWER. Name the actual part the player has to buy,
        * not the rule — "REQUIRES WIDE STEEL TRACKS" is a shopping instruction,
        * "prerequisite not met" is a error message. */
-      var needTitle = fit.needKey ? String(fit.needKey).toUpperCase() : 'RUNNING GEAR';
-      block = 'REQUIRES ' + needTitle +
-              (fit.needName ? (': ' + String(fit.needName).toUpperCase()) : '') +
-              ' — the tracks cannot carry this engine yet.';
+      var needTitle = fit.needKey ? trOr('shop.part.' + fit.needKey, String(fit.needKey).toUpperCase())
+                                  : tr('shop.runningGear');
+      block = tr('shop.requires', needTitle,
+                 fit.needName ? String(fit.needName).toUpperCase() : '');
       b.disabled = true;
       b.classList.add('sm-av-cant');
     } else if (short > 0) {
-      block = 'NEED ' + money(short) + ' MORE IN THE ACCOUNT.';
+      block = tr('shop.need', money(short));
       b.disabled = true;
       b.classList.add('sm-av-cant');
     }
@@ -2224,11 +2303,12 @@ SM.advui = (function () {
     var before = rigTier(p.key);
     var ok = !!(SM.adv && SM.adv.buyPart && SM.adv.buyPart(p.key));
     if (ok || rigTier(p.key) !== before) {
-      toast(String(p.title) + ' UPGRADED', 'MK ' + roman(rigTier(p.key) + 1) + ' fitted and bolted down', 2.4);
+      var mk = 'MK ' + roman(rigTier(p.key) + 1);
+      toast(function () { return [tr('shop.upgraded', tr(p.title)), tr('shop.upgradedSub', mk)]; }, '', 2.4);
       if (SM.effects && SM.effects.screenFlash) SM.effects.screenFlash(0.10, 255, 210, 120);
       refresh();
     } else {
-      toast('INSTALL REFUSED', 'The ledger will not cover it', 2.0);
+      toast(function () { return [tr('shop.refused'), tr('aui.noMoney')]; }, '', 2.0);
     }
   }
 
@@ -2305,7 +2385,7 @@ SM.advui = (function () {
       ctx.restore();
       ctx.fillStyle = 'rgba(255,90,72,0.65)';
       ctx.font = '600 12px ' + 'ui-monospace, monospace';
-      ctx.fillText('MACHINE PREVIEW UNAVAILABLE', 14, h - 14);
+      ctx.fillText(tr('shop.noPreview'), 14, h - 14);
       return;
     }
     ctx.restore();
@@ -2354,7 +2434,7 @@ SM.advui = (function () {
    * PREP
    * ------------------------------------------------------------------ */
   function buildPrep() {
-    var s = makeScreen('prep', 'LAST CHECKS BEFORE THE DARK', 'PREPARE DESCENT');
+    var s = makeScreen('prep', 'prep.kicker', 'prep.title');
 
     var top = el('div', 'sm-panel sm-av-prep-mine', s.body);
     el('div', 'sm-stripe', top);
@@ -2381,19 +2461,21 @@ SM.advui = (function () {
      * absent at full integrity, and the HUD carries the reading underground. */
     els.repairRow = el('div', 'sm-panel sm-av-repair', s.body);
     el('div', 'sm-stripe', els.repairRow);
-    el('div', 'sm-av-repair-lbl', els.repairRow, 'HULL');
+    elT('div', 'sm-av-repair-lbl', els.repairRow, 'prep.hull');
     els.hullPct = el('div', 'sm-av-repair-pct', els.repairRow, '100%');
     var hbar = el('div', 'sm-av-bar sm-av-repair-bar', els.repairRow);
     els.hullFill = el('div', 'sm-av-bar-fill', hbar);
-    els.repairBtn = button(els.repairRow, 'sm-av-repair-btn', 'REPAIR');
+    els.repairBtn = button(els.repairRow, 'sm-av-repair-btn', tr('prep.repair'));
     onTap(els.repairBtn, function () {
       var ok = !!(SM.adv && SM.adv.buyRepair && SM.adv.buyRepair());
-      toast(ok ? 'HULL REPAIRED' : 'REPAIR REFUSED',
-            ok ? 'Plates welded, seams checked' : 'The ledger will not cover it', 2.0);
+      toast(function () {
+        return ok ? [tr('prep.repaired'), tr('prep.repairedSub')]
+                  : [tr('prep.repairRefused'), tr('aui.noMoney')];
+      }, '', 2.0);
       refresh();
     });
 
-    els.descend = button(s.foot, 'sm-btn-primary sm-btn-big sm-av-descend', 'DESCEND');
+    els.descend = button(s.foot, 'sm-btn-primary sm-btn-big sm-av-descend', tr('prep.descend'));
     onTap(els.descend, onDescend);
 
     /* --- THIS SCREEN IS THE HOME NOW, UNTIL THE MAP IS EARNED -------------
@@ -2417,12 +2499,12 @@ SM.advui = (function () {
      * safe exit to the slot picker and not a discarded company. See paintPrep()
      * for both swaps; the handler asks the question fresh on every tap, so it
      * cannot be left pointing at the wrong verb by a repaint that did not run. */
-    els.prepShop = button(s.foot, '', 'WORKSHOP');
+    els.prepShop = buttonT(s.foot, '', 'menu.workshop');
     onTap(els.prepShop, function () {
       if (SM.adv && SM.adv.openGarage) SM.adv.openGarage();
     });
 
-    els.prepBack = button(s.foot, 'sm-av-quiet', 'BACK');
+    els.prepBack = buttonT(s.foot, 'sm-av-quiet', 'menu.back');
     onTap(els.prepBack, function () {
       if (!SM.adv) return;
       if (mapUnlocked()) {
@@ -2490,7 +2572,7 @@ SM.advui = (function () {
     els.prepLift = el('div', 'sm-panel sm-av-prep-lift', s.body);
     el('div', 'sm-stripe', els.prepLift);
     var head = el('div', 'sm-av-card-head', els.prepLift);
-    el('div', 'sm-av-card-name', head, 'THE LIFT');
+    elT('div', 'sm-av-card-name', head, 'lift.title');
     els.liftCount = el('div', 'sm-av-card-region', head, '');
     els.liftList = el('div', 'sm-av-levels', els.prepLift);
     /* THE PANEL TEXT, WHICH IS WHERE EVERY REASON GOES.
@@ -2543,7 +2625,7 @@ SM.advui = (function () {
     var selCheck = levelAt(levels, prepLevel);
     if (prepLevel < 1 || !selCheck || !selCheck.owned) prepLevel = deepest;
 
-    els.liftCount.textContent = fmt(owned) + ' OF ' + fmt(levels.length) + ' LEVELS';
+    els.liftCount.textContent = tr('lift.count', fmt(owned), fmt(levels.length));
 
     var cash = advNum('getCash', 0);
     var blocked = '';
@@ -2571,10 +2653,10 @@ SM.advui = (function () {
     var selL = levelAt(levels, prepLevel) || levels[0];
     /* WHERE THE LIFT PUTS YOU DOWN, and what that place is. Both halves, because
      * a level is a map: the band it covers and how wide it is. */
-    var line = 'DESCEND TO ' + levelLabel(selL) + '   ·   ' + bandText(selL);
+    var line = tr('lift.descendTo', levelLabel(selL)) + '   ·   ' + bandText(selL);
     var w = widthText(selL);
     if (w) line += '   ·   ' + w;
-    if (nextI < 0) line += '   ·   EVERY LEVEL IS OPEN';
+    if (nextI < 0) line += '   ·   ' + tr('lift.allOpen');
     els.liftNote.textContent = blocked ? (line + '\n' + blocked) : line;
   }
 
@@ -2588,7 +2670,7 @@ SM.advui = (function () {
 
     var go = el('button', 'sm-av-level-go', row);
     go.setAttribute('type', 'button');
-    el('span', 'sm-av-level-i', go, 'L' + i);
+    el('span', 'sm-av-level-i', go, tr('lift.short', i));
     el('span', 'sm-av-level-name', go, levelLabel(L));
     /* THE VALUE PROPOSITION IS THE MAP ITSELF: the band, then how wide it is.
      * A width in the same cell as the depth would fight it for space on a phone,
@@ -2600,7 +2682,7 @@ SM.advui = (function () {
     var tag = el('span', 'sm-av-level-tag', go, '');
 
     if (state === 'owned') {
-      tag.textContent = (i === prepLevel) ? 'START' : 'HELD';
+      tag.textContent = (i === prepLevel) ? tr('lift.start') : tr('lift.held');
       onTap(go, function () {
         prepLevel = i;
         paintPrep();
@@ -2612,7 +2694,7 @@ SM.advui = (function () {
     go.disabled = true;
     var price = num(L.price, 0);
     if (state === 'locked') {
-      tag.textContent = 'SEALED';
+      tag.textContent = tr('lift.sealed');
       return '';
     }
     tag.textContent = money(price);
@@ -2620,12 +2702,12 @@ SM.advui = (function () {
     /* BUY keeps its name and greys out; the shortfall goes in the panel text.
      * :disabled does the greying (see the stylesheet's UNAVAILABLE rule), so the
      * older sm-av-cant class is deliberately not used here — one mechanism. */
-    var b = button(row, 'sm-av-level-buy', 'BUY');
+    var b = button(row, 'sm-av-level-buy', tr('lift.buy'));
     onTap(b, function () { onBuyLevel(i, L); });
     var short = price - cash;
     if (short > 0) {
       b.disabled = true;
-      return 'NEED ' + money(short) + ' MORE FOR ' + levelLabel(L) + '.';
+      return tr('lift.need', money(short), levelLabel(L));
     }
     return '';
   }
@@ -2644,19 +2726,19 @@ SM.advui = (function () {
        * about on the refresh() below. */
       var mn = (SM.adv && SM.adv.getMapNotice) ? SM.adv.getMapNotice() : null;
       if (mn) {
-        toast('THE FIELD IS OPEN',
-              'Every level here is yours — the world map is open. BACK takes you out to it.',
-              4.0);
+        toast(function () { return [tr('lift.mapOpen'), tr('lift.mapOpenSub')]; }, '', 4.0);
         if (SM.adv.clearMapNotice) SM.adv.clearMapNotice();
       } else {
-        toast('LEVEL OPENED', levelLabel(L) + '   ·   ' + bandText(L) +
-                              (widthText(L) ? ('   ·   ' + widthText(L)) : ''), 2.6);
+        toast(function () {
+          return [tr('lift.opened'), levelLabel(L) + '   ·   ' + bandText(L) +
+                                     (widthText(L) ? ('   ·   ' + widthText(L)) : '')];
+        }, '', 2.6);
       }
       if (SM.effects && SM.effects.screenFlash) SM.effects.screenFlash(0.10, 255, 210, 120);
       // The new level is almost certainly where the player now wants to start.
       prepLevel = i;
     } else {
-      toast('THE SALE WAS REFUSED', 'The ledger will not cover it', 2.0);
+      toast(function () { return [tr('aui.refused'), tr('aui.noMoney')]; }, '', 2.0);
     }
     refresh();
   }
@@ -2664,11 +2746,11 @@ SM.advui = (function () {
   function paintPrep() {
     var m = (SM.adv && SM.adv.getMine) ? SM.adv.getMine() : null;
     if (!m && SM.mines && SM.mines.get) m = SM.mines.get(selMine);
-    var name = m ? String(m.name || m.id) : 'THE MINE';
+    var name = m ? String(m.name || m.id) : tr('prep.theMine');
     els.prepName.textContent = name.toUpperCase();
     els.prepMeta.textContent = m
-      ? (String(m.region || '').toUpperCase() + '   ·   EST. ' + fmt(num(m.depth, 0)) + ' m   ·   REC. DRILL ' +
-         fmt(num(m.recDrill, 0)) + '   ·   YOURS ' + fmt(rigNum('getDrillPower', 0)))
+      ? tr('prep.meta', (m.region ? regionName(m.region) : '').toUpperCase(), fmt(num(m.depth, 0)),
+           fmt(num(m.recDrill, 0)), fmt(rigNum('getDrillPower', 0)))
       : '';
 
     /* THE GEOLOGICAL REPORT. The layer table is the honest version of "what am
@@ -2695,10 +2777,10 @@ SM.advui = (function () {
     } else if (m) {
       var line = el('div', 'sm-av-sub', els.prepStrata, '');
       var bits = [];
-      if (m.common && m.common.length) bits.push('COMMON ' + m.common.join(', ').toUpperCase());
-      if (m.rare && m.rare.length) bits.push('RARE ' + m.rare.join(', ').toUpperCase());
-      if (m.hazards && m.hazards.length) bits.push('HAZARDS ' + m.hazards.join(', ').toUpperCase());
-      line.textContent = bits.join('   ·   ') || 'NO SURVEY ON FILE';
+      if (m.common && m.common.length) bits.push(tr('map.common') + ' ' + oreNames(m.common));
+      if (m.rare && m.rare.length) bits.push(tr('map.rare') + ' ' + oreNames(m.rare));
+      if (m.hazards && m.hazards.length) bits.push(tr('map.hazards') + ' ' + m.hazards.join(', ').toUpperCase());
+      line.textContent = bits.join('   ·   ') || tr('prep.noSurvey');
     }
 
     paintPrepLift(m);
@@ -2717,7 +2799,7 @@ SM.advui = (function () {
       els.repairRow.classList[integ < 0.4 ? 'add' : 'remove']('sm-av-repair-bad');
       var full = (SM.mines && SM.mines.repairCost) ? num(SM.mines.repairCost(integ), 0)
         : Math.round((1 - integ) * 100 * ((SM.mines && SM.mines.repairPrice) ? num(SM.mines.repairPrice(), 0) : 0));
-      els.repairBtn.textContent = full > 0 ? ('REPAIR  ' + money(full)) : 'REPAIR';
+      els.repairBtn.textContent = full > 0 ? tr('prep.repairCost', money(full)) : tr('prep.repair');
       // Label stays, the plate greys: the reason is the percentage next to it.
       if (full > advNum('getCash', 0)) els.repairBtn.setAttribute('disabled', 'disabled');
       else els.repairBtn.removeAttribute('disabled');
@@ -2727,14 +2809,16 @@ SM.advui = (function () {
      * price: the tank is bought out on the way down, so this is the entire cost
      * of the expedition and the player commits to it with one tap. */
     var cost = descendCost();
-    els.descend.textContent = cost > 0 ? ('DESCEND  ·  ' + money(cost)) : 'DESCEND';
+    els.descend.textContent = cost > 0 ? tr('prep.descendCost', money(cost)) : tr('prep.descend');
 
     /* THE FOOTER IS ONE OF TWO SHAPES — see buildPrep(). Home screen while the
      * map is locked (WORKSHOP + TITLE SCREEN), and the sub-screen it has always
      * been once the map is open (BACK, to the chart). */
     var toMap = mapUnlocked();
     if (els.prepShop) els.prepShop.style.display = toMap ? 'none' : '';
-    if (els.prepBack) els.prepBack.textContent = toMap ? 'BACK' : 'TITLE SCREEN';
+    /* BACK either way (§2) — it went TITLE SCREEN while the map was locked,
+     * and the handler above still decides where back is. */
+    if (els.prepBack) els.prepBack.textContent = tr('menu.back');
   }
 
   function onDescend() {
@@ -2765,7 +2849,7 @@ SM.advui = (function () {
    * RESULTS
    * ------------------------------------------------------------------ */
   function buildResults() {
-    var s = makeScreen('results', 'EXTRACTION', 'THE HAUL');
+    var s = makeScreen('results', 'haul.kicker', 'haul.title');
     var card = el('div', 'sm-panel sm-av-res', s.body);
     el('div', 'sm-stripe', card);
     els.resHeadline = el('div', 'sm-av-res-headline', card, '');
@@ -2776,15 +2860,15 @@ SM.advui = (function () {
      * the rails SECURED — the whole payout of a bad run — or, when nothing was
      * secured, what was LEFT BEHIND. Labelling both "HOLD VALUE" would have been
      * the one lie the screen cannot afford. */
-    els.resHeroLabel = el('div', 'sm-av-res-hero-label', hero, 'SECURED');
+    els.resHeroLabel = el('div', 'sm-av-res-hero-label', hero, tr('haul.secured'));
     els.resTotal = el('div', 'sm-av-res-total', hero, '$0');
     els.resLines = el('div', 'sm-av-res-lines', card);
     els.resNote = el('div', 'sm-av-warn', card, '');
     var grid = el('div', 'sm-av-card-grid', card);
-    els.resDepth = statCell(grid, 'DEPTH REACHED', '0 m');
-    els.resTime = statCell(grid, 'TIME UNDER', '0:00');
-    els.resFuel = statCell(grid, 'FUEL LEFT', '0%');
-    els.resDay = statCell(grid, 'DAY', '1');
+    els.resDepth = statCell(grid, 'haul.depth', '0 m');
+    els.resTime = statCell(grid, 'haul.time', '0:00');
+    els.resFuel = statCell(grid, 'haul.fuelLeft', '0%');
+    els.resDay = statCell(grid, 'slots.day', '1');
 
     /* FOUR BUTTONS, ONE JOB EACH.
      * What a player does at the surface is: bank the load, top the tank up, and
@@ -2792,23 +2876,23 @@ SM.advui = (function () {
      * common case cost a detour through a screen you did not want. Each of these
      * now does exactly the one thing it is named after, and SELL does not
      * navigate at all — you stay here and choose. */
-    els.resBtn = button(s.foot, 'sm-btn-primary sm-btn-big', 'SELL THE HAUL');
+    els.resBtn = buttonT(s.foot, 'sm-btn-primary sm-btn-big', 'haul.sell');
     onTap(els.resBtn, onSell);
     /* REFUEL HAPPENS HERE, not on the prep screen.
      * Sending the player to prep to buy fuel and press DESCEND put a whole
      * screen in the middle of the one loop they repeat all game: come up, sell,
      * fill up, go back down. It buys a full tank in place and says what it cost. */
-    els.resFuel2 = button(s.foot, '', 'REFUEL');
+    els.resFuel2 = button(s.foot, '', tr('haul.refuel'));
     onTap(els.resFuel2, onRefuelHere);
 
     /* ...and BACK TO MINE descends straight from here. */
-    els.resDive = button(s.foot, '', 'BACK TO MINE');
+    els.resDive = buttonT(s.foot, '', 'aui.diveAgain');
     onTap(els.resDive, onBackToMine);
-    els.resShop = button(s.foot, '', 'WORKSHOP');
+    els.resShop = buttonT(s.foot, '', 'menu.workshop');
     onTap(els.resShop, function () {
       if (SM.adv && SM.adv.openGarage) SM.adv.openGarage();
     });
-    els.resMap = button(s.foot, '', 'MAP');
+    els.resMap = button(s.foot, '', tr('menu.map'));
     onTap(els.resMap, function () {
       if (SM.adv && SM.adv.backToMap) SM.adv.backToMap();
     });
@@ -2930,20 +3014,21 @@ SM.advui = (function () {
     /* WHAT THE BIG NUMBER IS. Secured ore on a strand (it is the payout), the
      * hold on a legacy extraction, and what was LEFT BEHIND when a strand
      * secured nothing — labelled as such, never as money. */
-    var heroLabel, heroLines, heroTotal;
+    var heroLabel, heroLines, heroTotal, heroKey;
     if (strand && r.secured > 0) {
-      heroLabel = 'SECURED';
+      heroKey = 'haul.secured';
       heroLines = r.securedLines;
       heroTotal = r.secured;
     } else if (strand) {
-      heroLabel = 'LEFT BEHIND';
+      heroKey = 'haul.leftBehind';
       heroLines = r.lines;
       heroTotal = r.lost > 0 ? r.lost : r.gross;
     } else {
-      heroLabel = 'HOLD VALUE';
+      heroKey = 'haul.holdValue';
       heroLines = r.lines;
       heroTotal = r.gross;
     }
+    heroLabel = tr(heroKey);
     if (sold) { heroLines = []; heroTotal = 0; }
     r.lines = heroLines;
     r.gross = heroTotal;
@@ -2954,28 +3039,24 @@ SM.advui = (function () {
      * label, which is right for the hold on the floor and exactly wrong for the
      * secured ledger sitting there waiting to be banked. One class, and the
      * stylesheet re-dresses it green. */
-    sc.node.classList[(strand && heroLabel === 'SECURED') ? 'add' : 'remove']('sm-av-res-kept');
-    sc.kicker.textContent = (strand ? 'THE MINE KEPT IT' : 'EXTRACTION COMPLETE') +
+    sc.node.classList[(strand && heroKey === 'haul.secured') ? 'add' : 'remove']('sm-av-res-kept');
+    sc.kicker.textContent = tr(strand ? 'haul.kickerStrand' : 'haul.kickerDone') +
                             (r.mineName ? ('  ·  ' + r.mineName.toUpperCase()) : '');
-    sc.title.textContent = strand ? 'STRANDED' : 'THE HAUL';
+    sc.title.textContent = tr(strand ? 'haul.stranded' : 'haul.title');
     els.resHeroLabel.textContent = heroLabel;
     els.resHeadline.textContent = strand
       ? reasonLine(r.reason, r.depthM, r)
-      : (sold ? 'Sold. The hold is empty and the money is in the account.'
-              : (r.lines.length ? 'Back at the surface with the hold intact.'
-                                : 'Back at the surface. The hold is empty.'));
+      : tr(sold ? 'haul.lineSold' : (r.lines.length ? 'haul.lineFull' : 'haul.lineEmpty'));
 
     /* THE NOTE LINE: where the load is, and what the sale did. Both can be true
      * at once — a run that secured ore, stranded, and has now banked it still
      * has a pile waiting on that level. */
     var note = '';
     if (strand) {
-      note = 'The load is on ' + levelWord(r) + ' at ' + fmt(r.depthM) + ' m' +
-             (r.lost > 0 ? (' — ' + money(r.lost) + ' of it') : '') +
-             '. Descend to that level to pick it up.';
+      note = tr('haul.noteLoad', levelWord(r), fmt(r.depthM), r.lost > 0 ? money(r.lost) : '');
     }
     if (sold && lastSale > 0) {
-      note = (note ? (note + '  ') : '') + 'BANKED ' + money(lastSale) + ' into the company account.';
+      note = (note ? (note + '  ') : '') + tr('haul.noteBanked', money(lastSale));
     }
     els.resNote.textContent = note;
     els.resNote.style.display = note ? '' : 'none';
@@ -2990,21 +3071,33 @@ SM.advui = (function () {
     paintResFooter();
 
     buildResultLines(r);
-    startCountUp(r);
+    /* A LANGUAGE SWITCH IS NOT A NEW RESULT. The rows are rebuilt (their
+     * names are words) but land at their final values, rather than rolling
+     * the whole count-up again under a player who only changed a setting. */
+    if (langRepaint) finishCountUp(r);
+    else startCountUp(r);
+  }
+
+  function finishCountUp(r) {
+    stopCountUp();
+    for (var i = 0; i < r.lines.length; i++) {
+      var L = r.lines[i];
+      if (L.node) L.node.textContent = money(L.value);
+      if (L.row) L.row.classList.add('sm-av-res-row-in');
+    }
+    els.resTotal.textContent = money(r.gross);
   }
 
   /** 'LEVEL 3 (SILVER VEINS)' / 'that level' — the address of a dropped load. */
   function levelWord(r) {
-    if (!(r.level >= 1)) return 'that level';
-    return 'LEVEL ' + fmt(r.level) + (r.levelName ? (' · ' + r.levelName.toUpperCase()) : '');
+    if (!(r.level >= 1)) return tr('haul.thatLevel');
+    return tr('menu.level') + ' ' + fmt(r.level) + (r.levelName ? (' · ' + r.levelName.toUpperCase()) : '');
   }
 
   function reasonLine(reason, depth, r) {
-    var where = (r && r.level >= 1) ? (' on ' + levelWord(r)) : '';
-    if (reason === 'fuel') return 'The tank ran dry at ' + fmt(depth) + ' m' + where + '.';
-    if (reason === 'hull') return 'The hull gave out at ' + fmt(depth) + ' m' + where + '.';
-    if (reason === 'abort') return 'You walked away from the dig at ' + fmt(depth) + ' m' + where + '.';
-    return 'The machine stopped at ' + fmt(depth) + ' m' + where + '.';
+    var lw = (r && r.level >= 1) ? levelWord(r) : '';
+    var key = (reason === 'fuel' || reason === 'hull' || reason === 'abort') ? reason : 'other';
+    return tr('haul.reason.' + key, fmt(depth), lw);
   }
 
   function clock(t) {
@@ -3017,7 +3110,7 @@ SM.advui = (function () {
     els.resLines.innerHTML = '';
     if (!r.lines.length) {
       el('div', 'sm-av-res-empty', els.resLines,
-         r.stranded ? 'NOTHING WAS SECURED' : 'NOTHING IN THE HOLD');
+         tr(r.stranded ? 'haul.noneSecured' : 'haul.noneHold'));
       return;
     }
     for (var i = 0; i < r.lines.length; i++) {
@@ -3087,7 +3180,7 @@ SM.advui = (function () {
     if (res && num(res.gross, 0) > 0) gained = num(res.gross, gained);
     // Remembered for the note line, because the hold itself is zeroed on repaint.
     if (gained > 0) lastSale = gained;
-    if (gained > 0) toast('BANKED', money(gained) + ' into the company account', 2.6);
+    if (gained > 0) toast(function () { return [tr('haul.banked'), tr('haul.bankedSub', money(gained))]; }, '', 2.6);
     // sell() deliberately does NOT navigate any more, so repaint in place: the
     // ledger in the header has moved and SELL has nothing left to sell.
     paintSold();
@@ -3105,16 +3198,20 @@ SM.advui = (function () {
   /** Buy a full tank without leaving the extraction screen. */
   function onRefuelHere() {
     var want = refuelUnits();
-    if (want <= 0) { toast('TANK FULL', 'Nothing to top up', 1.8); paintResFooter(); return; }
+    if (want <= 0) {
+      toast(function () { return [tr('haul.tankFull'), tr('haul.tankFullSub')]; }, '', 1.8);
+      paintResFooter();
+      return;
+    }
     var quoted = (SM.mines && SM.mines.fuelCost) ? num(SM.mines.fuelCost(want), 0) : 0;
     var before = advNum('getCash', 0);
     var ok = !!(SM.adv && SM.adv.buyFuel && SM.adv.buyFuel(want));
     var spent = before - advNum('getCash', 0);
     if (!ok || spent <= 0) {
-      toast('CANNOT REFUEL', 'Not enough in the account for ' + money(quoted), 2.4);
+      toast(function () { return [tr('haul.cantRefuel'), tr('haul.cantRefuelSub', money(quoted))]; }, '', 2.4);
     } else {
       // Partial fills are legitimate: adv.buyFuel() buys what the cash reaches.
-      toast('REFUELLED', money(spent) + ' of diesel', 2.2);
+      toast(function () { return [tr('haul.refuelled'), tr('haul.refuelledSub', money(spent))]; }, '', 2.2);
     }
     paintResFooter();
     refresh();
@@ -3134,7 +3231,7 @@ SM.advui = (function () {
 
     var aboard = advNum('getTank', 0);
     if (aboard < 1) {
-      toast('TANK IS EMPTY', 'Refuel before you go back down', 2.6);
+      toast(function () { return [tr('haul.tankEmpty'), tr('haul.tankEmptySub')]; }, '', 2.6);
       return;
     }
     /* BACK TO THE LEVEL THE LOAD IS ON, not to the deepest one owned.
@@ -3145,7 +3242,7 @@ SM.advui = (function () {
     var res = (SM.adv && SM.adv.getResults) ? SM.adv.getResults() : null;
     if (res && res.kind === 'stranded' && num(res.level, 0) >= 1) opts.level = num(res.level, 1);
     if (SM.adv && SM.adv.enterMine && SM.adv.enterMine(id, opts)) return;
-    toast('CANNOT DESCEND', 'Check the mining rights for this site', 2.4);
+    toast(function () { return [tr('haul.cantDescend'), tr('haul.cantDescendSub')]; }, '', 2.4);
     if (SM.adv && SM.adv.backToMap) SM.adv.backToMap();
   }
 
@@ -3178,12 +3275,12 @@ SM.advui = (function () {
      * one that is simply dim. The greying is done in style-adventure.css against
      * :disabled, so the state lives in one place. */
     if (els.resBtn) {
-      els.resBtn.textContent = 'SELL THE HAUL';
+      els.resBtn.textContent = tr('haul.sell');
       if (sold || !(toSell > 0)) els.resBtn.setAttribute('disabled', 'disabled');
       else els.resBtn.removeAttribute('disabled');
     }
     if (els.resFuel2) {
-      els.resFuel2.textContent = need > 0 ? ('REFUEL  ·  ' + money(cost)) : 'REFUEL';
+      els.resFuel2.textContent = need > 0 ? tr('haul.refuelCost', money(cost)) : tr('haul.refuel');
       if (need > 0) els.resFuel2.removeAttribute('disabled');
       else els.resFuel2.setAttribute('disabled', 'disabled');
     }
@@ -3193,7 +3290,7 @@ SM.advui = (function () {
      * player who stranded broke, with a dry tank and nothing secured, has SELL,
      * REFUEL and BACK TO MINE all greyed, and this is what walks them back to
      * PREPARE DESCENT instead of leaving them on a dead screen. */
-    if (els.resMap) els.resMap.textContent = mapUnlocked() ? 'MAP' : 'PREPARE DESCENT';
+    if (els.resMap) els.resMap.textContent = tr(mapUnlocked() ? 'menu.map' : 'prep.title');
 
     /* WHICHEVER STEP IS NEXT WEARS THE BRIGHT PLATE. Bank what survived, fill
      * the tank, go back down for the pile — in that order, so the screen always
@@ -3261,8 +3358,8 @@ SM.advui = (function () {
 
   function paintLedger() {
     var rec = (SM.save && SM.save.get) ? SM.save.get() : null;
-    els.ledCompany.textContent = (rec && rec.company) ? String(rec.company).toUpperCase() : 'NO COMPANY';
-    els.ledDay.textContent = 'DAY ' + fmt(advNum('getDay', 1));
+    els.ledCompany.textContent = (rec && rec.company) ? String(rec.company).toUpperCase() : tr('aui.noCompany');
+    els.ledDay.textContent = tr('aui.day', fmt(advNum('getDay', 1)));
     els.ledCash.textContent = money(advNum('getCash', 0));
     els.ledTier.textContent = 'MK ' + roman(rigNum('getMachineTier', 1));
   }
@@ -3270,10 +3367,28 @@ SM.advui = (function () {
   /* =====================================================================
    * TOAST + LIFECYCLE
    * ================================================================== */
+  /**
+   * `title` may be a PAINTER — a function returning [title, sub] — and every
+   * toast this module raises is one, so a language switch while it is still
+   * up re-words it in place (onLang) instead of leaving a stale sentence on
+   * screen. A plain string pair still works for any outside caller.
+   */
+  var toastPaint = null;
+  function paintToast() {
+    if (!toastPaint) return;
+    var w = toastPaint();
+    els.toastTitle.textContent = (w && w[0]) || '';
+    els.toastSub.textContent = (w && w[1]) || '';
+  }
+
   function toast(title, sub, seconds) {
     if (!els.toast) return;
-    els.toastTitle.textContent = title || '';
-    els.toastSub.textContent = sub || '';
+    if (typeof title === 'function') toastPaint = title;
+    else {
+      var fixed = [title || '', sub || ''];
+      toastPaint = function () { return fixed; };
+    }
+    paintToast();
     els.toast.classList.remove('sm-av-toast-on');
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(function () { els.toast.classList.add('sm-av-toast-on'); });
@@ -3282,6 +3397,7 @@ SM.advui = (function () {
     if (els.toast.smTimer) clearTimeout(els.toast.smTimer);
     els.toast.smTimer = setTimeout(function () {
       els.toast.smTimer = 0;
+      toastPaint = null;
       els.toast.classList.remove('sm-av-toast-on');
     }, toastTimer);
   }
@@ -3302,6 +3418,12 @@ SM.advui = (function () {
        * event is what keeps them in step rather than either caller remembering to
        * ask for a repaint. */
       SM.events.on('lift:bought', refresh);
+      /* A LANGUAGE SWITCH (js/i18n.js). paintStatic has already re-worded every
+       * fixed caption by the time this fires; what is left is everything painted
+       * from state, which is exactly what refresh() repaints — on the screen that
+       * is up, without changing screen, closing the name field (a half-typed name
+       * is the player's and stays as typed) or re-rolling the results count-up. */
+      document.addEventListener('arcade:lang', onLang, false);
       window.addEventListener('resize', onResize, false);
       window.addEventListener('orientationchange', onResize, false);
 
@@ -3320,6 +3442,17 @@ SM.advui = (function () {
         }, SYNC_MS);
       }
     }
+  }
+
+  var langRepaint = false;
+  function onLang() {
+    if (!built) return;
+    for (var i = 0; i < slotRows.length; i++) {
+      if (slotRows[i].erase && slotRows[i].erase.smRelabel) slotRows[i].erase.smRelabel();
+    }
+    langRepaint = true;
+    try { refresh(); } finally { langRepaint = false; }
+    paintToast();
   }
 
   function onResize() {

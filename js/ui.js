@@ -79,7 +79,7 @@ SM.ui = (function () {
    * behind (v2.8.0 against sw.js's v2.9.1), which only ever shows on a
    * file:// or first-visit load — exactly the two cases where nobody can
    * check it against anything, so a wrong number there is worse than none. */
-  var GAME_VERSION    = 'v2.11.0';
+  var GAME_VERSION    = 'v2.12.0';
 
   /* TESTER MODE — the title-gate cheat code, old-school. Typed on the title
    * screen it reveals the TESTER MODE button; the unlock persists in
@@ -165,6 +165,19 @@ SM.ui = (function () {
     return n;
   }
 
+  /* SPEAKING, through js/i18n.js. elT() is el() for a node whose words never
+   * change except with the language: it carries data-i18n, so I18N.paintStatic
+   * repaints it on a switch with no code here. Everything this file writes
+   * later (the update button, the tester card, the fullscreen label, the way
+   * out) is repainted by onLang() instead. */
+  function T() { return I18N.t.apply(null, arguments); }
+
+  function elT(tag, cls, parent, key) {
+    var n = el(tag, cls, parent, T(key));
+    n.setAttribute('data-i18n', key);
+    return n;
+  }
+
   function setText(key, node, str) {
     if (!node || lastStrings[key] === str) return;
     lastStrings[key] = str;
@@ -173,11 +186,12 @@ SM.ui = (function () {
 
   /** A square glyph plate. Art carries the meaning here, so the title is not
    *  optional and neither is the aria-label — same helper shape as advhud's. */
-  function iconButton(parent, cls, icon, title) {
+  function iconButton(parent, cls, icon, key) {
     var b = el('button', 'sm-btn sm-iconbtn ' + cls, parent);
     b.setAttribute('type', 'button');
-    b.setAttribute('title', title);
-    b.setAttribute('aria-label', title);
+    b.setAttribute('data-i18n-label', key);
+    b.setAttribute('title', T(key));
+    b.setAttribute('aria-label', T(key));
     b.innerHTML = glyph(icon);
     return b;
   }
@@ -257,9 +271,11 @@ SM.ui = (function () {
     el('div', 'sm-start-logo', head, 'SUPERMINE');
     el('div', 'sm-start-sub', head, 'ADVENTURE');
 
-    el('div', 'sm-start-pick', sc, 'RUN A MINING COMPANY');
+    elT('div', 'sm-start-pick', sc, 'title.pick');
 
-    els.startBtn = el('button', 'sm-btn sm-btn-big sm-start-go', sc, 'START');
+    /* PLAY, not START: the way in says the hub's one word for it (CLAUDE.md
+     * §2, "Menus speak plainly"), in this game's brass caps. */
+    els.startBtn = elT('button', 'sm-btn sm-btn-big sm-start-go', sc, 'menu.play');
     els.startBtn.setAttribute('type', 'button');
 
     /* NON-BREAKING SPACE BEFORE EACH SEPARATOR. This line wraps to two rows on
@@ -267,20 +283,17 @@ SM.ui = (function () {
      * "·", orphaning the bullet onto the head of the second line. Tying each
      * separator to the word it follows means a break can only happen AFTER it,
      * which is the only place it looks deliberate. */
-    el('div', 'sm-start-tag', sc,
-      'DIG DEEP · FILL THE HOLD · GET BACK TO THE LIFT');
+    elT('div', 'sm-start-tag', sc, 'title.tag');
 
     /* Runs of spaces COLLAPSE in HTML, so the columns the old copy tried to set
      * up with whitespace all closed up into one ragged line. Explicit
      * separators, and caps, like every other label in the game. */
     var keys = el('div', 'sm-start-keys', sc);
-    el('div', 'sm-keys-desk', keys,
-      'W A S D / ARROWS — DRIVE   ·   M — MUTE   ·   ENTER — START');
-    el('div', 'sm-keys-touch', keys,
-      'DRAG ANYWHERE TO DRIVE');
+    elT('div', 'sm-keys-desk', keys, 'title.keysDesk');
+    elT('div', 'sm-keys-touch', keys, 'title.keysTouch');
 
     /* --- opt-in update, shown only when a new build is parked and waiting --- */
-    els.update = el('button', 'sm-update', sc, 'UPDATE READY — TAP TO INSTALL');
+    els.update = el('button', 'sm-update', sc, T('update.offer', null));
     els.update.setAttribute('type', 'button');
     els.update.style.display = 'none';
     els.update.addEventListener('click', function (e) {
@@ -362,6 +375,17 @@ SM.ui = (function () {
     catch (e) { return false; }   // a cross-origin parent is not a crash
   }
 
+  /* exit.js picks the case and we supply the words, in whichever language is
+   * current — and again on every switch (onLang), so the door is never left
+   * speaking the language the page opened in. */
+  var quitRefused = false;
+  function exitWord() {
+    return window.ArcadeExit.verb({
+      arcade: T('menu.exitArcade'),
+      app: T('menu.close'),
+    });
+  }
+
   function buildArcadeExit() {
     if (!exitOffered()) return;
 
@@ -372,11 +396,7 @@ SM.ui = (function () {
      * survives from this game's own voice — it is an all-caps game.
      * `tab` is legacy in exit.js and deliberately not passed; the tab case
      * wears the arcade's word now, which is what verb() already returns. */
-    var word = window.ArcadeExit.verb({
-      arcade: 'BACK TO ARCADE',
-      app: 'CLOSE',
-    });
-    els.startQuit = el('button', 'sm-btn sm-start-quit', els.start, word);
+    els.startQuit = el('button', 'sm-btn sm-start-quit', els.start, exitWord());
     els.startQuit.setAttribute('type', 'button');
     els.startQuit.addEventListener('click', function (e) {
       e.preventDefault();
@@ -388,7 +408,8 @@ SM.ui = (function () {
         // Refused means the browser would not close a tab it did not open.
         // Say so where the button is, rather than leaving it looking dead.
         if (how !== 'refused') return;
-        els.startQuit.textContent = 'CLOSE THIS TAB YOURSELF';
+        quitRefused = true;
+        els.startQuit.textContent = T('menu.closeTab');
         els.startQuit.disabled = true;
       });
     });
@@ -441,7 +462,7 @@ SM.ui = (function () {
      * line. Kept as insurance against whatever ends up under here next. */
     els.corner.addEventListener('click', function (e) { e.stopPropagation(); });
 
-    els.mixBtn = iconButton(els.corner, 'sm-btn-mix', UI_ICONS.sound_on, 'Sound');
+    els.mixBtn = iconButton(els.corner, 'sm-btn-mix', UI_ICONS.sound_on, 'menu.soundAria');
     els.mixBtn.setAttribute('aria-expanded', 'false');
     els.mixBtn.addEventListener('click', function (e) {
       e.preventDefault();
@@ -458,7 +479,11 @@ SM.ui = (function () {
      * only once a working request/exit PAIR has answered. Safari on iPhone has
      * no element fullscreen at all, and a plate that does nothing when pressed
      * is worse than no plate. A shrunk cluster is a fine outcome. */
-    els.screen = iconButton(els.corner, 'sm-btn-screen', UI_ICONS.expand, 'Fullscreen');
+    els.screen = iconButton(els.corner, 'sm-btn-screen', UI_ICONS.expand, 'menu.fullscreen');
+    /* Its words follow its state, not a fixed key — refreshScreenToggle()
+     * owns them, and paintStatic must not put "Fullscreen" back on a plate
+     * that is currently offering the way out of it. */
+    els.screen.removeAttribute('data-i18n-label');
     els.screen.setAttribute('aria-pressed', 'false');
     els.screen.hidden = true;
   }
@@ -504,8 +529,8 @@ SM.ui = (function () {
 
     var card = el('div', 'sm-panel sm-sound-card', els.soundPanel);
     el('div', 'sm-stripe', card);
-    el('div', 'sm-sound-kicker', card, 'CAB SPEAKERS');
-    el('div', 'sm-sound-title', card, 'SOUND');
+    elT('div', 'sm-sound-kicker', card, 'sound.kicker');
+    elT('div', 'sm-sound-title', card, 'menu.sound');
 
     /* ENGINE and EFFECTS, not THE RIG and THE ROCK. A player reaching for a
      * volume is not reading for flavour — they are looking for which of two
@@ -520,18 +545,19 @@ SM.ui = (function () {
      * labelled MUSIC would be naming something that does not exist, which is
      * worse than being the odd one out. js/sound.js's header carries the full
      * argument, including why the stored key is still `vol.music.v1`. */
-    els.volMusic = volumeRow(card, 'sm-vol-rig', 'ENGINE');
-    els.volSfx = volumeRow(card, 'sm-vol-rock', 'EFFECTS');
+    els.volMusic = volumeRow(card, 'sm-vol-rig', 'menu.engine');
+    els.volSfx = volumeRow(card, 'sm-vol-rock', 'menu.effects');
 
-    el('div', 'sm-sound-hint', card,
-      'ENGINE IS THE DRONE AND THE CUTTER — THE NOISE THAT NEVER STOPS WHILE ' +
-      'YOU DRIVE. EFFECTS IS EVERYTHING IT BREAKS, AND EVERY ORE THAT GOES IN ' +
-      'THE HOLD. DRAG EITHER ONE AND YOU WILL HEAR IT.');
+    elT('div', 'sm-sound-hint', card, 'sound.hint');
 
-    /* Just BACK. A panel's way out is not a place in the fiction and does not
-     * get a name from one — it is the plainest word for what the button does,
-     * in this game's caps. */
-    els.soundBack = el('button', 'sm-btn sm-sound-back', card, 'BACK');
+    /* THE LANGUAGE ROW. This panel is the one settings surface the title gate
+     * has — the corner speaker opens it before any run — so it is where a
+     * stranger who cannot read the Norwegian the game opened in finds the way
+     * to English (CLAUDE.md §2, "Two languages"). The pause card carries the
+     * second copy; `sound` keeps this one's flag ids apart from it. */
+    I18N.langRow(card, 'sound');
+
+    els.soundBack = elT('button', 'sm-btn sm-sound-back', card, 'menu.back');
     els.soundBack.setAttribute('type', 'button');
     els.soundBack.addEventListener('click', function (e) {
       e.preventDefault();
@@ -565,7 +591,7 @@ SM.ui = (function () {
   function volumeRow(parent, id, label) {
     var row = el('div', 'sm-sound-row', parent);
 
-    var lab = el('label', 'sm-sound-label', row, label);
+    var lab = elT('label', 'sm-sound-label', row, label);
     lab.setAttribute('for', id);
 
     var input = el('input', 'sm-sound-range', row);
@@ -729,7 +755,7 @@ SM.ui = (function () {
     /* Plain words, and deliberately not the mine's own vocabulary. This is
      * something the browser does, not something the game does; it has one name
      * everywhere and the player already knows it. */
-    var label = on ? 'Exit fullscreen' : 'Fullscreen';
+    var label = T(on ? 'menu.exitFullscreen' : 'menu.fullscreen');
     els.screen.innerHTML = glyph(on ? UI_ICONS.contract : UI_ICONS.expand);
     els.screen.setAttribute('aria-pressed', on ? 'true' : 'false');
     els.screen.setAttribute('aria-label', label);
@@ -785,7 +811,7 @@ SM.ui = (function () {
    * which covers every button inside it.
    * ------------------------------------------------------------------ */
   function buildTester() {
-    els.testerBtn = el('button', 'sm-btn sm-start-tester', els.start, 'TESTER MODE');
+    els.testerBtn = elT('button', 'sm-btn sm-start-tester', els.start, 'tester.title');
     els.testerBtn.setAttribute('type', 'button');
     if (!testerUnlocked) els.testerBtn.style.display = 'none';
     els.testerBtn.addEventListener('click', function (e) {
@@ -801,13 +827,12 @@ SM.ui = (function () {
     });
 
     var card = el('div', 'sm-tester-card', els.tester);
-    el('div', 'sm-tester-title', card, 'TESTER MODE');
-    el('div', 'sm-tester-note', card,
-      'A SEPARATE SLOT FOR TESTING — THE THREE COMPANY SLOTS ARE NEVER TOUCHED');
+    elT('div', 'sm-tester-title', card, 'tester.title');
+    elT('div', 'sm-tester-note', card, 'tester.note');
 
     var slot = el('div', 'sm-tester-slot', card);
     var info = el('div', 'sm-tester-info', slot);
-    els.testerName = el('div', 'sm-tester-name', info, 'EMPTY');
+    els.testerName = el('div', 'sm-tester-name', info, T('tester.empty'));
     els.testerStats = el('div', 'sm-tester-stats', info, '');
     els.testerCash = el('button', 'sm-btn sm-tester-cash', slot, '+ $1 000 000');
     els.testerCash.setAttribute('type', 'button');
@@ -820,7 +845,7 @@ SM.ui = (function () {
     });
 
     var acts = el('div', 'sm-tester-acts', card);
-    els.testerGo = el('button', 'sm-btn sm-btn-primary sm-tester-go', acts, 'NEW TEST COMPANY');
+    els.testerGo = el('button', 'sm-btn sm-btn-primary sm-tester-go', acts, T('tester.new'));
     els.testerGo.setAttribute('type', 'button');
     els.testerGo.addEventListener('click', function (e) {
       e.preventDefault();
@@ -834,27 +859,27 @@ SM.ui = (function () {
         enterTester();
       }
     });
-    els.testerWipe = el('button', 'sm-btn sm-tester-quiet', acts, 'WIPE');
+    els.testerWipe = el('button', 'sm-btn sm-tester-quiet', acts, T('tester.wipe'));
     els.testerWipe.setAttribute('type', 'button');
     els.testerWipe.addEventListener('click', function (e) {
       e.preventDefault();
       if (!wipeTimer) {
         /* Two taps, like every destructive verb in the campaign. */
-        els.testerWipe.textContent = 'WIPE FOR GOOD?';
+        els.testerWipe.textContent = T('tester.wipeSure');
         wipeTimer = setTimeout(function () {
           wipeTimer = 0;
-          els.testerWipe.textContent = 'WIPE';
+          els.testerWipe.textContent = T('tester.wipe');
         }, 2600);
         return;
       }
       clearTimeout(wipeTimer);
       wipeTimer = 0;
-      els.testerWipe.textContent = 'WIPE';
+      els.testerWipe.textContent = T('tester.wipe');
       if (SM.save && SM.save.erase) SM.save.erase(SM.save.TESTER_SLOT);
       if (SM.save && SM.save.flush) SM.save.flush();
       paintTester();
     });
-    els.testerBack = el('button', 'sm-btn sm-tester-quiet', acts, 'BACK');
+    els.testerBack = elT('button', 'sm-btn sm-tester-quiet', acts, 'menu.back');
     els.testerBack.setAttribute('type', 'button');
     els.testerBack.addEventListener('click', function (e) {
       e.preventDefault();
@@ -870,12 +895,11 @@ SM.ui = (function () {
   function paintTester() {
     var s = (SM.save && SM.save.testerSummary) ? SM.save.testerSummary() : null;
     var empty = !s || s.empty;
-    setText('tstName', els.testerName, empty ? 'EMPTY' : String(s.company || TESTER_NAME));
+    setText('tstName', els.testerName, empty ? T('tester.empty') : String(s.company || TESTER_NAME));
     setText('tstStats', els.testerStats, empty
-      ? 'NO TEST COMPANY YET'
-      : 'DAY ' + s.day + '   ·   ' + moneyStr(s.cash) +
-        '   ·   MK ' + s.tier + '   ·   ' + s.mines + ' MINES');
-    setText('tstGo', els.testerGo, empty ? 'NEW TEST COMPANY' : 'CONTINUE');
+      ? T('tester.none')
+      : T('tester.stats', s.day, moneyStr(s.cash), s.tier, s.mines));
+    setText('tstGo', els.testerGo, empty ? T('tester.new') : T('tester.continue'));
     els.testerCash.disabled = empty;
     els.testerWipe.style.display = empty ? 'none' : '';
   }
@@ -1143,6 +1167,21 @@ SM.ui = (function () {
   /* =====================================================================
    * LIFECYCLE
    * ================================================================== */
+  /* A LANGUAGE SWITCH, from either copy of the row. paintStatic has already
+   * repainted every data-i18n node by the time this runs; what is left is the
+   * text this file writes itself. Nothing here closes a panel, leaves the
+   * title or touches the pause — the menu stays open, in the new words. */
+  function onLang() {
+    lastStrings = {};
+    paintUpdate();
+    refreshScreenToggle();
+    if (els.startQuit && !quitRefused && window.ArcadeExit) {
+      els.startQuit.textContent = exitWord();
+    }
+    if (els.testerWipe && !wipeTimer) els.testerWipe.textContent = T('tester.wipe');
+    if (els.testerName) paintTester();
+  }
+
   function init() {
     build();
     /* AFTER build(), because it un-hides a plate build() has just created —
@@ -1157,6 +1196,7 @@ SM.ui = (function () {
        * in principle run again — a second listener would be harmless (the call
        * is idempotent) but this is the file's existing discipline. */
       window.addEventListener('keydown', onTitleKey, false);
+      document.addEventListener('arcade:lang', onLang, false);
     }
     initPWA();
   }
@@ -1220,10 +1260,23 @@ SM.ui = (function () {
     if (v && els.version) setText('ver', els.version, v);
   }
 
+  /* What the update button is saying, so a language switch can say it again:
+   * '' (hidden), 'offer' or 'installing'. */
+  var updateState = '';
+  var updateVersion = null;
+
+  function paintUpdate() {
+    if (!els.update || !updateState) return;
+    els.update.textContent = updateState === 'installing'
+      ? T('update.installing')
+      : T('update.offer', updateVersion);
+  }
+
   function offerUpdate(version) {
     if (!els.update) return;
-    els.update.textContent = (version ? version + ' READY' : 'UPDATE READY') +
-                             ' — TAP TO INSTALL';
+    updateState = 'offer';
+    updateVersion = version || null;
+    paintUpdate();
     els.update.style.display = '';
     els.update.classList.add('sm-update-on');
   }
@@ -1231,7 +1284,8 @@ SM.ui = (function () {
   function applyUpdate() {
     if (!swReg || !swReg.waiting) return;
     if (SM.sound && SM.sound.play) SM.sound.play('ui');
-    els.update.textContent = 'INSTALLING…';
+    updateState = 'installing';
+    paintUpdate();
     els.update.disabled = true;
     swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
   }

@@ -663,6 +663,27 @@ SM.materials = (function () {
     byId[m.id] = m;
   }
 
+  /* WORDS THAT FOLLOW THE LANGUAGE. `name` is what every manifest, chip and
+   * scanner line prints, so it becomes a getter on I18N.t('mat.<id>') and the
+   * English above stays as the fallback (and as the `en` text in js/i18n.js).
+   * `id` is the identifier everywhere; nothing keys off a name. */
+  (function speakNames() {
+    function speak(obj, key) {
+      var en = obj.name;
+      Object.defineProperty(obj, 'name', {
+        configurable: true, enumerable: true,
+        get: function () {
+          return (typeof window !== 'undefined' && window.I18N) ? window.I18N.t(key) : en;
+        },
+        set: function (v) {
+          Object.defineProperty(obj, 'name',
+            { value: v, writable: true, enumerable: true, configurable: true });
+        }
+      });
+    }
+    for (var j = 0; j < list.length; j++) speak(list[j], 'mat.' + list[j].id);
+  })();
+
   /**
    * Re-balance the table for a terrain grid of `spacing` instead of the
    * authored `baseSpacing`. See the tunables note at the top for why.

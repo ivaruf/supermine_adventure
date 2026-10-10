@@ -442,6 +442,10 @@ SM.adv = (function () {
    * gone with the mouth. See the LIFT note in the header.
    * ------------------------------------------------------------------ */
   var levels = [];
+  /* The level-table record each entry above was last filled from. An entry's
+   * `name` is a getter onto it rather than a copy, so a language switch reaches
+   * the door menu and the results screen without re-keying this cache. */
+  var levelSrc = [];
   var lvMineId = null;                 // which mine `levels` describes
   var lvOwned = -1;                    // ...and how many levels were owned then
   var lvTaught = -1;                   // ...and how far the reveal had got
@@ -519,6 +523,23 @@ SM.adv = (function () {
     blurb: 'A shaft nobody bothered to name. Good enough to shake the rig down.',
     layers: []
   };
+  /* Its words follow the language like the catalogue's do (js/mines.js). */
+  (function () {
+    function speak(obj, field, key) {
+      var en = obj[field];
+      Object.defineProperty(obj, field, {
+        configurable: true, enumerable: true,
+        get: function () { return window.I18N ? window.I18N.t(key) : en; }
+      });
+    }
+    speak(FALLBACK_MINE, 'name', 'mine.shakedown.name');
+    speak(FALLBACK_MINE, 'blurb', 'mine.shakedown.blurb');
+    speak(FALLBACK_MINE.hazards, 0, 'mine.haz.unsurveyed');
+    Object.defineProperty(FALLBACK_MINE, 'regionLabel', {
+      configurable: true, enumerable: false,
+      get: function () { return window.I18N ? window.I18N.t('mine.region.test_ground') : 'Test Ground'; }
+    });
+  })();
 
   /* =====================================================================
    * SMALL GUARDED READS ACROSS THE SEAMS
@@ -1173,6 +1194,18 @@ SM.adv = (function () {
    * return. The rebuild reuses the array AND the entry objects — a UI that
    * stashed `getLevels()[2]` keeps a live reference for the whole session.
    */
+  function levelEntry(idx) {
+    var e = {
+      i: 0, depthTopM: 0, depthBotM: 0, depthM: 0,
+      price: 0, widthU: 0, y: 0, owned: false, offered: false, endless: true
+    };
+    Object.defineProperty(e, 'name', {
+      configurable: true, enumerable: true,
+      get: function () { var L = levelSrc[idx]; return L ? String(L.name || '') : ''; }
+    });
+    return e;
+  }
+
   function ensureLevels() {
     var def = getMine();
     var id = def ? def.id : null;
@@ -1195,15 +1228,12 @@ SM.adv = (function () {
     var want = tbl ? tbl.length : 0;
     while (levels.length > want) levels.pop();
     while (levels.length < want) {
-      levels.push({
-        i: 0, name: '', depthTopM: 0, depthBotM: 0, depthM: 0,
-        price: 0, widthU: 0, y: 0, owned: false, offered: false, endless: true
-      });
+      levels.push(levelEntry(levels.length));
     }
     for (var k = 0; k < want; k++) {
       var e = levels[k], L = tbl[k];
       e.i = k + 1;
-      e.name = L.name;
+      levelSrc[k] = L;
       e.depthTopM = (typeof L.depthTopM === 'number') ? L.depthTopM : (L.depthM || 0);
       e.depthBotM = (typeof L.depthBotM === 'number') ? L.depthBotM : e.depthTopM;
       e.depthM = e.depthTopM;               // alias: the depth a UI quotes
@@ -3043,13 +3073,13 @@ SM.adv = (function () {
       kind: kind,
       reason: reason || '',
       mineId: runMineId,
-      mineName: mineDef ? mineDef.name : '',
+      mineName: '',
       /* WHICH LEVEL MAP IT HAPPENED ON. A strand drops the hold as piles on that
        * level and nowhere else, so "go back for it" is only actionable if the
        * screen can say WHERE — and with levels as separate maps, a depth in
        * metres no longer identifies a place on its own. */
       level: runLevel,
-      levelName: levels[runLevel - 1] ? levels[runLevel - 1].name : '',
+      levelName: '',
       depthM: depthM,
       maxDepthM: maxDepthM,
       runTime: runTime,
@@ -3070,6 +3100,18 @@ SM.adv = (function () {
       securedUnits: secured.units,
       securedLines: securedForResults()
     };
+    /* NAMES ARE READ THROUGH, NOT COPIED: the results screen re-renders when the
+     * player switches language, and a copied name would still be in the old one.
+     * Enumerable getters, so anything that serialises the record still gets text. */
+    var rDef = mineDef, rLv = levels[runLevel - 1] || null;
+    Object.defineProperty(results, 'mineName', {
+      configurable: true, enumerable: true,
+      get: function () { return rDef ? String(rDef.name || '') : ''; }
+    });
+    Object.defineProperty(results, 'levelName', {
+      configurable: true, enumerable: true,
+      get: function () { return rLv ? String(rLv.name || '') : ''; }
+    });
     return results;
   }
 

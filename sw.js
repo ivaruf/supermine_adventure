@@ -148,7 +148,11 @@
 //         the arcade's copy of exit.js, which no bump here could refresh), and
 //         the way out is now drawn off framed()/standalone() rather than an
 //         offers() an older cached exit.js has never heard of.
-const VERSION = 'v2.11.2'; // a tablet no longer selects the HUD or opens Copy / Look Up mid-drive (js/touch-guard.js)
+// v2.12.0  NORSK FØRST. The whole game speaks bokmål by default and English
+//         on request, switched live from a language row in the sound panel and
+//         on the pause card (js/i18n.js, new and precached below, storing the
+//         hub-wide arcade.lang.v1). Menus use the hub's plain words.
+const VERSION = 'v2.12.0'; // bokmål by default, English one tap away; plain menu words
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 
@@ -161,6 +165,7 @@ const ASSETS = [
   './manifest.webmanifest',
   './style.css',
   './style-adventure.css',
+  './js/i18n.js',
   './js/config.js',
   './js/events.js',
   './js/materials.js',

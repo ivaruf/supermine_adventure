@@ -187,6 +187,29 @@ SM.advterrain = (function () {
   var A = SM.config.ADV;
   var C = SM.config;
 
+  /* --- words that follow the language (js/i18n.js) --------------------
+   * tr() asks I18N.t() at the moment of drawing; the English beside each key
+   * is only what a page without i18n.js would show. Every name a level or a
+   * layer carries is a GETTER onto the record it came from (nameFrom), so the
+   * level board and the strata never hold a string in yesterday's language. */
+  function tr(key, en) {
+    var I = (typeof window !== 'undefined') ? window.I18N : null;
+    if (!I) return en;
+    return I.t.apply(null, arguments.length > 2
+      ? [key].concat(Array.prototype.slice.call(arguments, 2)) : [key]);
+  }
+  function nameFrom(obj, src, fallback) {
+    Object.defineProperty(obj, 'name', {
+      configurable: true, enumerable: true,
+      get: function () { return (src && src.name) || fallback(); },
+      set: function (v) {
+        Object.defineProperty(obj, 'name',
+          { value: v, writable: true, enumerable: true, configurable: true });
+      }
+    });
+    return obj;
+  }
+
   /* --- the generation grid -------------------------------------------
    * SP is SM.config.ADV's (shared, frozen). Everything below is derived from it
    * so nothing has to be re-tuned if it moves.
@@ -1034,8 +1057,9 @@ SM.advterrain = (function () {
    * =================================================================== */
 
   /** Record one level. Rejects a nameless nothing rather than inventing one. */
-  function pushBand(i, name, topM) {
-    bands.push({ i: i, name: name || ('LEVEL ' + i), topM: topM });
+  function pushBand(i, src, topM) {
+    bands.push(nameFrom({ i: i, topM: topM }, src,
+      function () { return tr('terr.level', 'LEVEL ' + i, i); }));
   }
 
   /**
@@ -1057,7 +1081,7 @@ SM.advterrain = (function () {
       for (i = 0; i < t.length; i++) {
         e = t[i];
         if (!e) continue;
-        pushBand(num(e.i, i + 1), e.name, num(e.depthTopM, 0));
+        pushBand(num(e.i, i + 1), e, num(e.depthTopM, 0));
       }
     } else {
       /* NO LEVEL TABLE. One level per layer, at that layer's top — which is the
@@ -1066,12 +1090,12 @@ SM.advterrain = (function () {
       var src = (def && def.layers && def.layers.length) ? def.layers : DEFAULT_LAYERS;
       var from = 0;
       for (i = 0; i < src.length; i++) {
-        pushBand(i + 1, src[i].name, from);
+        pushBand(i + 1, src[i], from);
         from = num(src[i].toDepth, from);
       }
     }
     // A mine with no usable table at all is still one whole level, not a crash.
-    if (!bands.length) pushBand(1, (def && def.name) || 'LEVEL 1', 0);
+    if (!bands.length) pushBand(1, def || null, 0);
   }
 
   /**
@@ -1452,6 +1476,14 @@ SM.advterrain = (function () {
       pocketRate: 0.18, cavernRate: 0.08, seamRate: 0.06, driftRate: 0.02,
       lodeRate: 0.045, lode: 'ancient', hardnessScale: 1.5, heat: 0.7 }
   ];
+  (function () {
+    var KEYS = ['topsoil', 'clay', 'sandstone', 'limestone', 'granite', 'deep'];
+    for (var i = 0; i < DEFAULT_LAYERS.length; i++) {
+      (function (L, key, en) {
+        nameFrom(L, null, function () { return tr('terr.default.' + key, en); });
+      })(DEFAULT_LAYERS[i], KEYS[i], DEFAULT_LAYERS[i].name);
+    }
+  })();
 
   /** {a:6, b:2} -> flat weighted table. Unknown ids resolve to stone. */
   function buildWeights(obj) {
@@ -1562,7 +1594,8 @@ SM.advterrain = (function () {
     var f = (n <= 1) ? 1 : (k - 1) / (n - 1);
     var L = {};
     L.idx = k - 1;
-    L.name = (sp && sp.name) || s.name || ('LAYER ' + k);
+    nameFrom(L, (sp && sp.name) ? sp : s,
+      function () { return tr('terr.layer', 'LAYER ' + k, k); });
     L.fill = matIdx((sp && sp.fill) || s.fill, 'stone');
     L.beds = buildBeds({ beds: (sp && sp.beds) || s.beds,
                          fill: (sp && sp.fill) || s.fill,
@@ -3253,6 +3286,16 @@ SM.advterrain = (function () {
   function init() {
     resolveMaterials();
     SM.events.on('material:destroyed', onDestroyed);
+    /* THE LEVEL BOARD IS A BAKED PICTURE with the level's name painted into it
+     * (readoutFor), so a language switch has to re-bake the one on the doors —
+     * nothing else would, until the next ride. The cache is keyed on the name,
+     * so this is a new picture, not a stale one fetched back. Everything else
+     * this file draws asks tr() per frame and needs nothing. */
+    document.addEventListener('arcade:lang', function () {
+      if (!bandN || !doorArt) return;
+      var b = bands[bandN - 1];
+      if (b) doorArt = readoutFor(bandN, depthOfY(doorY), b.name, true);
+    });
     /* NO `lift:bought` LISTENER ANY MORE. Buying a level used to re-cut the
      * resident band, because the shaft grew downward through the map you were
      * standing in. A level is its own map now: the purchase changes what the door
@@ -3878,7 +3921,10 @@ SM.advterrain = (function () {
     var lvl = 'L' + level;
     var nm = name ? ('' + name).toUpperCase() : '';
     if (nm.length > 15) nm = nm.substr(0, 15);
-    if (!lit) nm = nm ? (nm + '  LOCKED') : 'LOCKED';
+    if (!lit) {
+      var locked = tr('terr.locked', 'LOCKED');
+      nm = nm ? (nm + '  ' + locked) : locked;
+    }
     var lvlFont = 'bold ' + LED_LVL + 'px ui-sans-serif, system-ui, Arial, sans-serif';
     var tagFont = 'bold ' + LED_TAG + 'px ui-monospace, Menlo, Consolas, monospace';
     var tagW = measureWith(lvlFont, lvl) + 8 + measureWith(tagFont, nm);
@@ -4452,7 +4498,8 @@ SM.advterrain = (function () {
      * the label the floor left behind: a machine that drives north until it stops
      * is owed an explanation, and this is it. */
     if (bandN && rockR > rockL) {
-      hazardFace(ctx, lvlTopY, -1, rockL, rockR, vTop, vBot, 'BEDROCK');
+      hazardFace(ctx, lvlTopY, -1, rockL, rockR, vTop, vBot,
+                 tr('terr.bedrock', 'BEDROCK'));
     }
 
     /* --- depth ruler, in metres --------------------------------------

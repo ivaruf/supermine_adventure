@@ -234,7 +234,7 @@ SM.rig = (function () {
     },
     {
       key: 'fuel', title: 'FUEL', icon: 'fuel', glyph: '[]',
-      blurb: 'How long you can stay down there. See design note B.',
+      blurb: 'How long you can stay down there.',
       stats: ['cap'],
       /* Sized so that at the tier a mine is designed for, the modelled
        * round-trip needs 40-50% of the tank, and one tier below it strands.
@@ -374,6 +374,37 @@ SM.rig = (function () {
       ]
     }
   ];
+
+  /* WORDS THAT FOLLOW THE LANGUAGE. Every title, name and blurb above is the
+   * English text and the `en` fallback in js/i18n.js; here each one becomes a
+   * getter that asks I18N.t() when it is read, so the workshop speaks whatever
+   * the player last chose without a single call site changing. Keys are
+   * part.<key>.title / .blurb and part.<key>.t<n>.name / .blurb. Nothing in the
+   * game uses one of these strings as an identifier — `key` is the identifier. */
+  (function speakParts() {
+    function speak(obj, field, key) {
+      var en = obj[field];
+      Object.defineProperty(obj, field, {
+        configurable: true, enumerable: true,
+        get: function () {
+          return (typeof window !== 'undefined' && window.I18N) ? window.I18N.t(key) : en;
+        },
+        set: function (v) {
+          Object.defineProperty(obj, field,
+            { value: v, writable: true, enumerable: true, configurable: true });
+        }
+      });
+    }
+    for (var i = 0; i < PART_TABLE.length; i++) {
+      var p = PART_TABLE[i], k = 'part.' + p.key;
+      speak(p, 'title', k + '.title');
+      speak(p, 'blurb', k + '.blurb');
+      for (var n = 0; n < p.tiers.length; n++) {
+        speak(p.tiers[n], 'name', k + '.t' + n + '.name');
+        speak(p.tiers[n], 'blurb', k + '.t' + n + '.blurb');
+      }
+    }
+  })();
 
   var C0 = SM.config;
 

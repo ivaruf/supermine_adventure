@@ -631,6 +631,43 @@
 .sm-btn.sm-ah-quit.sm-ah-armed { color: #ffd8d2; background: rgba(255, 90, 72, 0.16); }
 .sm-btn.sm-ah-quit:disabled { color: var(--sm-dimmer); cursor: default; }
 
+/* THE PAUSE CARD ON A PHONE ON ITS SIDE (hub CLAUDE.md §2: a menu must not
+   scroll sideways). The language row made a tall card taller — kicker, title,
+   stats, SPRÅK, three actions, the note and the way out come to ~510px against
+   a sideways phone's ~330 — so here it becomes maxgear's shape: two columns
+   laid over the existing markup, nothing moved in the DOM. What the player
+   reads goes left (PAUSE, the stats, the language), what they press goes right
+   (RESUME, END RUN, TITLE SCREEN, the note, the way out). `dense` packing
+   is what lets the right column start at the top again rather than below the
+   last left-hand row. The kicker is flavour, so it is what goes. Controls stop
+   at 40px: this fires on a phone, where a finger is still the pointer. The
+   overflow is a safety net, not the plan. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .sm-ah-pause-card {
+    width: min(660px, 94vw);
+    max-height: 94vh;
+    overflow: auto;
+    padding: 12px 16px 10px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-auto-flow: row dense;
+    column-gap: 18px;
+    align-content: start;
+    align-items: start;
+  }
+  .sm-ah-pause-card > * { grid-column: 1; }
+  .sm-ah-pause-card > .sm-pause-btn,
+  .sm-ah-pause-card > .sm-ah-pause-note { grid-column: 2; }
+  .sm-ah-pause-card .sm-pause-kicker { display: none; }
+  .sm-ah-pause-card .sm-pause-title { font-size: 24px; margin-bottom: 4px; }
+  .sm-ah-pause-card .sm-ah-pause-stats { margin: 4px 0 0; }
+  .sm-ah-pause-card .sm-lang { margin-top: 8px; }
+  .sm-ah-pause-card .sm-pause-btn { min-height: 40px; margin-top: 6px; }
+  .sm-ah-pause-card .sm-pause-btn:first-of-type { margin-top: 0; }
+  .sm-ah-pause-card .sm-ah-pause-note { margin-top: 6px; }
+  .sm-btn.sm-ah-quit { margin-top: 8px; padding-top: 8px; }
+}
+
 /* ===========================================================================
  * 3b. THE RAIL LAYOUT — COMPACT AND PORTRAIT
  * ---------------------------------------------------------------------------
@@ -921,6 +958,9 @@
   letter-spacing: 2px;
   color: var(--sm-dimmer);
 }
+/* Words in CSS still speak the page's language: <html lang> is rewritten live
+   by js/i18n.js, so :lang() follows a switch with no script here. */
+.sm-adv.sm-compact .sm-ah-manifest.sm-ah-manifest-empty:lang(nb)::before { content: 'TOMT LASTEROM'; }
 
 /* --- THE BOTTOM READOUT LINE ------------------------------------------
  * DEPTH, the balance, the hull and — once it means anything — the heat. Four
@@ -2189,6 +2229,7 @@
 }
 .sm-av-res-strand .sm-av-res-hero-label { color: var(--sm-red); }
 .sm-av-res-strand .sm-av-res-hero-label::after { content: ' — LOST'; }
+.sm-av-res-strand .sm-av-res-hero-label:lang(nb)::after { content: ' — TAPT'; }
 .sm-av-res-strand .sm-av-res-total { color: #ffb3a8; text-shadow: 0 3px 0 #000, 0 0 28px rgba(255, 90, 72, 0.35); }
 .sm-av-res-strand .sm-av-res-val { color: #ffb3a8; }
 
@@ -2200,6 +2241,7 @@
    else about the strand's dress stays. */
 .sm-av-res-strand.sm-av-res-kept .sm-av-res-hero-label { color: var(--sm-green); }
 .sm-av-res-strand.sm-av-res-kept .sm-av-res-hero-label::after { content: ' — BANKABLE'; }
+.sm-av-res-strand.sm-av-res-kept .sm-av-res-hero-label:lang(nb)::after { content: ' — KAN SETTES INN'; }
 .sm-av-res-strand.sm-av-res-kept .sm-av-res-hero {
   background: linear-gradient(180deg, rgba(88, 224, 138, 0.14), rgba(0, 0, 0, 0.5));
   border-color: rgba(88, 224, 138, 0.42);

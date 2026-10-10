@@ -610,6 +610,90 @@ var SM = SM || {};
 SM.mines = (function () {
   'use strict';
 
+  /* =====================================================================
+   * WORDS THAT FOLLOW THE LANGUAGE — see js/i18n.js
+   * ---------------------------------------------------------------------
+   * The catalogue below is authored in English, and that English is also the
+   * fallback text in i18n.js's `en` table. Once init() has built it, every
+   * field a player READS (a mine's name, its blurb, each hazard, each layer's
+   * name) is swapped for a GETTER that asks I18N.t() at the moment it is read.
+   * That is what lets the map, the prep card and the level boards come out in
+   * the new language the instant the player switches, without one call site
+   * in another file changing — and without a stale copy anywhere, because
+   * nothing holds the string; everything holds the record.
+   *
+   * `region` IS DELIBERATELY NOT ONE OF THEM. js/advui.js groups the map's
+   * regions by that string and picks each region's terrain art and seeds its
+   * coastline off it (artFor / hashStr), so a translated region would redraw
+   * the world in a different shape per language. It stays the English
+   * identifier it always was; what a player reads is `regionLabel`, or
+   * regionLabel(region) for a REGIONS entry.
+   *
+   * A write to a spoken field replaces the getter with a plain value, so
+   * nothing that assigns one (a test, a future tool) is silently ignored.
+   * ================================================================== */
+  function tr(key, en) {
+    return (typeof window !== 'undefined' && window.I18N) ? window.I18N.t(key) : en;
+  }
+
+  function speak(obj, field, key) {
+    var en = obj[field];
+    Object.defineProperty(obj, field, {
+      configurable: true, enumerable: true,
+      get: function () { return tr(key, en); },
+      set: function (v) {
+        Object.defineProperty(obj, field,
+          { value: v, writable: true, enumerable: true, configurable: true });
+      }
+    });
+  }
+
+  /** `obj.name` reads through to `src.name`, live. For the derived records
+   *  (spawn table, level table) that are cached on the mine and would
+   *  otherwise freeze the language they were first built in. */
+  function nameFrom(obj, src) {
+    Object.defineProperty(obj, 'name', {
+      configurable: true, enumerable: true,
+      get: function () { return src.name; },
+      set: function (v) {
+        Object.defineProperty(obj, 'name',
+          { value: v, writable: true, enumerable: true, configurable: true });
+      }
+    });
+    return obj;
+  }
+
+  function slug(s) {
+    return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  }
+
+  /** What a player reads for a region identifier ('Red Ridge' -> 'RØDÅSEN'
+   *  in Norwegian). The identifier itself never changes; see above. */
+  function regionLabel(region) {
+    if (!region) return '';
+    return tr('mine.region.' + slug(region), String(region));
+  }
+
+  function speakMine(m) {
+    var id = m.id, j;
+    speak(m, 'name', 'mine.' + id + '.name');
+    speak(m, 'blurb', 'mine.' + id + '.blurb');
+    if (m.hazards) {
+      for (j = 0; j < m.hazards.length; j++) {
+        speak(m.hazards, j, 'mine.haz.' + slug(m.hazards[j]));
+      }
+    }
+    if (m.layers) {
+      for (j = 0; j < m.layers.length; j++) {
+        speak(m.layers[j], 'name', 'mine.' + id + '.L' + (j + 1));
+      }
+    }
+    Object.defineProperty(m, 'regionLabel', {
+      configurable: true, enumerable: false,
+      get: function () { return regionLabel(m.region); }
+    });
+  }
+
   /* ----- Tunables live here -----------------------------------
    *
    * THE ECONOMY TABLE.  [ dollars per cargo unit, cargo units per deposit ]
@@ -1411,6 +1495,7 @@ SM.mines = (function () {
 
     LIST = buildCatalogue();
     BY_ID = {};
+    for (i = 0; i < LIST.length; i++) speakMine(LIST[i]);
 
     for (i = 0; i < LIST.length; i++) {
       var mine = LIST[i];
@@ -1514,6 +1599,11 @@ SM.mines = (function () {
       var r = LIST[i].region;
       if (seen[r]) { seen[r].mines.push(LIST[i].id); continue; }
       seen[r] = { name: r, mines: [LIST[i].id] };
+      /* `name` is the identifier; `label` is what a player reads. */
+      Object.defineProperty(seen[r], 'label', {
+        configurable: true, enumerable: false,
+        get: (function (rr) { return function () { return regionLabel(rr); }; })(r)
+      });
       REGIONS.push(seen[r]);
     }
     return REGIONS;
@@ -1772,9 +1862,8 @@ SM.mines = (function () {
       ? authored.debrisRate
       : Math.min(DEBRIS_RATE_MAX, ancientShare * DEBRIS_FROM_WEIGHT);
 
-    return {
+    return nameFrom({
       i: i,
-      name: L.name,
       layerIndex: L.index,
       /* --- the country rock: straight off the layer, unchanged ---------- */
       fill: L.fill,
@@ -1817,7 +1906,7 @@ SM.mines = (function () {
         ? authored.debrisCells : (2 + i),
       /* --- what the whole thing is worth, at the lift -------------------- */
       rate: rateOfWeights(w)
-    };
+    }, L);
   }
 
   /**
@@ -1952,9 +2041,8 @@ SM.mines = (function () {
         price = niceMoney(LEVEL_K * hold * rate * Math.pow(LEVEL_GROWTH, j - 1));
         if (price < LEVEL_MIN) price = LEVEL_MIN;
       }
-      out.push({
+      out.push(nameFrom({
         i: i,
-        name: L.name,
         depthTopM: L.fromDepth,
         /* EQUAL TO THE TOP, DELIBERATELY: an endless map has no bottom, and the
          * two consumers that print a band render "top-bot" only when bot > top. */
@@ -1968,7 +2056,7 @@ SM.mines = (function () {
          * what a unit of hold out of it is worth AT THE LIFT. */
         layerIndex: j,
         rate: Math.round(rate * 10) / 10
-      });
+      }, L));
     }
     m.levelTable = out;
     return out;
@@ -2400,6 +2488,8 @@ SM.mines = (function () {
     recDrillOf: recDrillOf,
     seedOf: seedOf,
     regions: regions,
+    /** Display text for a region identifier (m.region, REGIONS[k].name). */
+    regionLabel: regionLabel,
     priceOfIndex: priceOfIndex,
     volumeOfIndex: volumeOfIndex,
     depositValue: depositValue,

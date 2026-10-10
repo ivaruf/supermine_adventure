@@ -79,9 +79,12 @@
  *      exists to support, and making it from the HUD is the whole point.
  *
  * PAUSE
- *   This module owns the pause card. It offers RESUME, ABORT RUN
- *   (SM.adv.abort() — costs the hold, like a strand) and LEAVE EXPEDITION,
+ *   This module owns the pause card. It offers RESUME, END RUN
+ *   (SM.adv.abort() — costs the hold, like a strand) and TITLE SCREEN,
  *   which aborts and then closes the campaign back to the title screen.
+ *   Plain words, the hub's glossary (games/CLAUDE.md §2): they were ABORT RUN
+ *   and LEAVE EXPEDITION until the languages arrived. The card also carries
+ *   the language row (I18N.langRow), and a switch repaints it in place.
  *   The simulation is gated with SM.main.setPaused(true/false) as usual.
  * ========================================================================== */
 
@@ -232,6 +235,28 @@ SM.advhud = (function () {
     return n;
   }
 
+  /* EVERY WORD THIS HUD SAYS goes through T(), and every node whose words
+   * never change carries its key in data-i18n so I18N.paintStatic() repaints it
+   * on a language switch. Everything written at runtime is repainted by
+   * onLang() at the bottom of this file. See js/i18n.js. */
+  function T() { return I18N.t.apply(null, arguments); }
+
+  /** el() for a node whose text is one fixed key: painted now, repainted by
+   *  paintStatic() whenever the language changes. */
+  function elK(tag, cls, parent, key) {
+    var n = el(tag, cls, parent, T(key));
+    n.setAttribute('data-i18n', key);
+    return n;
+  }
+
+  /** aria-label + title from one key, repainted by paintStatic(). */
+  function labelK(node, key) {
+    var w = T(key);
+    node.setAttribute('data-i18n-label', key);
+    node.setAttribute('aria-label', w);
+    node.setAttribute('title', w);
+  }
+
   function setText(key, node, str) {
     if (!node || last[key] === str) return;
     last[key] = str;
@@ -272,11 +297,12 @@ SM.advhud = (function () {
     return out;
   }
 
-  function iconButton(parent, cls, icon, title) {
+  /* `key` is an i18n key: the art carries the meaning, so the label is not
+   * optional, and it has to follow the language like everything else. */
+  function iconButton(parent, cls, icon, key) {
     var b = el('button', 'sm-btn sm-iconbtn ' + cls, parent);
     b.setAttribute('type', 'button');
-    b.setAttribute('title', title);
-    b.setAttribute('aria-label', title);
+    labelK(b, key);
     b.innerHTML = glyph(icon);
     return b;
   }
@@ -287,10 +313,10 @@ SM.advhud = (function () {
    * stack them on a phone and put them side by side on a wide screen, and so the
    * label is never the thing that moves — see paintDoorActs().
    */
-  function doorButton(parent, cls, label, fn) {
+  function doorButton(parent, cls, labelKey, fn) {
     var b = el('button', 'sm-ah-doorbtn ' + cls, parent);
     b.setAttribute('type', 'button');
-    b.smLabel = el('span', 'sm-ah-doorlbl', b, label);
+    b.smLabel = elK('span', 'sm-ah-doorlbl', b, labelKey);
     b.smVal = el('span', 'sm-ah-doorval', b, '');
     b.addEventListener('click', function (e) {
       e.preventDefault();
@@ -301,12 +327,20 @@ SM.advhud = (function () {
     return b;
   }
 
+  /** `label` is an i18n key or a function returning the words. The label span
+   *  carries no data-i18n: armConfirm() owns it (it swaps in the confirm words
+   *  while armed) and repaints it itself through btn.smRelabel(). */
+  function labelOf(label) {
+    return typeof label === 'function' ? label() : T(label);
+  }
+
   function menuButton(parent, cls, icon, label) {
     var b = el('button', 'sm-btn sm-pause-btn ' + cls, parent);
     b.setAttribute('type', 'button');
     var ico = el('span', 'sm-pause-ico', b);
     ico.innerHTML = glyph(icon);
-    el('span', 'sm-pause-label', b, label);
+    var span = el('span', 'sm-pause-label', b, labelOf(label));
+    b.smRelabel = function () { span.textContent = labelOf(label); };
     return b;
   }
 
@@ -343,7 +377,7 @@ SM.advhud = (function () {
       dispOut.name = String(m.name || m.id || '');
       dispOut.color = (m.colors && m.colors[0]) ? m.colors[0] : dispOut.color;
     } else {
-      dispOut.name = String(matId || 'UNKNOWN');
+      dispOut.name = String(matId || T('hud.unknown'));
     }
     return dispOut;
   }
@@ -396,7 +430,7 @@ SM.advhud = (function () {
      * that name and renaming it would be a cosmetic change with a layout bug in
      * it; `sm-ah-exit` is added alongside for anything that wants the new name. */
     var dep = el('div', 'sm-ah-cell sm-ah-depth sm-ah-exit', strip);
-    el('div', 'sm-ah-lbl', dep, 'EXIT');
+    elK('div', 'sm-ah-lbl', dep, 'hud.exit');
     els.depth = el('div', 'sm-ah-val', dep, '0 m');
 
     /* FUNDS, where TO SURFACE used to be.
@@ -415,18 +449,18 @@ SM.advhud = (function () {
      * stylesheet put it anywhere in the window without a second DOM node and
      * without a second guarded write. */
     var fu = el('div', 'sm-ah-cell sm-ah-funds', els.root);
-    el('div', 'sm-ah-lbl', fu, 'FUNDS');
+    elK('div', 'sm-ah-lbl', fu, 'hud.funds');
     els.funds = el('div', 'sm-ah-val', fu, '$0');
 
     // HEAT and INTEGRITY are absent, not zeroed, until they mean something.
     els.heatCell = el('div', 'sm-ah-cell sm-ah-heat', strip);
-    el('div', 'sm-ah-lbl', els.heatCell, 'HEAT');
+    elK('div', 'sm-ah-lbl', els.heatCell, 'hud.heat');
     els.heat = el('div', 'sm-ah-val', els.heatCell, '0%');
     els.heatBar = el('div', 'sm-ah-mini', els.heatCell);
     el('div', 'sm-ah-mini-fill', els.heatBar);
 
     els.integCell = el('div', 'sm-ah-cell sm-ah-integ', strip);
-    el('div', 'sm-ah-lbl', els.integCell, 'HULL');
+    elK('div', 'sm-ah-lbl', els.integCell, 'hud.hull');
     els.integ = el('div', 'sm-ah-val', els.integCell, '100%');
     els.integBar = el('div', 'sm-ah-mini', els.integCell);
     el('div', 'sm-ah-mini-fill', els.integBar);
@@ -434,7 +468,7 @@ SM.advhud = (function () {
     /* --- row 2: FUEL, the primary gauge -------------------------------- */
     els.fuelPanel = el('div', 'sm-panel sm-ah-fuel', els.topbar);
     var fhead = el('div', 'sm-ah-fuel-head', els.fuelPanel);
-    el('div', 'sm-ah-lbl', fhead, 'FUEL');
+    elK('div', 'sm-ah-lbl', fhead, 'hud.fuel');
     els.fuelPct = el('div', 'sm-ah-fuel-pct', fhead, '0%');
     els.fuelNote = el('div', 'sm-ah-fuel-note', fhead, '');
     var fbar = el('div', 'sm-ah-bar sm-ah-bar-fuel', els.fuelPanel);
@@ -452,7 +486,7 @@ SM.advhud = (function () {
      * value, with the separators supplied by CSS ::before so an empty span
      * leaves no orphaned dot. Still one guarded write per span. */
     els.fuelSub = el('div', 'sm-ah-sub', els.fuelPanel);
-    el('span', 'sm-ah-sub-k', els.fuelSub, 'HOME ');
+    elK('span', 'sm-ah-sub-k', els.fuelSub, 'hud.home');
     els.fuelHome = el('span', 'sm-ah-sub-home', els.fuelSub, '');
     els.fuelBurn = el('span', 'sm-ah-sub-burn', els.fuelSub, '');
     els.fuelLeft = el('span', 'sm-ah-sub-left', els.fuelSub, '');
@@ -460,7 +494,7 @@ SM.advhud = (function () {
     /* --- row 3: the hold ----------------------------------------------- */
     els.cargoPanel = el('div', 'sm-panel sm-ah-cargo', els.root);
     var chead = el('div', 'sm-ah-fuel-head', els.cargoPanel);
-    el('div', 'sm-ah-lbl', chead, 'HOLD');
+    elK('div', 'sm-ah-lbl', chead, 'hud.hold');
     /* "0 / 48" is two spans for the same reason as the fuel sub line: inline on
      * a wide screen, and the capacity dropped onto its own line in the rail. */
     els.cargoVal = el('div', 'sm-ah-cargo-val', chead);
@@ -483,8 +517,7 @@ SM.advhud = (function () {
     /* The handle. Hidden on a wide screen, where there is nothing to unfold. */
     els.holdBtn = el('button', 'sm-ah-holdbtn', els.cargoPanel);
     els.holdBtn.setAttribute('type', 'button');
-    els.holdBtn.setAttribute('title', 'Manifest — tap a row twice to dump it');
-    els.holdBtn.setAttribute('aria-label', 'Manifest');
+    paintHoldLabels();
     els.holdIco = el('span', 'sm-ah-holdico', els.holdBtn);
     els.holdIco.innerHTML = glyph(ICONS.manifest);
     els.holdCount = el('span', 'sm-ah-holdnum', els.holdBtn, '0');
@@ -540,13 +573,12 @@ SM.advhud = (function () {
      * nothing to dodge and nothing to measure. */
     els.lift = el('div', 'sm-ah-lift', root);
     var lhead = el('div', 'sm-ah-lift-head', els.lift);
-    el('div', 'sm-ah-lbl', lhead, 'LIFT');
+    elK('div', 'sm-ah-lbl', lhead, 'door.lift');
     els.liftWhere = el('div', 'sm-ah-lift-where', lhead, '');
     els.liftClose = el('button', 'sm-ah-lift-close', lhead);
     /* (the cross is wired below; the rest of the panel is built after it) */
     els.liftClose.setAttribute('type', 'button');
-    els.liftClose.setAttribute('title', 'Roll out — back to the rock');
-    els.liftClose.setAttribute('aria-label', 'Leave the lift');
+    labelK(els.liftClose, 'door.closeAria');
     els.liftClose.innerHTML = glyph(ICONS.close);
     /* DISMISSING THE MENU MEANS LEAVING THE CAGE. There is no "keep the machine
      * in the lift with the panel shut" state to want: the machine is invisible
@@ -568,8 +600,8 @@ SM.advhud = (function () {
      * They keep their labels and grey out through :disabled; the reason always
      * goes in the note line at the foot, never on the plate. */
     els.doorActs = el('div', 'sm-ah-door-acts', els.lift);
-    els.doorSell = doorButton(els.doorActs, 'sm-ah-door-sell', 'SELL', onDoorSell);
-    els.doorFuel = doorButton(els.doorActs, 'sm-ah-door-fuel', 'REFUEL', onDoorRefuel);
+    els.doorSell = doorButton(els.doorActs, 'sm-ah-door-sell', 'door.sell', onDoorSell);
+    els.doorFuel = doorButton(els.doorActs, 'sm-ah-door-fuel', 'door.refuel', onDoorRefuel);
     /* --- ...AND THE WORKSHOP -------------------------------------------
      * OWNER: "workshop needs to be a button on the lift menu."
      *
@@ -588,7 +620,7 @@ SM.advhud = (function () {
      *
      * It is never disabled. An empty wallet is a thing you find out by looking
      * at the prices, and the workshop is also where the machine is INSPECTED. */
-    els.doorShop = doorButton(els.doorActs, 'sm-ah-door-shop', 'WORKSHOP', onDoorShop);
+    els.doorShop = doorButton(els.doorActs, 'sm-ah-door-shop', 'menu.workshop', onDoorShop);
 
     /* --- THE UNLOCK NOTICE ----------------------------------------------
      * THE PROGRESSION GATE'S ONE PIECE OF TEACHING (js/adv.js's note above
@@ -653,8 +685,8 @@ SM.advhud = (function () {
      * The cross in the head does exactly what RETURN TO MINE does; both are the
      * undocking, and dismissing the panel has always meant leaving the cage. */
     els.doorFoot = el('div', 'sm-ah-door-foot', els.lift);
-    els.doorOut = doorButton(els.doorFoot, 'sm-ah-door-return', 'RETURN TO MINE', onDoorOut);
-    els.doorMap = doorButton(els.doorFoot, 'sm-ah-door-map', 'LEAVE', onDoorMap);
+    els.doorOut = doorButton(els.doorFoot, 'sm-ah-door-return', 'menu.back', onDoorOut);
+    els.doorMap = doorButton(els.doorFoot, 'sm-ah-door-map', 'door.leave', onDoorMap);
 
     /* --- THE RIDE TRANSITION -------------------------------------------
      * A level is its own map, so a ride has to READ as a load: the screen goes
@@ -663,7 +695,7 @@ SM.advhud = (function () {
      * this is DOM and not js/effects.js. */
     els.ride = el('div', 'sm-ah-ride', root);
     els.rideInner = el('div', 'sm-ah-ride-inner', els.ride);
-    els.rideKicker = el('div', 'sm-ah-ride-kicker', els.rideInner, 'LIFT');
+    els.rideKicker = el('div', 'sm-ah-ride-kicker', els.rideInner, T('door.lift'));
     els.rideTitle = el('div', 'sm-ah-ride-title', els.rideInner, '');
     els.rideSub = el('div', 'sm-ah-ride-sub', els.rideInner, '');
 
@@ -681,8 +713,8 @@ SM.advhud = (function () {
     /* Own class names, NOT ui.js's sm-btn-sound / sm-btn-pause: both HUDs are
      * in the DOM at the same time and a shared class would make
      * querySelector('.sm-btn-pause') a coin toss for anything that looks. */
-    els.mute = iconButton(btns, 'sm-ah-sound', ICONS.sound_on, 'Sound on / off');
-    els.pauseBtn = iconButton(btns, 'sm-ah-pausebtn', ICONS.pause, 'Pause');
+    els.mute = iconButton(btns, 'sm-ah-sound', ICONS.sound_on, 'menu.soundOnOff');
+    els.pauseBtn = iconButton(btns, 'sm-ah-pausebtn', ICONS.pause, 'menu.pause');
     els.mute.addEventListener('click', function (e) {
       e.preventDefault();
       if (SM.sound && SM.sound.toggleMute) SM.sound.toggleMute();
@@ -702,28 +734,34 @@ SM.advhud = (function () {
     els.pause = el('div', 'sm-ah-pause', root);
     var card = el('div', 'sm-panel sm-ah-pause-card', els.pause);
     el('div', 'sm-stripe', card);
-    el('div', 'sm-pause-kicker', card, 'ENGINE IDLING');
-    el('div', 'sm-pause-title', card, 'PAUSED');
+    elK('div', 'sm-pause-kicker', card, 'pause.kicker');
+    elK('div', 'sm-pause-title', card, 'menu.paused');
     els.pauseStats = el('div', 'sm-ah-pause-stats', card);
-    els.psDepth = statCell(els.pauseStats, 'DEPTH', '0 m');
-    els.psFuel = statCell(els.pauseStats, 'FUEL', '0%');
-    els.psHold = statCell(els.pauseStats, 'HOLD', '0%');
+    els.psDepth = statCell(els.pauseStats, 'pause.depth', '0 m');
+    els.psFuel = statCell(els.pauseStats, 'pause.fuel', '0%');
+    els.psHold = statCell(els.pauseStats, 'pause.hold', '0%');
 
-    els.btnResume = menuButton(card, 'sm-btn-primary', ICONS.play, 'RESUME');
-    els.btnAbort = menuButton(card, 'sm-ah-danger', ICONS.abort, 'ABORT RUN');
-    els.btnLeave = menuButton(card, '', ICONS.home, 'LEAVE EXPEDITION');
-    els.abortNote = el('div', 'sm-ah-pause-note', card,
-      'Aborting drops the hold where it stands, exactly like running dry.');
+    /* THE LANGUAGE ROW. The hub wants it behind the menu plate as well as on
+     * the way in, and this card is this game's menu. Switching repaints the
+     * card in place: it does not close, and the run stays paused. js/i18n.js
+     * builds the row (the second copy is in ui.js's sound panel, hence the
+     * 'pause' id suffix on the flag's clipPaths). */
+    els.pauseLang = I18N.langRow(card, 'pause');
+
+    els.btnResume = menuButton(card, 'sm-btn-primary', ICONS.play, 'menu.resume');
+    els.btnAbort = menuButton(card, 'sm-ah-danger', ICONS.abort, 'pause.abort');
+    els.btnLeave = menuButton(card, '', ICONS.home, 'menu.titleScreen');
+    els.abortNote = elK('div', 'sm-ah-pause-note', card, 'pause.abortNote');
 
     els.btnResume.addEventListener('click', function (e) {
       e.preventDefault(); els.btnResume.blur(); closePause();
     });
     // ABORT and LEAVE both throw a run away, so both are two-tap.
-    armConfirm(els.btnAbort, 'ABORT RUN', 'CONFIRM — LOSE THE HOLD', function () {
+    armConfirm(els.btnAbort, 'pause.abort', 'pause.confirmLose', function () {
       closePause();
       if (SM.adv && SM.adv.abort) SM.adv.abort();
     });
-    armConfirm(els.btnLeave, 'LEAVE EXPEDITION', 'CONFIRM — BACK TO TITLE', function () {
+    armConfirm(els.btnLeave, 'menu.titleScreen', 'pause.confirmTitle', function () {
       closePause();
       if (SM.adv && SM.adv.abort) SM.adv.abort();
       if (SM.adv && SM.adv.close) SM.adv.close();
@@ -746,27 +784,35 @@ SM.advhud = (function () {
        * how they come to disagree. BACK TO ARCADE when framed or when a tab
        * can navigate there, CLOSE when we are an installed app closing our own
        * window. `tab` is legacy in exit.js and is not passed. */
-      var quitWord = window.ArcadeExit.verb({
-        arcade: 'BACK TO ARCADE',
-        app: 'CLOSE',
-      });
+      /* verb() is asked again on every switch, through the label function,
+       * because it hands back whichever of OUR words fits — and ours change
+       * with the language. Once the browser has refused, that is what the
+       * button says, in whichever language is current. */
+      var quitWord = function () {
+        if (els.btnQuit && els.btnQuit.smRefused) return T('menu.closeTab');
+        return window.ArcadeExit.verb({
+          arcade: T('menu.exitArcade'),
+          app: T('menu.close'),
+        });
+      };
       els.btnQuit = menuButton(card, 'sm-ah-quit', ICONS.surface, quitWord);
-      armConfirm(els.btnQuit, quitWord, 'CONFIRM — LOSE THE HOLD', function () {
+      armConfirm(els.btnQuit, quitWord, 'pause.confirmLose', function () {
         window.ArcadeExit.quit().then(function (how) {
           // Refused means the browser would not close a tab it did not open.
           // Say so where the button was, rather than looking dead.
           if (how !== 'refused') return;
+          els.btnQuit.smRefused = true;
           var label = els.btnQuit.querySelector('.sm-pause-label');
-          if (label) label.textContent = 'CLOSE THIS TAB YOURSELF';
+          if (label) label.textContent = T('menu.closeTab');
           els.btnQuit.disabled = true;
         });
       });
     }
   }
 
-  function statCell(parent, label, value) {
+  function statCell(parent, labelKey, value) {
     var cell = el('div', 'sm-cell', parent);
-    el('div', 'sm-cell-label', cell, label);
+    elK('div', 'sm-cell-label', cell, labelKey);
     return el('div', 'sm-cell-value', cell, value);
   }
 
@@ -795,15 +841,19 @@ SM.advhud = (function () {
       armed = false;
       if (t) { clearTimeout(t); t = 0; }
       btn.classList.remove('sm-ah-armed');
-      if (lbl) lbl.textContent = label;
+      if (lbl) lbl.textContent = labelOf(label);
     }
+    /* A language switch while armed keeps it armed, in the new words. */
+    btn.smRelabel = function () {
+      if (lbl) lbl.textContent = labelOf(armed ? confirmLabel : label);
+    };
     btn.addEventListener('click', function (e) {
       e.preventDefault();
       btn.blur();
       if (!armed) {
         armed = true;
         btn.classList.add('sm-ah-armed');
-        if (lbl) lbl.textContent = confirmLabel;
+        if (lbl) lbl.textContent = labelOf(confirmLabel);
         if (SM.sound && SM.sound.play) SM.sound.play('ui');
         t = setTimeout(disarm, 3200);
         return;
@@ -966,7 +1016,8 @@ SM.advhud = (function () {
     dumpTimer = 0;
     paintDumpArm();
     if (SM.adv && SM.adv.dump) SM.adv.dump(r.matIndex);
-    alert('JETTISONED', String(r.name.textContent || '') + ' tipped onto the floor', 1.8);
+    var dumped = String(r.name.textContent || '');
+    alert(['hud.jettisoned'], ['hud.jettisonedSub', dumped], 1.8);
   }
 
   function paintDumpArm() {
@@ -977,7 +1028,7 @@ SM.advhud = (function () {
       setClass('darm' + i, r.node, 'sm-ah-mrow-armed', on);
       // SAME cache key as refreshManifest() writes with, or the two would
       // shadow each other and leave a row stuck reading DUMP?.
-      setText('mu' + i, r.units, on ? 'DUMP?' : (r.unitsText || ''));
+      setText('mu' + i, r.units, on ? T('hud.dumpQ') : (r.unitsText || ''));
     }
   }
 
@@ -1015,7 +1066,7 @@ SM.advhud = (function () {
       setVar('msw' + idx, r.sw, '--sm-ah-sw', d.color);
       setText('mn' + idx, r.name, d.name.toUpperCase());
       r.unitsText = fmt(num(ln.units, 0)) + 'u';
-      setText('mu' + idx, r.units, (r.matIndex === dumpArmed) ? 'DUMP?' : r.unitsText);
+      setText('mu' + idx, r.units, (r.matIndex === dumpArmed) ? T('hud.dumpQ') : r.unitsText);
       setText('mv' + idx, r.val, num(ln.value, 0) > 0 ? ('$' + fmt(ln.value)) : '—');
     }
     for (i = used; i < manifestRows.length; i++) {
@@ -1026,7 +1077,7 @@ SM.advhud = (function () {
     }
 
     setText('mmore', els.manifestMore,
-            hiddenUnits > 0 ? ('+ ' + fmt(hiddenUnits) + 'u OF OTHER MATERIAL') : '');
+            hiddenUnits > 0 ? T('hud.moreOther', fmt(hiddenUnits)) : '');
     setClass('mmoreon', els.manifestMore, 'sm-ah-more-on', hiddenUnits > 0);
     setText('mworth', els.cargoWorth, worth > 0 ? ('$' + fmt(worth)) : '');
     setClass('mempty', els.manifest, 'sm-ah-manifest-empty', used === 0);
@@ -1094,7 +1145,7 @@ SM.advhud = (function () {
    * ================================================================== */
   function liftLabel(L, i) {
     if (L && L.name) return String(L.name).toUpperCase();
-    return 'LEVEL ' + i;
+    return T('hud.levelN', i);
   }
 
   /**
@@ -1140,7 +1191,7 @@ SM.advhud = (function () {
     r.name = el('span', 'sm-ah-liftname', r.go, '');
     r.dep = el('span', 'sm-ah-liftdep', r.go, '');
     r.tag = el('span', 'sm-ah-lifttag', r.go, '');
-    r.buy = el('button', 'sm-ah-liftbuy', node, 'BUY');
+    r.buy = elK('button', 'sm-ah-liftbuy', node, 'door.buy');
     r.buy.setAttribute('type', 'button');
     r.go.addEventListener('click', function (e) {
       e.preventDefault();
@@ -1161,7 +1212,7 @@ SM.advhud = (function () {
     if (!a || !a.rideTo || r.level < 0) return;
     if (SM.sound && SM.sound.play) SM.sound.play('ui');
     if (!a.rideTo(r.level)) {
-      alert('THE LIFT WILL NOT MOVE', 'Drive into the doorway first', 2.0);
+      alert(['door.noMove'], ['door.noMoveSub'], 2.0);
       return;
     }
     /* The machine is now standing in ANOTHER MAP's doorway, so the panel it is
@@ -1187,10 +1238,11 @@ SM.advhud = (function () {
     if (!a || !a.buyLevel || r.level < 0) return;
     if (SM.sound && SM.sound.play) SM.sound.play('ui');
     if (a.buyLevel(r.level)) {
-      alert('LEVEL OPENED', String(r.name.textContent || '') + ' — the lift will take you down', 2.4);
+      var opened = String(r.name.textContent || '');
+      alert(['door.opened'], ['door.openedSub', opened], 2.4);
       if (SM.effects && SM.effects.screenFlash) SM.effects.screenFlash(0.12, 255, 210, 120);
     } else {
-      alert('THE SALE WAS REFUSED', 'The ledger will not cover it', 2.0);
+      alert(['door.refused'], ['door.refusedSub'], 2.0);
     }
     liftSig = '';
   }
@@ -1216,10 +1268,10 @@ SM.advhud = (function () {
     var res = a.sellAtDoor();
     if (SM.sound && SM.sound.play) SM.sound.play('ui');
     if (!res) {
-      alert('NOTHING TO SELL', 'The hold is empty', 1.8);
+      alert(['door.nothing'], ['door.nothingSub'], 1.8);
       return;
     }
-    alert('BANKED', '$' + fmt(num(res.gross, 0)) + ' into the company account', 2.6);
+    alert(['door.banked'], ['door.bankedSub', fmt(num(res.gross, 0))], 2.6);
     if (SM.effects && SM.effects.screenFlash) SM.effects.screenFlash(0.10, 255, 214, 120);
     liftSig = '';
     paintDoorActs();
@@ -1231,11 +1283,11 @@ SM.advhud = (function () {
     var got = a.refuelAtDoor();
     if (SM.sound && SM.sound.play) SM.sound.play('ui');
     if (!got) {
-      alert('CANNOT REFUEL', 'The tank is full, or the ledger is empty', 2.0);
+      alert(['door.noFuel'], ['door.noFuelSub'], 2.0);
       return;
     }
     // Partial fills are legitimate: adv.js buys what the cash reaches.
-    alert('REFUELLED', '$' + fmt(num(got.cost, 0)) + ' of diesel', 2.2);
+    alert(['door.refuelled'], ['door.refuelledSub', fmt(num(got.cost, 0))], 2.2);
     liftSig = '';
     paintDoorActs();
   }
@@ -1281,7 +1333,7 @@ SM.advhud = (function () {
       return;
     }
     mapArmed = 0;
-    if (!a.leaveToMap()) alert('THE LIFT WILL NOT MOVE', 'Drive into the doorway first', 2.0);
+    if (!a.leaveToMap()) alert(['door.noMove'], ['door.noMoveSub'], 2.0);
     // Leaving changes state, so onState() takes the whole HUD down from here.
   }
 
@@ -1298,13 +1350,13 @@ SM.advhud = (function () {
      * else, because that is what is being weighed — the manifest is already on
      * screen in the hold box and the tank is already a gauge. */
     var sellV = doorSellValue();
-    setText('dsellv', els.doorSell.smVal, sellV > 0 ? ('$' + fmt(sellV)) : 'HOLD EMPTY');
+    setText('dsellv', els.doorSell.smVal, sellV > 0 ? ('$' + fmt(sellV)) : T('door.holdEmpty'));
     els.doorSell.disabled = !(sellV > 0);
 
     var q = (a.getDoorFuelQuote) ? a.getDoorFuelQuote() : null;
     var cost = num(q && q.cost, 0);
     var cash = num(a.getCash && a.getCash(), 0);
-    setText('dfuelv', els.doorFuel.smVal, cost > 0 ? ('$' + fmt(cost)) : 'TANK FULL');
+    setText('dfuelv', els.doorFuel.smVal, cost > 0 ? ('$' + fmt(cost)) : T('door.tankFull'));
     els.doorFuel.disabled = !(cost > 0) || cash < 1;
 
     /* THE CALL TO ACTION SAYS WHERE IT PUTS YOU. "RETURN TO MINE" is the label
@@ -1314,7 +1366,7 @@ SM.advhud = (function () {
     var at = num(a.getLevel && a.getLevel(), 0);
     var hereL = (a.getLevelDef && at >= 1) ? a.getLevelDef(at) : null;
     setText('doutv', els.doorOut.smVal,
-            at >= 1 ? ('L' + fmt(at) + '  ' + liftLabel(hereL, at)) : 'BACK TO THE ROCK');
+            at >= 1 ? (T('hud.lvlShort', fmt(at)) + '  ' + liftLabel(hereL, at)) : T('door.toRock'));
 
     /* THE WORKSHOP PLATE CARRIES A PRICE TOO, so the row reads as three money
      * decisions rather than two and a door. The number is the CHEAPEST thing on
@@ -1335,7 +1387,7 @@ SM.advhud = (function () {
      * whatever is aboard on the way out. */
     var mapOut = !a.isMapUnlocked || !!a.isMapUnlocked();
     setText('dmapv', els.doorMap.smVal,
-            mapArmed > 0 ? 'CONFIRM' : (mapOut ? 'TO THE MAP' : 'TO THE SURFACE'));
+            mapArmed > 0 ? T('menu.confirm') : (mapOut ? T('door.toMap') : T('door.toSurface')));
     setClass('dmaparm', els.doorMap, 'sm-ah-door-armed', mapArmed > 0);
   }
 
@@ -1349,7 +1401,7 @@ SM.advhud = (function () {
    */
   function cheapestPart() {
     var R = SM.rig;
-    if (!R || !R.PART_KEYS || !R.nextCost) return 'FIT PARTS';
+    if (!R || !R.PART_KEYS || !R.nextCost) return T('door.fitParts');
     var best = -1;
     for (var i = 0; i < R.PART_KEYS.length; i++) {
       var k = R.PART_KEYS[i];
@@ -1358,7 +1410,7 @@ SM.advhud = (function () {
       if (c < 0) continue;
       if (best < 0 || c < best) best = c;
     }
-    return best < 0 ? 'ALL FITTED' : ('FROM $' + fmt(best));
+    return best < 0 ? T('door.allFitted') : T('door.fromPrice', fmt(best));
   }
 
   /**
@@ -1371,7 +1423,7 @@ SM.advhud = (function () {
     if (!a || !a.openGarage) return;
     if (SM.sound && SM.sound.play) SM.sound.play('ui');
     if (!a.openGarage()) {
-      alertKind('shop', 'NOT YET', 'Wait for the lift to finish docking', 1.8);
+      alertKind('shop', ['door.notYet'], ['door.notYetSub'], 1.8);
     }
   }
 
@@ -1520,18 +1572,15 @@ SM.advhud = (function () {
     /* THE HEAD NAMES THE PLACE. A level reads as one depth now, so the header is
      * where you are and how deep that is — the same string shape the rows use. */
     setText('liftwhere', els.liftWhere,
-            'LEVEL ' + fmt(at) + '  ·  ' + liftLabel(here, at) + '  ·  ' + bandText(here));
+            T('hud.levelN', fmt(at)) + '  ·  ' + liftLabel(here, at) + '  ·  ' + bandText(here));
 
     /* THE INSTRUCTION BOX. Written before the list, because it is about the list
      * and the eye should meet it first. */
     setClass('unlockon', els.unlock, 'sm-ah-unlock-on', liftUnlock >= 1);
     if (liftUnlock >= 1) {
-      setText('unlockt', els.unlockTitle, 'THE LIFT WILL GO DEEPER');
+      setText('unlockt', els.unlockTitle, T('door.deeper'));
       setText('unlockb', els.unlockBody,
-              'You have worked this level and the ledger covers it. LEVEL ' +
-              fmt(liftUnlock) + ' — ' + liftUnlockName + ' is now for sale at $' +
-              fmt(liftUnlockPrice) + '. Buy it below, then ride down: richer rock, ' +
-              'same lift.');
+              T('door.deeperBody', fmt(liftUnlock), liftUnlockName, fmt(liftUnlockPrice)));
     }
 
     /* AND THE FIELD, WHICH IS THE OTHER THING THAT CAN OPEN DOWN HERE. It names
@@ -1539,12 +1588,8 @@ SM.advhud = (function () {
      * the map's own screen can sell the map. */
     setClass('mapopenon', els.mapOpen, 'sm-ah-unlock-on', liftMapOpen);
     if (liftMapOpen) {
-      setText('mapopent', els.mapOpenTitle, 'THE FIELD IS OPEN');
-      setText('mapopenb', els.mapOpenBody,
-              'You own every level ' + (liftMapName || 'this mine') + ' has to sell, ' +
-              'and word travels. The world map is yours from here: other claims, ' +
-              'harder rock, richer ground — and rights to buy when the ledger can ' +
-              'stand it. LEAVE takes you out to it.');
+      setText('mapopent', els.mapOpenTitle, T('door.mapOpen'));
+      setText('mapopenb', els.mapOpenBody, T('door.mapOpenBody', liftMapName));
     }
 
     var used = 0, r, lvl;
@@ -1573,11 +1618,11 @@ SM.advhud = (function () {
       r.level = lvl;
       r.node.style.display = '';
       r.node.className = 'sm-ah-liftrow' + dress;
-      setText('lfn' + kx, r.name, 'L' + fmt(lvl) + '  ' + liftLabel(L, lvl));
+      setText('lfn' + kx, r.name, T('hud.lvlShort', fmt(lvl)) + '  ' + liftLabel(L, lvl));
       setText('lfd' + kx, r.dep, bandText(L));
       setText('lft' + kx, r.tag,
-              owned ? (lvl === at ? 'HERE' : 'RIDE')
-                    : (isNext ? ('$' + fmt(num(L.price, 0))) : 'SEALED'));
+              owned ? (lvl === at ? T('door.here') : T('door.ride'))
+                    : (isNext ? ('$' + fmt(num(L.price, 0))) : T('door.sealed')));
       // You cannot ride to the level you are standing in, and an unowned level
       // is not a destination at all — only its BUY takes a tap.
       r.go.disabled = !owned || lvl === at;
@@ -1617,16 +1662,16 @@ SM.advhud = (function () {
      * the same point better, and printing both puts the word SELL on the line
      * twice. */
     var sellV = doorSellValue();
-    var lead = sellV > 0 ? ('SELL BANKS $' + fmt(sellV) + ' AND ROLLS THE DAY.') : '';
+    var lead = sellV > 0 ? T('door.noteSell', fmt(sellV)) : '';
     var tail;
-    if (!nextL) tail = 'EVERY LEVEL OF THIS MINE IS OPEN.';
+    if (!nextL) tail = T('door.noteAllOpen');
     else if (!gateOpen || liftUnlock >= 1) tail = '';
     else if ((nextPrice - cash) > 0) {
-      tail = 'NEED $' + fmt(nextPrice - cash) + ' MORE FOR ' + liftLabel(nextL, nextI) + '.';
+      tail = T('door.noteNeed', fmt(nextPrice - cash), liftLabel(nextL, nextI));
     } else {
-      tail = liftLabel(nextL, nextI) + ' COSTS $' + fmt(nextPrice) + ' — BUY IT FROM HERE.';
+      tail = T('door.noteCosts', liftLabel(nextL, nextI), fmt(nextPrice));
     }
-    if (!lead && !tail) tail = 'THE DOORS ARE THE SURFACE — SELL, REFUEL, AND BACK TO WORK.';
+    if (!lead && !tail) tail = T('door.noteDoors');
     setText('liftnote', els.liftNote,
             (lead && tail) ? (lead + '  ' + tail) : (lead || tail));
 
@@ -1672,8 +1717,8 @@ SM.advhud = (function () {
       if (list && list.length && to >= 1 && to <= list.length) L = list[to - 1];
     }
 
-    els.rideKicker.textContent = 'LIFT  ·  LEVEL ' + fmt(to);
-    els.rideTitle.textContent = L ? liftLabel(L, to) : ('LEVEL ' + fmt(to));
+    els.rideKicker.textContent = T('door.rideKicker', fmt(to));
+    els.rideTitle.textContent = L ? liftLabel(L, to) : T('hud.levelN', fmt(to));
     els.rideSub.textContent = L ? bandText(L) : '';
 
     if (rideT1) { clearTimeout(rideT1); rideT1 = 0; }
@@ -1734,7 +1779,7 @@ SM.advhud = (function () {
     if (!best) return;
 
     var d = displayOf(best.matIndex, best.matId);
-    setText('scant', els.scanText, (d.name || 'SIGNATURE').toUpperCase() + ' SIGNATURE');
+    setText('scant', els.scanText, T('scan.signature', String(d.name || '').toUpperCase()));
     var dist = num(best.dist, 0) * M_PER_UNIT;
     setText('scand', els.scanDist, Math.round(dist) + ' m');
     // bearing is radians, 0 = straight down the shaft the machine is facing.
@@ -1747,10 +1792,27 @@ SM.advhud = (function () {
    * ALERTS — the short banner
    * ================================================================== */
   /** A short banner: 'CARGO FULL', 'FUEL RESERVE', 'UNKNOWN SIGNATURE'. */
+  /* WORDS THAT OUTLIVE A SWITCH. A banner may be up for three seconds, and a
+   * language can change inside them. So a line is either a plain string (the
+   * public SM.advhud.alert() contract other modules use), an array
+   * [key, ...args] for I18N.t, or a function returning the words; the last two
+   * are kept and re-read by onLang(), so a banner up at the moment of a switch
+   * changes language with everything else. */
+  var alertLines = [null, null];
+  function words(v) {
+    if (typeof v === 'function') return String(v() || '');
+    if (v && typeof v === 'object' && typeof v.length === 'number') {
+      return String(I18N.t.apply(null, v) || '');
+    }
+    return v ? String(v) : '';
+  }
+
   function alert(title, sub, seconds) {
     if (!built || !els.alert) return;
-    els.alertTitle.textContent = title || '';
-    els.alertSub.textContent = sub || '';
+    alertLines[0] = title;
+    alertLines[1] = sub;
+    els.alertTitle.textContent = words(title);
+    els.alertSub.textContent = words(sub);
     retrigger(els.alert, 'sm-ah-alert-on');
     alertTimer = seconds || ALERT_TIME;
   }
@@ -1805,17 +1867,18 @@ SM.advhud = (function () {
   function refuseNotice(x, y) {
     if (!SM.effects || !SM.effects.notice) return;
     var d = displayOf(refuseMat, null);
-    var name = (d.name || 'THIS ROCK').toUpperCase();
+    var name = (d.name || T('hud.thisRock')).toUpperCase();
     refuseSaid = 0;
 
+    /* In-world notices are painted by effects.js from the strings handed over
+     * here, so they are in the language of the moment they went up; they live
+     * a few seconds and are not re-read on a switch. */
     if (refuseSeal) {
-      SM.effects.notice(x, y, 'THE LEVEL ENDS HERE', name,
-                        'NO DRILL CUTS IT · TAKE THE LIFT DOWN', -1);
+      SM.effects.notice(x, y, T('hud.sealHere'), name, T('hud.sealNotice'), -1);
       return;
     }
-    SM.effects.notice(x, y, 'UPGRADE THE DRILL TO MINE', name,
-                      'HARDNESS ' + refuseHard.toFixed(1)
-                      + ' · THIS BIT CUTS ' + refuseCap.toFixed(1), refuseMat);
+    SM.effects.notice(x, y, T('hud.needDrill'), name,
+                      T('hud.hardNotice', refuseHard.toFixed(1), refuseCap.toFixed(1)), refuseMat);
   }
 
   /**
@@ -1829,13 +1892,19 @@ SM.advhud = (function () {
    * all this.
    */
   function refuseBanner(rammed) {
-    var d = displayOf(refuseMat, null);
-    var name = (d.name || 'THIS ROCK').toUpperCase();
+    var mat = refuseMat;
+    var hard = refuseHard.toFixed(1), cap = refuseCap.toFixed(1);
+    /* The rock's name is read inside the function, so a switch re-reads it
+     * from the material table in the new language too. */
+    function name() {
+      var d = displayOf(mat, null);
+      return (d.name || T('hud.thisRock')).toUpperCase();
+    }
     refuseSaid = 0;
 
     if (refuseSeal) {
-      alertKind('seal', name + ' — THE LEVEL ENDS HERE',
-                'The lift is the only way between levels', 2.6);
+      alertKind('seal', function () { return T('hud.sealBanner', name()); },
+                ['hud.sealBannerSub'], 2.6);
       return;
     }
     /* The sub carries the two numbers because "too hard" on its own is a verdict
@@ -1843,12 +1912,8 @@ SM.advhud = (function () {
      * drill card is quoting when the player gets there. Kept short enough to
      * hold ONE line on a phone; see the compact banner rule in
      * style-adventure.css for the width it has to live inside. */
-    alertKind('toohard', name + ' — TOO HARD FOR THIS DRILL',
-              rammed
-                ? 'Ramming it dents the hull · upgrade in the workshop'
-                : 'Hardness ' + refuseHard.toFixed(1)
-                  + ' · bit cuts ' + refuseCap.toFixed(1)
-                  + ' · upgrade in the workshop',
+    alertKind('toohard', function () { return T('hud.hardBanner', name()); },
+              rammed ? ['hud.rammedSub'] : ['hud.hardSub', hard, cap],
               2.8);
   }
 
@@ -1867,11 +1932,11 @@ SM.advhud = (function () {
       SM.events.on('game:paused', onGamePaused);
       SM.events.on('sound:muted', refreshMute);
       SM.events.on('adv:cargofull', function () {
-        alertKind('full', 'HOLD FULL', 'Dump the spoil or head for the surface', 2.6);
+        alertKind('full', ['hud.holdFull'], ['hud.holdFullSub'], 2.6);
       });
       SM.events.on('adv:fuellow', function (p) {
         var pct = Math.round(num(p && p.pct, 0) * 100);
-        alertKind('fuel', 'FUEL LOW', pct + '% left  ·  check the reserve mark', 2.8);
+        alertKind('fuel', ['hud.fuelLow'], ['hud.fuelLowSub', pct], 2.8);
       });
       /* --- HULL DAMAGE, AND WHY IT USED TO EAT THE STORY ------------------
        * MEASURED, and it is an ORDERING bug rather than a wording one. Inside
@@ -1922,16 +1987,17 @@ SM.advhud = (function () {
           refuseBanner(true);
           return;
         }
-        alertKind('dmg', 'HULL DAMAGE', src.toUpperCase(), 1.8);
+        alertKind('dmg', ['hud.hullDamage'], function () { return damageWord(src); }, 1.8);
       });
       SM.events.on('adv:heat', function (p) {
         if (num(p && p.pct, 0) < 0.9) return;
-        alertKind('heat', 'OVERHEATING', 'Back off the rock and let it cool', 2.2);
+        alertKind('heat', ['hud.overheat'], ['hud.overheatSub'], 2.2);
       });
       SM.events.on('mine:layer', function (p) {
         if (!p || !p.name) return;
-        alertKind('layer', String(p.name).toUpperCase(),
-                  Math.round(num(p.depthM, 0)) + ' m  ·  new stratum', 2.2);
+        var layerName = String(p.name).toUpperCase();
+        alertKind('layer', layerName,
+                  ['hud.newLayer', Math.round(num(p.depthM, 0))], 2.2);
       });
       /* --- THE WALL THAT WILL NOT CUT ------------------------------------
        * The one thing in the mine a player cannot work out by looking at it.
@@ -2042,6 +2108,7 @@ SM.advhud = (function () {
        * from this panel today, but the prep screen and the map own the same verb
        * and the signature is what keeps them in step. */
       SM.events.on('lift:bought', function () { liftSig = ''; });
+      document.addEventListener('arcade:lang', onLang, false);
       window.addEventListener('keydown', onKeyDown, false);
       window.addEventListener('blur', function () {
         if (els.btnAbort && els.btnAbort.smDisarm) els.btnAbort.smDisarm();
@@ -2221,15 +2288,15 @@ SM.advhud = (function () {
     setClass('fwarn', els.fuelPanel, 'sm-ah-warn', warnState);
     setClass('fcrit', els.fuelPanel, 'sm-ah-crit', crit);
     setText('fnote', els.fuelNote,
-            crit ? 'RESERVE SPENT' : (warnState ? 'TURN BACK' : ''));
+            crit ? T('hud.reserveSpent') : (warnState ? T('hud.turnBack') : ''));
 
     // The sub line is the arithmetic the player would otherwise do in their
     // head: what the trip home costs, and how long the tank lasts at this draw.
     // Three writes rather than one string, so the rail can keep the first part
     // and drop the rest — the separators come from CSS (see build()).
     setText('fhome', els.fuelHome, fmt(reserve) + 'u');
-    setText('fburn', els.fuelBurn, burn > 0.001 ? ('BURN ' + burn.toFixed(1) + '/s') : '');
-    setText('fleft', els.fuelLeft, burn > 0.001 ? (Math.round(fuel / burn) + 's LEFT') : '');
+    setText('fburn', els.fuelBurn, burn > 0.001 ? T('hud.burn', burn.toFixed(1)) : '');
+    setText('fleft', els.fuelLeft, burn > 0.001 ? T('hud.secsLeft', Math.round(fuel / burn)) : '');
 
     /* --- the hold ------------------------------------------------------ */
     var ccap = num(a.getCargoCap && a.getCargoCap(), 1);
@@ -2278,6 +2345,56 @@ SM.advhud = (function () {
       refreshScanner();
       if (pauseOpen) paintPauseStats();
     }
+  }
+
+  /* The hold button's two labels differ — a short name for a screen reader, a
+   * how-to for the pointer — so they cannot share one data-i18n-label. */
+  function paintHoldLabels() {
+    if (!els.holdBtn) return;
+    els.holdBtn.setAttribute('title', T('hud.manifestTip'));
+    els.holdBtn.setAttribute('aria-label', T('hud.manifest'));
+  }
+
+  /** A damage source id from adv.js, as words. An id nobody has named yet is
+   *  shown as itself, as it always was, rather than as a missing key. */
+  var DAMAGE_WORDS = { impact: 'hud.dmgImpact', ram: 'hud.dmgRam', heat: 'hud.dmgHeat' };
+  function damageWord(src) {
+    var k = DAMAGE_WORDS[src];
+    return k ? T(k) : String(src || '').toUpperCase();
+  }
+
+  /* ---------------------------------------------------------------------
+   * A LANGUAGE SWITCH (document 'arcade:lang', after I18N.paintStatic has
+   * already repainted every data-i18n node). Everything else this HUD writes
+   * is cached behind setText() or a signature, and the run may well be PAUSED
+   * right now — the pause card is where the language row is — so waiting for
+   * the next update() tick would leave the screen half in one language. So:
+   * forget every cache and repaint what is showing, now. Nothing here opens,
+   * closes, pauses or unpauses anything.
+   * ------------------------------------------------------------------ */
+  function onLang() {
+    if (!built) return;
+    paintHoldLabels();
+    if (els.btnResume && els.btnResume.smRelabel) els.btnResume.smRelabel();
+    if (els.btnAbort && els.btnAbort.smRelabel) els.btnAbort.smRelabel();
+    if (els.btnLeave && els.btnLeave.smRelabel) els.btnLeave.smRelabel();
+    if (els.btnQuit && els.btnQuit.smRelabel) els.btnQuit.smRelabel();
+    if (alertTimer > 0) {
+      els.alertTitle.textContent = words(alertLines[0]);
+      els.alertSub.textContent = words(alertLines[1]);
+    }
+    if (!visible) return;
+    /* `last` guards classes and --vars as well as text; dropping all of it
+     * costs one redundant write per node, once, and is simpler than keeping
+     * the text keys apart. */
+    last = {};
+    manifestSig = ' ';
+    liftSig = '';
+    update(0);
+    refreshManifest();
+    paintDumpArm();
+    refreshLift();
+    if (pauseOpen) paintPauseStats();
   }
 
   function isVisible() { return visible; }
