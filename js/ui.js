@@ -83,7 +83,7 @@ SM.ui = (function () {
    * behind (v2.8.0 against sw.js's v2.9.1), which only ever shows on a
    * file:// or first-visit load — exactly the two cases where nobody can
    * check it against anything, so a wrong number there is worse than none. */
-  var GAME_VERSION    = 'v2.14.0';
+  var GAME_VERSION    = 'v2.15.0';
 
   /* TESTER MODE — the title-gate cheat code, old-school. Typed on the title
    * screen it reveals the TESTER MODE button; the unlock persists in
@@ -317,17 +317,11 @@ SM.ui = (function () {
 
     els.version = el('div', 'sm-start-version', els.start, GAME_VERSION);
 
-    /* THE LANGUAGE, ON THIS SCREEN AND IN PLAIN SIGHT, directly above the way
-     * out (CLAUDE.md §2, "Two languages", *Where*). It used to live only in
-     * the panel behind the corner speaker, and the owner opened this game,
-     * looked at a title in Norwegian and could not find English at all. The
-     * player who needs this row most is exactly the one who cannot read the
-     * screen it is on, so it cannot be behind anything. `title` keeps this
-     * copy's flag clipPath ids apart from the menu's and the pause card's.
-     * langRow stops its own clicks, so a tap here never starts a descent. */
-    els.startLang = I18N.langRow(sc, 'title');
-    els.startLang.classList.add('sm-start-lang');
-
+    /* No language row here. It stood on this screen, above the way out, from
+     * 2026-10-11 until the same day's evening, when the hub settled that
+     * language and sound are settings and live behind the three bars — which
+     * are on this screen too, one tap from a stranger who cannot read it. The
+     * title spends its room on the way in and the way out. */
     buildArcadeExit(sc);
     buildCorner();
     buildTester();
@@ -1318,7 +1312,7 @@ SM.ui = (function () {
   /* =====================================================================
    * LIFECYCLE
    * ================================================================== */
-  /* A LANGUAGE SWITCH, from either copy of the row. paintStatic has already
+  /* A LANGUAGE SWITCH, from the menu's copy of the row or the pause card's. paintStatic has already
    * repainted every data-i18n node by the time this runs; what is left is the
    * text this file writes itself. Nothing here closes a panel, leaves the
    * title or touches the pause — the menu stays open, in the new words. */

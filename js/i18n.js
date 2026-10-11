@@ -41,9 +41,9 @@
  * arcade card reads it), console output and storage keys. Numbers keep the
  * game's own '$1 000 000' formatting, which is not locale-driven and never was.
  *
- * The language row (langRow) is built here rather than in the three places
- * that show it — the title screen itself, the menu's settings face and the
- * pause card — so the copies cannot drift. Its flags are the hub's art,
+ * The language row (langRow) is built here rather than in the two places
+ * that show it — the menu's settings face and the pause card, both behind
+ * the three bars — so the copies cannot drift. Its flags are the hub's art,
  * copied path for path from kitchens/index.html, never emoji.
  * ========================================================================== */
 

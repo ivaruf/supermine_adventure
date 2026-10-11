@@ -152,7 +152,7 @@
 //         on request, switched live from a language row in the sound panel and
 //         on the pause card (js/i18n.js, new and precached below, storing the
 //         hub-wide arcade.lang.v1). Menus use the hub's plain words.
-const VERSION = 'v2.14.1'; // precache reads past the browser's HTTP cache, so an update can never mix old and new files
+const VERSION = 'v2.15.0'; // the language row leaves the title: language and sound live behind the three bars, and the title keeps Play and the way out
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 

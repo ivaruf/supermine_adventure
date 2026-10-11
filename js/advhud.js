@@ -729,8 +729,8 @@ SM.advhud = (function () {
     /* THE LANGUAGE ROW. The hub wants it behind the menu plate as well as on
      * the way in, and this card is this game's menu. Switching repaints the
      * card in place: it does not close, and the run stays paused. js/i18n.js
-     * builds the row (other copies sit on the title and on ui.js's settings
-     * face, hence the 'pause' id suffix on the flag's clipPaths). */
+     * builds the row (the other copy sits on ui.js's settings face, hence the
+     * 'pause' id suffix on the flag's clipPaths). */
     els.pauseLang = I18N.langRow(card, 'pause');
 
     els.btnResume = menuButton(card, 'sm-btn-primary', ICONS.play, 'menu.resume');

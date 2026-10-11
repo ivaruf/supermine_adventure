@@ -2469,8 +2469,8 @@ textarea,
 }
 
 /* ---------------------------------------------------------------------------
- * THE LANGUAGE ROW — js/i18n.js langRow(), on the title screen itself, on the
- * menu's settings face and on the pause card (hub CLAUDE.md §2, "Two
+ * THE LANGUAGE ROW — js/i18n.js langRow(), on the menu's settings face and on
+ * the pause card, and nowhere else (hub CLAUDE.md §2, "Two
  * languages, Norwegian first")
  * ---------------------------------------------------------------------------
  * Laid out as a third row of the sound panel on purpose: the caption takes the
@@ -2542,17 +2542,6 @@ textarea,
 .sm-tiny .sm-lang-label { flex-basis: 66px; letter-spacing: 1.2px; }
 .sm-tiny .sm-lang { gap: 9px; }
 .sm-tiny .sm-btn.sm-lang-btn { gap: 6px; padding: 6px; letter-spacing: 1px; }
-
-/* ON THE TITLE, as wide as PLAY and the door it sits between (the same
-   min(320px, 74vw)), so the column reads as one: the way in, the language,
-   the way out. Left-aligned inside itself so its caption gutter matches the
-   menu's copies. */
-.sm-lang.sm-start-lang {
-  width: min(320px, 74vw);
-  margin-top: 0;
-}
-.sm-compact .sm-lang.sm-start-lang { width: min(300px, 78vw); }
-.sm-tiny .sm-lang.sm-start-lang { width: min(280px, 84vw); }
 
 /* ---------------------------------------------------------------------------
  * TESTER MODE — revealed by the title-gate cheat code (see ui.js)

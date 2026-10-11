@@ -96,8 +96,8 @@ between (say) camera and vehicle are fine.
 **Before all of them, in `<head>`: `js/i18n.js` → `window.I18N`** (not on
 `SM`). It is the hub-wide language contract (games/CLAUDE.md §2, "Two
 languages"): `t(key, ...args)`, `getLang()`, `setLang()`, `paintStatic()`,
-plus `langRow()` for the Språk/Language row the title screen, the menu's
-settings face and the pause card all carry. Bokmål unless `arcade.lang.v1` says `"en"`. Every word a player
+plus `langRow()` for the Språk/Language row the menu's settings face and
+the pause card both carry (not the title: language lives behind the three bars). Bokmål unless `arcade.lang.v1` says `"en"`. Every word a player
 reads goes through `I18N.t`; a switch repaints `[data-i18n]` nodes and then
 fires `arcade:lang` on `document`, which every module that writes text at
 runtime listens for and re-renders what it is showing — never changing screen,
@@ -504,8 +504,8 @@ SM.ui.showTitle() / leaveAdventure()   // SM.adv.close() calls the latter
 SM.ui.isTitleUp() / getRoot()
 ```
 
-Four jobs now. The **title gate** (with the language row in its own column,
-above Back to arcade), and with it the **corner** — the hub's three plates,
+Four jobs now. The **title gate** (Play, then Back to arcade last; the
+language row lives behind the three bars, not here), and with it the **corner** — the hub's three plates,
 menu, a live mute and fullscreen, fixed to the page on every screen including
 underground — and the menu's **settings face** behind the three bars
 (ENGINE, EFFECTS, language, Back, Back to arcade). Underground the three bars
