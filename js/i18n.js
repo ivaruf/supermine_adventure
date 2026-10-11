@@ -82,9 +82,12 @@ var I18N = (function () {
       'menu.language': 'SPRÅK',
       'menu.fullscreen': 'Fullskjerm',
       'menu.exitFullscreen': 'Avslutt fullskjerm',
-      'menu.exitArcade': 'TILBAKE TIL ARKADEN',
-      'menu.close': 'LUKK',
-      'menu.closeTab': 'LUKK FANEN SELV',
+      /* The way out is the one button in this game NOT in capitals: the hub
+         makes it the same object in every cabinet, words and case included
+         (CLAUDE.md §2, "One button..."). */
+      'menu.exitArcade': 'Tilbake til arkaden',
+      'menu.close': 'Lukk',
+      'menu.closeTab': 'Lukk fanen selv',
       'menu.titleScreen': 'STARTSKJERMEN',
       'menu.map': 'KART',
       'menu.workshop': 'VERKSTED',
@@ -647,9 +650,9 @@ var I18N = (function () {
       'menu.language': 'LANGUAGE',
       'menu.fullscreen': 'Fullscreen',
       'menu.exitFullscreen': 'Exit fullscreen',
-      'menu.exitArcade': 'BACK TO ARCADE',
-      'menu.close': 'CLOSE',
-      'menu.closeTab': 'CLOSE THIS TAB YOURSELF',
+      'menu.exitArcade': 'Back to arcade',
+      'menu.close': 'Close',
+      'menu.closeTab': 'Close this tab yourself',
       'menu.titleScreen': 'TITLE SCREEN',
       'menu.map': 'MAP',
       'menu.workshop': 'WORKSHOP',

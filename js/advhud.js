@@ -152,8 +152,10 @@ SM.advhud = (function () {
            '<circle cx="12" cy="16.8" r="1.1" fill="currentColor" stroke="none"/>',
     /* Quitting the game itself: the shaft, and an arrow riding up it. A door
        would be the obvious pick and the obvious pick is wrong down here. */
-    surface: '<path d="M4.6 20.4V6.6h6.4v13.8"/><path d="M17.6 20.4V9.6"/>' +
-             '<path d="m14.1 13.1 3.5-3.5 3.5 3.5"/>',
+    /* The hub's shared back arrow, to the path data, on the way out of the
+     * game (CLAUDE.md §2, "One button..."). It replaced a shaft-and-arrow of
+     * our own: this one control is the same object in every cabinet. */
+    back: '<path d="M19 12H5m6-6-6 6 6 6"/>',
     sound_on: '<path d="M4.4 9.4h3.3l4.9-4.1v13.4l-4.9-4.1H4.4z"/>' +
               '<path d="M15.7 9.2a3.9 3.9 0 0 1 0 5.6"/><path d="M18.3 6.5a7.6 7.6 0 0 1 0 11"/>',
     sound_off: '<path d="M4.4 9.4h3.3l4.9-4.1v13.4l-4.9-4.1H4.4z"/>' +
@@ -795,7 +797,7 @@ SM.advhud = (function () {
           app: T('menu.close'),
         });
       };
-      els.btnQuit = menuButton(card, 'sm-ah-quit', ICONS.surface, quitWord);
+      els.btnQuit = menuButton(card, 'sm-ah-quit', ICONS.back, quitWord);
       armConfirm(els.btnQuit, quitWord, 'pause.confirmLose', function () {
         window.ArcadeExit.quit().then(function (how) {
           // Refused means the browser would not close a tab it did not open.
@@ -908,12 +910,33 @@ SM.advhud = (function () {
   }
 
   /**
-   * ESC / P. ui.js owns the same keys but refuses to act while adventure is
-   * active (canPause() returns false) and returns WITHOUT preventDefault, so
-   * this listener is the only one that answers them underground.
+   * ESCAPE AND P, UNDERGROUND. The hub's rule (CLAUDE.md §2, "Escape goes one
+   * step back") in this HUD's states, in the order they stack on screen:
+   *
+   *   ui.js's sound panel  -> not ours; ui.js closes it (see below)
+   *   pause card open      -> close it, the run carries on
+   *   lift panel open      -> its cross: leave the cage, back into the rock.
+   *                           The lift is a sub-panel and that cross is its
+   *                           Back; it is also the only way out of it that is
+   *                           not a decision (sell, refuel, ride, workshop).
+   *   driving              -> open the pause card, which pauses, and which has
+   *                           Back to arcade at its foot
+   *
+   * P is the older pause key and only ever toggles the card.
+   *
+   * ONE PRESS, ONE ANSWER. ui.js's handler also sees every key and owns the
+   * title and the sound panel; advui.js's owns the meta screens. They are kept
+   * apart by state (only one of title / meta screen / mine is ever up), and
+   * belt and braces by `defaultPrevented`: whichever handler acted first has
+   * called preventDefault(), and every other one stands down. input.js, which
+   * owns the driving keys, has never known Escape or P. Auto-repeat is
+   * ignored, so a held key cannot open and close the card at the repeat rate.
    */
   function onKeyDown(e) {
-    if (!e || !visible) return;
+    if (!e || !visible || e.defaultPrevented) return;
+    var k = e.key;
+    var esc = (k === 'Escape' || k === 'Esc');
+    if (!esc && k !== 'p' && k !== 'P') return;
     /* THE MIXER TAKES THE KEY FIRST. ui.js's sound panel is permanent chrome
      * and opens over a live descent, so underground one Escape would otherwise
      * be answered twice: ui.js closing the panel and this handler RESUMING the
@@ -921,11 +944,11 @@ SM.advhud = (function () {
      * looking at. Opening that panel pauses us on purpose (see ui.js's
      * openSound); leaving it is not the gesture that undoes that. */
     if (SM.ui && SM.ui.isSoundOpen && SM.ui.isSoundOpen()) return;
-    var k = e.key;
-    if (k === 'Escape' || k === 'Esc' || k === 'p' || k === 'P') {
-      e.preventDefault();
-      if (pauseOpen) closePause(); else openPause();
-    }
+    e.preventDefault();
+    if (e.repeat) return;
+    if (pauseOpen) { closePause(); return; }
+    if (esc && liftOpen) { onDoorOut(); return; }
+    openPause();
   }
 
   /** Somebody else paused us. Mirror it; never call setPaused() back. */

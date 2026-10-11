@@ -2159,11 +2159,13 @@ textarea,
   color: rgba(255, 255, 255, 0.20);
 }
 
-/* THE WAY OUT, top left — the corner you came in by, opposite the tester plate.
-   Pinned to the overlay for the same reason the build stamp is: the panel in
-   the middle scrolls on a short phone and a door must not scroll away. See
-   buildArcadeExit() in js/ui.js for when it exists at all — it is absent
-   entirely unless ../arcade/exit.js answered.
+/* THE WAY OUT: the last row of the title's column, as wide as PLAY above
+   it (the same min(320px, 74vw), and the breakpoints that resize PLAY are
+   matched below), with a little more air above it than the column's own gap.
+   It used to be a small plate pinned to the overlay's top-left corner; ui.js's
+   buildArcadeExit() says why it moved (hub CLAUDE.md §2, "One button, and it
+   looks and behaves the same in every game"). Absent entirely unless
+   ../arcade/exit.js answered.
 
    ONLY THE GEOMETRY IS HERE. Its colour lives in style-adventure.css, next to
    the rule it has to argue with: `.sm-adv .sm-btn:not(.sm-iconbtn)` paints
@@ -2171,13 +2173,20 @@ textarea,
    more specific than a bare class AND in the later file, so a colour written
    here would simply never apply. Measured, not assumed. */
 .sm-start-quit {
-  position: absolute;
-  left: max(14px, env(safe-area-inset-left, 0px));
-  top: max(12px, env(safe-area-inset-top, 0px));
-  padding: 8px 14px;
-  font-size: 9.5px;
-  letter-spacing: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: min(320px, 74vw);
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 10px 18px;
+  font-size: 12px;
+  letter-spacing: 0.4px;
 }
+.sm-start-quit-ico { display: block; width: 17px; height: 17px; }
+.sm-start-quit-ico .sm-btn-svg { width: 100%; height: 100%; filter: none; }
+.sm-start-quit-label { line-height: 1; }
 
 /* ===========================================================================
  * THE CORNER CLUSTER — PERMANENT, AND FIXED TO THE PAGE
@@ -2186,7 +2195,7 @@ textarea,
  * the screen. They are the same `.sm-iconbtn` gold-on-dark plate with the same
  * hazard sliver as the in-mine pair, because they are the same kind of object
  * — that stripe is what keeps a 42px button from reading as generic mobile
- * chrome, and it is why these are NOT dressed like .sm-start-quit beside them.
+ * chrome, and it is why these are NOT dressed like the .sm-start-quit door.
  *
  * THEY NEVER GO ANYWHERE. This was `position: absolute` inside .sm-start,
  * which made it an ornament of the title gate: it existed on one screen out of
@@ -2204,10 +2213,9 @@ textarea,
  *
  * WHERE IT SITS. Exactly where the in-mine pair used to: --sm-top-y down and
  * --sm-gutter in, so the two pairs line up as one row on a wide screen and as
- * one column on a phone. It no longer mirrors .sm-start-quit's insets — the
- * door is 4px lower on the title and that is the right trade, because this
- * cluster shares a row with the run's plates on six screens and shares a line
- * with the door on one.
+ * one column on a phone. (It once had to choose between that row and the
+ * title's door in the opposite corner; the door lives in the title's column
+ * now, so there is nothing left to choose.)
  *
  * SAFE AREAS ARE ARITHMETIC NOW, not inheritance: `fixed` positions against
  * the viewport, so #ui-root's padding does not apply and both insets are added

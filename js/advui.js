@@ -542,6 +542,54 @@ SM.advui = (function () {
   }
 
   /* ---------------------------------------------------------------------
+   * ESCAPE ON A META SCREEN IS THAT SCREEN'S BACK
+   * ---------------------------------------------------------------------
+   * The hub's rule (CLAUDE.md §2, "Escape goes one step back, and from the
+   * start screen that step is the arcade") never had a word for this game's
+   * five screens between the title and the mine, because most games have
+   * none. They are each one step from somewhere: every one but RESULTS has a
+   * BACK in its footer, and every chain of BACKs ends on the title, which has
+   * the way out on it. So Escape presses whichever BACK is showing — the
+   * same button, the same handler, so the key and the tap cannot disagree —
+   * and Escape, Escape, Escape walks home exactly as the rule promises.
+   *
+   * RESULTS HAS NO BACK, and Escape does nothing there. That screen is a
+   * decision with money on it (SELL, refuel, dive again, the workshop, the
+   * map), and none of those is "one step back"; guessing one for the player
+   * would be a key that spends or skips their haul.
+   *
+   * THE WORKSHOP HAS TWO, never both visible: BACK to the map between runs,
+   * and BACK to the lift when it was opened over a held run. escBack() keeps
+   * them in registration order and the handler presses the one that is shown.
+   *
+   * ONE PRESS, ONE ANSWER: the title and the sound panel are ui.js's, the
+   * mine is advhud.js's, and this stands down for both — by state, and by
+   * `defaultPrevented` should another handler have answered first.
+   * ------------------------------------------------------------------ */
+  var escBacks = {};
+
+  function escBack(screen, btn) {
+    (escBacks[screen] || (escBacks[screen] = [])).push(btn);
+    return btn;
+  }
+
+  function onKeyDown(e) {
+    if (!e || e.defaultPrevented || !current) return;
+    if (e.key !== 'Escape' && e.key !== 'Esc') return;
+    if (SM.ui && SM.ui.isSoundOpen && SM.ui.isSoundOpen()) return;
+    if (SM.ui && SM.ui.isTitleUp && SM.ui.isTitleUp()) return;
+    var list = escBacks[current];
+    var b = null;
+    for (var i = 0; list && i < list.length; i++) {
+      // No client rects means display:none, on the button or above it.
+      if (list[i].getClientRects().length && !list[i].disabled) { b = list[i]; break; }
+    }
+    if (!b) return;
+    e.preventDefault();
+    if (!e.repeat) b.click();
+  }
+
+  /* ---------------------------------------------------------------------
    * SLOTS
    * ------------------------------------------------------------------ */
   function buildSlots() {
@@ -550,9 +598,9 @@ SM.advui = (function () {
     for (var i = 0; i < n; i++) slotRows.push(makeSlotRow(s.body, i));
     /* BACK, not TITLE SCREEN: a way back says Back in every game of the hub
      * (games/CLAUDE.md §2, "Menus speak plainly"); where it goes is obvious. */
-    onTap(buttonT(s.foot, '', 'menu.back'), function () {
+    escBack('slots', onTap(buttonT(s.foot, '', 'menu.back'), function () {
       if (SM.adv && SM.adv.close) SM.adv.close();
-    });
+    }));
   }
 
   function makeSlotRow(parent, i) {
@@ -744,9 +792,9 @@ SM.advui = (function () {
     onTap(buttonT(s.foot, '', 'menu.workshop'), function () {
       if (SM.adv && SM.adv.openGarage) SM.adv.openGarage();
     });
-    onTap(buttonT(s.foot, 'sm-av-quiet', 'menu.back'), function () {
+    escBack('map', onTap(buttonT(s.foot, 'sm-av-quiet', 'menu.back'), function () {
       if (SM.adv && SM.adv.close) SM.adv.close();
-    });
+    }));
   }
 
   function paintMap() {
@@ -2063,7 +2111,7 @@ SM.advui = (function () {
     els.garageDive = buttonT(s.foot, '', 'aui.diveAgain');
     onTap(els.garageDive, onBackToMine);
 
-    els.garageMap = buttonT(s.foot, '', 'menu.back');
+    els.garageMap = escBack('garage', buttonT(s.foot, '', 'menu.back'));
     onTap(els.garageMap, function () {
       if (SM.adv && SM.adv.backToMap) SM.adv.backToMap();
       else if (SM.adv && SM.adv.openMap) SM.adv.openMap();
@@ -2080,7 +2128,7 @@ SM.advui = (function () {
      * are refused by adv.js while a run is held (see the shopHold note there).
      * A greyed-out BACK TO MINE beside a live expedition would be the screen
      * asking a question that has no answer. */
-    els.garageLift = buttonT(s.foot, 'sm-btn-primary sm-btn-big', 'menu.back');
+    els.garageLift = escBack('garage', buttonT(s.foot, 'sm-btn-primary sm-btn-big', 'menu.back'));
     onTap(els.garageLift, function () {
       if (SM.adv && SM.adv.closeShop) SM.adv.closeShop();
     });
@@ -2504,7 +2552,7 @@ SM.advui = (function () {
       if (SM.adv && SM.adv.openGarage) SM.adv.openGarage();
     });
 
-    els.prepBack = buttonT(s.foot, 'sm-av-quiet', 'menu.back');
+    els.prepBack = escBack('prep', buttonT(s.foot, 'sm-av-quiet', 'menu.back'));
     onTap(els.prepBack, function () {
       if (!SM.adv) return;
       if (mapUnlocked()) {
@@ -3424,6 +3472,7 @@ SM.advui = (function () {
        * is up, without changing screen, closing the name field (a half-typed name
        * is the player's and stays as typed) or re-rolling the results count-up. */
       document.addEventListener('arcade:lang', onLang, false);
+      window.addEventListener('keydown', onKeyDown, false);
       window.addEventListener('resize', onResize, false);
       window.addEventListener('orientationchange', onResize, false);
 

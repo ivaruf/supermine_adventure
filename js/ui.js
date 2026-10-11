@@ -79,7 +79,7 @@ SM.ui = (function () {
    * behind (v2.8.0 against sw.js's v2.9.1), which only ever shows on a
    * file:// or first-visit load — exactly the two cases where nobody can
    * check it against anything, so a wrong number there is worse than none. */
-  var GAME_VERSION    = 'v2.12.0';
+  var GAME_VERSION    = 'v2.13.0';
 
   /* TESTER MODE — the title-gate cheat code, old-school. Typed on the title
    * screen it reveals the TESTER MODE button; the unlock persists in
@@ -116,7 +116,12 @@ SM.ui = (function () {
             '<path d="M3.6 14.6v5.8h5.8M20.4 14.6v5.8h-5.8"/>',
 
     contract: '<path d="M3.6 9.4h5.8V3.6M20.4 9.4h-5.8V3.6"/>' +
-              '<path d="M3.6 14.6h5.8v5.8M20.4 14.6h-5.8v5.8"/>'
+              '<path d="M3.6 14.6h5.8v5.8M20.4 14.6h-5.8v5.8"/>',
+
+    /* The way out of the game: the hub's shared back arrow, TO THE PATH DATA
+     * (CLAUDE.md §2, "One button, and it looks and behaves the same in every
+     * game"). advhud.js draws the same path on the pause card's twin. */
+    back: '<path d="M19 12H5m6-6-6 6 6 6"/>'
   };
 
   function glyph(inner) {
@@ -304,7 +309,7 @@ SM.ui = (function () {
 
     els.version = el('div', 'sm-start-version', els.start, GAME_VERSION);
 
-    buildArcadeExit();
+    buildArcadeExit(sc);
     buildCorner();
     buildTester();
     /* The cluster and the panel are built HERE, with the rest of this screen's
@@ -386,32 +391,47 @@ SM.ui = (function () {
     });
   }
 
-  function buildArcadeExit() {
+  function buildArcadeExit(parent) {
     if (!exitOffered()) return;
 
-    /* PLAIN WORDS, NOT THE MINE'S. A way out of the game is not a place in the
-     * fiction, so it does not get a name from one: BACK TO ARCADE when the
-     * launcher framed us or when we are a tab that can navigate there, CLOSE
-     * when we are an installed app closing our own window. Only the case
-     * survives from this game's own voice — it is an all-caps game.
-     * `tab` is legacy in exit.js and deliberately not passed; the tab case
-     * wears the arcade's word now, which is what verb() already returns. */
-    els.startQuit = el('button', 'sm-btn sm-start-quit', els.start, exitWord());
+    /* PLAIN WORDS, NOT THE MINE'S, AND NOT THE MINE'S CAPITALS EITHER. A way
+     * out of the game is not a place in the fiction, so it does not get a name
+     * from one: "Back to arcade" when the launcher framed us, "Close" when we
+     * are an installed app closing our own window. Since 2026-10-11 it does
+     * not even keep this game's all-caps — the hub makes this one control the
+     * same object in every cabinet, case, glyph and place (CLAUDE.md §2), so
+     * the strings arrive in sentence case and nothing here raises them.
+     * `tab` is legacy in exit.js and deliberately not passed.
+     *
+     * THE LAST THING IN THE TITLE'S COLUMN, as wide as PLAY above it. It used
+     * to be a small plate pinned to the overlay's top-left corner, so that it
+     * could not scroll away on a short phone; the hub fixed its place in the
+     * column instead, and the column fits a sideways phone with room over. */
+    els.startQuit = el('button', 'sm-btn sm-start-quit', parent, '');
     els.startQuit.setAttribute('type', 'button');
+    el('span', 'sm-start-quit-ico', els.startQuit).innerHTML = glyph(UI_ICONS.back);
+    els.startQuitLabel = el('span', 'sm-start-quit-label', els.startQuit, exitWord());
     els.startQuit.addEventListener('click', function (e) {
       e.preventDefault();
       /* els.start's own click handler starts the campaign, and this button is
        * sitting on top of it. Leaving must never launch a run on the way. */
       e.stopPropagation();
       els.startQuit.blur();
-      window.ArcadeExit.quit().then(function (how) {
-        // Refused means the browser would not close a tab it did not open.
-        // Say so where the button is, rather than leaving it looking dead.
-        if (how !== 'refused') return;
-        quitRefused = true;
-        els.startQuit.textContent = T('menu.closeTab');
-        els.startQuit.disabled = true;
-      });
+      startQuit();
+    });
+  }
+
+  /** The title's way out. The button and Escape on the title both come
+   *  through here, so they are one action and cannot drift apart. */
+  function startQuit() {
+    if (!els.startQuit || els.startQuit.disabled) return;
+    window.ArcadeExit.quit().then(function (how) {
+      // Refused means the browser would not close a tab it did not open.
+      // Say so where the button is, rather than leaving it looking dead.
+      if (how !== 'refused') return;
+      quitRefused = true;
+      els.startQuitLabel.textContent = T('menu.closeTab');
+      els.startQuit.disabled = true;
     });
   }
 
@@ -420,7 +440,7 @@ SM.ui = (function () {
    * ---------------------------------------------------------------------
    * Two square plates: the speaker that opens the sound panel, and the plate
    * that fills the screen. The two things here that are about the HARDWARE
-   * rather than about the mine, together, in the corner opposite the door.
+   * rather than about the mine, together, in the corner.
    *
    * THE SPEAKER IS NOT A MUTE BUTTON and carries no slash. advhud's speaker
    * mutes; this one opens a panel, and the two must not look like the same
@@ -450,9 +470,10 @@ SM.ui = (function () {
    *
    * SAFE AREAS ARE ARITHMETIC NOW, not inheritance: `fixed` positions against
    * the viewport, so #ui-root's padding no longer applies and .sm-corner adds
-   * both insets back by hand. It no longer lines up with .sm-start-quit in the
-   * opposite corner — it lines up with the run's plates instead, which is the
-   * row it has to share on six screens out of seven.
+   * both insets back by hand. It lines up with the run's plates, which is the
+   * row it has to share on six screens out of seven. (The title's door used
+   * to sit in the opposite corner; it is the last row of the title's column
+   * now, see buildArcadeExit().)
    * ------------------------------------------------------------------ */
   function buildCorner() {
     els.corner = el('div', 'sm-corner', root);
@@ -609,7 +630,12 @@ SM.ui = (function () {
        descent out from under an open menu. Stopping propagation at the input
        is what keeps the key: nothing here calls preventDefault, so the range
        still does its own default thing. */
-    input.addEventListener('keydown', function (e) { e.stopPropagation(); });
+    /* ...all but Escape, which is the panel's BACK and must reach onTitleKey
+       from a focused slider too, or the key that closes the panel would be
+       the one key that does nothing while you are using it. */
+    input.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape' && e.key !== 'Esc') e.stopPropagation();
+    });
     input.addEventListener('keyup', function (e) { e.stopPropagation(); });
 
     var out = el('output', 'sm-sound-out', row, '100');
@@ -1040,6 +1066,27 @@ SM.ui = (function () {
       return;
     }
     if (!titleUp) return;
+    /* ESCAPE ON THE TITLE, the hub's rule in this screen's two states
+     * (CLAUDE.md §2, "Escape goes one step back"): the tester panel is a
+     * sub-panel and Escape is its BACK; with nothing open, Escape IS the
+     * "Back to arcade" button — the same startQuit(), and only when that
+     * button is shown. Taken here, before the Enter/Space and cheat-tracker
+     * logic below, and preventDefault()ed, so the one press can never also
+     * start a descent: that exact double — quit AND descend on one keystroke
+     * — is the bug the hub names this game for. Auto-repeat is ignored so a
+     * held key cannot close the tester and then leave the game behind it. */
+    if (k === 'Escape' || k === 'Esc') {
+      /* ...unless another handler already answered this very press. A meta
+       * screen's BACK (advui.js) can land on this title synchronously, and if
+       * that listener ran first, `titleUp` is already true by the time this
+       * one runs — one Escape would walk to the title AND out of the game. */
+      if (e.defaultPrevented) return;
+      e.preventDefault();
+      if (e.repeat) return;
+      if (testerOpen) closeTester();
+      else if (els.startQuit) startQuit();
+      return;
+    }
     if (els.update && e.target === els.update) return;
     /* ENTER AND SPACE BELONG TO WHATEVER BUTTON HAS FOCUS, not to the overlay
        underneath it. The UPDATE plate got this by name on the line above, back
@@ -1059,9 +1106,8 @@ SM.ui = (function () {
      * own Enter) must not fall through and start the game. */
     if (trackTesterCode(k)) { e.preventDefault(); return; }
     if (testerOpen) {
-      /* The tester panel owns the keyboard: Escape closes it, and Enter and
-       * Space must not start a campaign underneath an open menu. */
-      if (k === 'Escape') closeTester();
+      /* The tester panel owns the keyboard: Enter and Space must not start a
+       * campaign underneath an open menu. (Escape closed it above.) */
       return;
     }
     if (k !== 'Enter' && k !== ' ' && k !== 'Spacebar') return;
@@ -1175,8 +1221,8 @@ SM.ui = (function () {
     lastStrings = {};
     paintUpdate();
     refreshScreenToggle();
-    if (els.startQuit && !quitRefused && window.ArcadeExit) {
-      els.startQuit.textContent = exitWord();
+    if (els.startQuit && window.ArcadeExit) {
+      els.startQuitLabel.textContent = quitRefused ? T('menu.closeTab') : exitWord();
     }
     if (els.testerWipe && !wipeTimer) els.testerWipe.textContent = T('tester.wipe');
     if (els.testerName) paintTester();

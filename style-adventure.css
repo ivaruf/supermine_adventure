@@ -612,24 +612,11 @@
   border-color: rgba(255, 200, 190, 0.6);
 }
 
-/* Leaving the game itself, under a hairline that separates it from the three
-   buttons about this expedition. The quietest thing on the card on purpose —
-   and it still arms like the others, because quitting mid-descent drops the
-   hold exactly as aborting does. Armed, it borrows the same red. */
-.sm-btn.sm-ah-quit {
-  margin-top: 15px;
-  padding-top: 16px;
-  border: 0;
-  border-top: 1px solid rgba(142, 155, 171, 0.16);
-  border-radius: 0;
-  background: none;
-  box-shadow: none;
-  color: var(--sm-dim);
-}
-.sm-btn.sm-ah-quit:hover:not(:disabled),
-.sm-btn.sm-ah-quit:focus-visible { color: #cfe0ef; background: rgba(142, 155, 171, 0.08); }
-.sm-btn.sm-ah-quit.sm-ah-armed { color: #ffd8d2; background: rgba(255, 90, 72, 0.16); }
-.sm-btn.sm-ah-quit:disabled { color: var(--sm-dimmer); cursor: default; }
+/* Leaving the game itself: last on the card, with a little more air above it
+   than between the others. Only the geometry is here — its look is shared
+   with the title's copy and lives beside .sm-start-quit further down, where
+   it can win the specificity tie that a rule up here loses. */
+.sm-btn.sm-ah-quit { margin-top: 16px; }
 
 /* THE PAUSE CARD ON A PHONE ON ITS SIDE (hub CLAUDE.md §2: a menu must not
    scroll sideways). The language row made a tall card taller — kicker, title,
@@ -665,7 +652,7 @@
   .sm-ah-pause-card .sm-pause-btn { min-height: 40px; margin-top: 6px; }
   .sm-ah-pause-card .sm-pause-btn:first-of-type { margin-top: 0; }
   .sm-ah-pause-card .sm-ah-pause-note { margin-top: 6px; }
-  .sm-btn.sm-ah-quit { margin-top: 8px; padding-top: 8px; }
+  .sm-btn.sm-ah-quit { margin-top: 10px; }
 }
 
 /* ===========================================================================
@@ -2067,37 +2054,73 @@
 }
 
 /* --- and the ONE button that opts out of it ----------------------------
- * BACK TO ARCADE on the title gate is the only control on any screen here
- * that is not the game: it leaves. A gold hazard plate in the top-left corner
- * shouts as loudly as START does in the middle, which is the wrong order of
- * importance on the screen a player arrives at. So it keeps the plate's shape
- * and the mine's gold, quietly, on the dark it is sitting on.
+ * THE WAY OUT — "Back to arcade", on the title and at the foot of the pause
+ * card — is the one control here that is not the game: it leaves. The hub
+ * makes it the same object in every cabinet (CLAUDE.md §2, "One button, and
+ * it looks and behaves the same in every game"), so both copies share this
+ * one look: SECONDARY, which in this game means the plate's shape and the
+ * mine's gold as an outline on the dark it sits on, never the filled gold
+ * hazard plate every other button wears. Leaving is never the recommended
+ * action, and a filled plate in the title's column would shout as loudly as
+ * PLAY. No hazard sliver either: that stripe says "machinery", and a door is
+ * not machinery.
  *
  * It lives HERE rather than beside its geometry in style.css because the rule
  * above is `.sm-adv .sm-btn:not(.sm-iconbtn)` — three classes, in the later of
  * the two stylesheets — so a colour written in style.css never gets a look in.
- * `.sm-adv .sm-btn.sm-start-quit` ties on specificity and wins on order. */
-.sm-adv .sm-btn.sm-start-quit {
-  color: rgba(255, 194, 31, 0.82);
-  background: rgba(10, 14, 20, 0.72);
-  border-color: rgba(255, 194, 31, 0.30);
+ * `.sm-adv .sm-btn.sm-start-quit` ties on specificity and wins on order. The
+ * pause card's copy used to be styled at two classes in §3 and lost that tie
+ * outright — it was drawn as a full gold plate, the loudest thing on the card,
+ * under a comment calling it the quietest. This is where it is styled now. */
+.sm-adv .sm-btn.sm-start-quit,
+.sm-adv .sm-btn.sm-ah-quit {
+  color: rgba(255, 194, 31, 0.88);
+  background: transparent;
+  border: 1px solid rgba(255, 194, 31, 0.36);
+  border-radius: 4px;
+  box-shadow: none;
   text-shadow: none;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  text-indent: 0;
 }
-/* The hazard sliver is what says "machinery"; a door is not machinery. */
-.sm-adv .sm-btn.sm-start-quit::before { content: none; }
+.sm-adv .sm-btn.sm-start-quit::before,
+.sm-adv .sm-btn.sm-ah-quit::before { content: none; }
 .sm-adv .sm-btn.sm-start-quit:hover:not(:disabled),
-.sm-adv .sm-btn.sm-start-quit:focus-visible {
+.sm-adv .sm-btn.sm-start-quit:focus-visible,
+.sm-adv .sm-btn.sm-ah-quit:hover:not(:disabled),
+.sm-adv .sm-btn.sm-ah-quit:focus-visible {
   color: var(--sm-gold);
-  border-color: rgba(255, 194, 31, 0.6);
+  border-color: rgba(255, 194, 31, 0.66);
+  background: rgba(255, 194, 31, 0.07);
+}
+/* Armed (the pause card's copy is two-tap, because quitting mid-descent drops
+   the hold exactly as aborting does): the same outline, in the abort red. */
+.sm-adv .sm-btn.sm-ah-quit.sm-ah-armed {
+  color: #ffd8d2;
+  border-color: rgba(255, 90, 72, 0.6);
+  background: rgba(255, 90, 72, 0.16);
 }
 /* The adventure-wide disabled rule greys a GOLD plate; this one is already
    dark, so it says its piece in the text instead. */
-.sm-adv .sm-btn.sm-start-quit:disabled {
+.sm-adv .sm-btn.sm-start-quit:disabled,
+.sm-adv .sm-btn.sm-ah-quit:disabled {
   filter: none;
   opacity: 1;
   color: var(--sm-dimmer);
   border-color: var(--sm-border);
 }
+/* As wide as PLAY at every size: the generic compact and tiny button rules in
+   style.css shrink every word-button for the mine's crowded controls, and
+   PLAY's own overrides there put it back; these are the door's. */
+.sm-adv.sm-compact .sm-btn.sm-start-quit {
+  min-width: min(300px, 78vw);
+  min-height: 44px;
+  padding: 10px 18px;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+}
+.sm-adv.sm-tiny .sm-btn.sm-start-quit { min-width: min(280px, 84vw); }
 
 /* DESCEND keeps its own rule as the canonical source of the treatment above. */
 .sm-btn.sm-av-descend {
