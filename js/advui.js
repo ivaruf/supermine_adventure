@@ -562,7 +562,7 @@ SM.advui = (function () {
    * and BACK to the lift when it was opened over a held run. escBack() keeps
    * them in registration order and the handler presses the one that is shown.
    *
-   * ONE PRESS, ONE ANSWER: the title and the sound panel are ui.js's, the
+   * ONE PRESS, ONE ANSWER: the title and the settings menu are ui.js's, the
    * mine is advhud.js's, and this stands down for both — by state, and by
    * `defaultPrevented` should another handler have answered first.
    * ------------------------------------------------------------------ */
@@ -576,7 +576,7 @@ SM.advui = (function () {
   function onKeyDown(e) {
     if (!e || e.defaultPrevented || !current) return;
     if (e.key !== 'Escape' && e.key !== 'Esc') return;
-    if (SM.ui && SM.ui.isSoundOpen && SM.ui.isSoundOpen()) return;
+    if (SM.ui && SM.ui.isMenuOpen && SM.ui.isMenuOpen()) return;
     if (SM.ui && SM.ui.isTitleUp && SM.ui.isTitleUp()) return;
     var list = escBacks[current];
     var b = null;

@@ -59,7 +59,6 @@
  * ======================================================================== */
 #ui-root:not(.sm-adv) .sm-av,
 #ui-root:not(.sm-adv) .sm-ah,
-#ui-root:not(.sm-adv) .sm-ah-btns,
 #ui-root:not(.sm-adv) .sm-ah-pause,
 #ui-root:not(.sm-adv) .sm-stick-layer {
   display: none !important;
@@ -537,34 +536,6 @@
   margin-top: 3px;
 }
 
-/* --- the RUN's two icon buttons, inboard of the page's two --------------
- * ui.js's .sm-corner owns the corner itself now — sound and fullscreen, fixed
- * to the page, on every screen and mid-descent. These two are a different kind
- * of object: they answer "silence this instant" and "stop the run", and they
- * exist only while a run does. So they give the corner up rather than fight
- * for it.
- *
- * WIDE, THEY MOVE LEFT. One row of four, reading in from the right edge:
- * fullscreen, sound, pause, mute — the page's pair outermost because it is the
- * pair that is always there. The offset below is one plate pair (two plates
- * and the 8px between them) plus another 8px so the two pairs read as two.
- * On a phone they move DOWN instead; see the compact block further down, and
- * the reason there (four plates across a 360px top edge would eat the
- * instrument bar).
- * ---------------------------------------------------------------------- */
-.sm-ah-btns {
-  position: absolute;
-  top: var(--sm-top-y);
-  right: calc(var(--sm-gutter) + var(--sm-btn-size) * 2 + 16px);
-  display: flex;
-  gap: 8px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.28s ease;
-  z-index: 8;
-}
-.sm-ah-btns.sm-ah-on { opacity: 1; pointer-events: auto; }
-
 /* --- the adventure pause card ----------------------------------------- */
 .sm-ah-pause {
   position: absolute;
@@ -595,6 +566,9 @@
   text-align: left;
 }
 .sm-ah-pause-stats .sm-cell { padding: 6px 8px; }
+/* The card centres its text; its ENGINE / EFFECTS captions must not, or they
+   float in their gutter instead of starting at the x SPRÅK starts at. */
+.sm-ah-pause-card .sm-sound-label { text-align: left; }
 .sm-ah-pause-stats .sm-cell-value { font-size: 15px; }
 .sm-ah-pause-note {
   font-family: var(--sm-mono);
@@ -2096,7 +2070,8 @@
 }
 /* Armed (the pause card's copy is two-tap, because quitting mid-descent drops
    the hold exactly as aborting does): the same outline, in the abort red. */
-.sm-adv .sm-btn.sm-ah-quit.sm-ah-armed {
+.sm-adv .sm-btn.sm-ah-quit.sm-ah-armed,
+.sm-adv .sm-btn.sm-menu-quit.sm-ah-armed {
   color: #ffd8d2;
   border-color: rgba(255, 90, 72, 0.6);
   background: rgba(255, 90, 72, 0.16);
@@ -2788,7 +2763,7 @@
  * Everything that is a READING goes to the top and reads left to right in
  * descending order of how often it is needed:
  *
- *     FUEL % + bar   HULL   DEPTH   ·   funds (smaller)   ·   sound  pause
+ *     FUEL % + bar   HULL   DEPTH   ·   funds (smaller)   ·   menu sound screen
  *
  * The HOLD keeps the bottom to itself, because it is the only instrument that
  * is also a CONTROL — its rows are the two-tap dump — so it belongs in thumb
@@ -2803,47 +2778,17 @@
  * laid side by side in the top band, with the strip's cells re-ordered by flex
  * `order` rather than by moving anything in advhud.js.
  * ======================================================================== */
-/* THE FOUR PLATES ARE A ROW WHERE THERE IS WIDTH AND A COLUMN WHERE THERE IS
- * NOT, and `.sm-compact` alone cannot tell those apart — a landscape phone and
- * a portrait phone are both compact and want opposite answers here, which is
- * exactly what .sm-portrait is for (see ui.js's applyCompact).
- *
- * PORTRAIT: 390 px of top edge, and the instrument bar measures fuel 148 +
- * strip 105 + icons 80. A second pair across the top would take another 84
- * from a strip already showing three readings on two lines, so instead the
- * run's mute and PAUSE drop one plate-height below ui.js's permanent pair. The
- * reading is top-down there and not right-to-left: the page's pair on the
- * corner, the run's directly under it. Nothing else lives in that strip of the
- * right edge — the hold is bottom-left, the scanner line above it, the warning
- * banner bottom-centre — except the lift panel on a short window, which buys
- * the lane back below.
- *
- * LANDSCAPE (and any short, wide window): 844 px of top edge. Four plates and
- * their gaps are 176 of it and the bar keeps 650, so they stay one row and
- * --sm-ah-icons simply doubles. That matters more here than anywhere: the lift
- * panel hangs from the bottom edge with a 54 px lane along the top, three
- * pixels clear of a SINGLE row of plates, and a second row would have put its
- * dismiss cross back underneath them — the precise bug the bottom-anchoring
- * further down this file was written to fix.
+/* THE THREE CORNER PLATES ARE ONE ROW, IN BOTH ORIENTATIONS, and the bar stops
+ * short of them. They are ui.js's — menu, sound, fullscreen — and they are the
+ * only plates up here: until 2026-10-11 a run added its own mute and PAUSE,
+ * which made four across a landscape top edge and a second row under the
+ * corner in portrait. The hub's corner is three plates and nothing else, so
+ * this is one number for every phone: three plates, the two gaps between
+ * them, the gutter and 6px of air. The lift panel's clear lane along the top
+ * (54 px, bottom-anchored further down) already assumes a single row.
  * ======================================================================== */
 .sm-adv.sm-compact {
-  /* Room for the page's pair alone — portrait keeps the run's pair below it. */
-  --sm-ah-icons: calc(var(--sm-btn-size) * 2 + 8px + var(--sm-gutter) + 6px);
-}
-.sm-adv.sm-compact:not(.sm-portrait) {
-  /* Four plates and the three gaps between them. */
-  --sm-ah-icons: calc(var(--sm-btn-size) * 4 + 24px + var(--sm-gutter) + 6px);
-}
-.sm-adv.sm-compact.sm-portrait .sm-ah-btns {
-  top: calc(var(--sm-top-y) + var(--sm-btn-size) + 8px);
-  right: var(--sm-gutter);
-}
-/* ...and the lift panel's clear lane grows by that second row. It costs
-   nothing on a real phone held upright — 844 px of height means this panel
-   never reaches its max — and it is what keeps the dismiss cross out from
-   under the plates on a short portrait window, where it would. */
-.sm-adv.sm-compact.sm-portrait .sm-ah-lift {
-  max-height: calc(100% - var(--sm-top-y) - var(--sm-btn-size) * 2 - 22px);
+  --sm-ah-icons: calc(var(--sm-btn-size) * 3 + 16px + var(--sm-gutter) + 6px);
 }
 
 /* --- FUEL: top-left, narrow enough to leave room for three more readings -- */

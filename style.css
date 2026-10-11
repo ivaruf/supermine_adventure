@@ -2189,13 +2189,14 @@ textarea,
 .sm-start-quit-label { line-height: 1; }
 
 /* ===========================================================================
- * THE CORNER CLUSTER — PERMANENT, AND FIXED TO THE PAGE
+ * THE CORNER — THREE PLATES, PERMANENT, AND FIXED TO THE PAGE
  * ---------------------------------------------------------------------------
- * Two plates: the speaker that opens the sound panel, and the one that fills
- * the screen. They are the same `.sm-iconbtn` gold-on-dark plate with the same
- * hazard sliver as the in-mine pair, because they are the same kind of object
- * — that stripe is what keeps a 42px button from reading as generic mobile
- * chrome, and it is why these are NOT dressed like the .sm-start-quit door.
+ * Menu, sound, fullscreen, left to right (hub CLAUDE.md §2, "The corner: three
+ * plates, on every screen, and nothing else up there"). The same `.sm-iconbtn`
+ * gold-on-dark plate with the hazard sliver — that stripe is what keeps a 42px
+ * button from reading as generic mobile chrome, and it is why these are NOT
+ * dressed like the .sm-start-quit door. Until 2026-10-11 there were two here
+ * and the run parked two more beside them; see buildCorner() in js/ui.js.
  *
  * THEY NEVER GO ANYWHERE. This was `position: absolute` inside .sm-start,
  * which made it an ornament of the title gate: it existed on one screen out of
@@ -2205,17 +2206,15 @@ textarea,
  * prep, on results and underground.
  *
  * Z-INDEX 30 IS THE WHOLE POINT. This game's layers run: stick 3, instruments
- * 6, lift panel 7, the run's own plates 8, the ride wipe 9, the meta screens
- * 14, the pause card 17, the toast 19, the title 20, and the sound panel 28.
- * These outlive every one of them, so nothing any of them does may cover them
- * — including the panel this cluster opens, which is what lets the speaker be
- * a real toggle (see buildCorner() in js/ui.js).
+ * 6, lift panel 7, the ride wipe 9, the meta screens 14, the pause card 17,
+ * the toast 19, the title 20, and the menu's settings face 28. These outlive
+ * every one of them, so nothing any of them does may cover them — including
+ * either face of the menu the first plate opens, which is what lets a second
+ * press of it close the menu again.
  *
- * WHERE IT SITS. Exactly where the in-mine pair used to: --sm-top-y down and
- * --sm-gutter in, so the two pairs line up as one row on a wide screen and as
- * one column on a phone. (It once had to choose between that row and the
- * title's door in the opposite corner; the door lives in the title's column
- * now, so there is nothing left to choose.)
+ * WHERE IT SITS. --sm-top-y down and --sm-gutter in. The in-mine instrument
+ * bar on a phone stops short of it by --sm-ah-icons (style-adventure.css),
+ * which is sized for exactly these three plates.
  *
  * SAFE AREAS ARE ARITHMETIC NOW, not inheritance: `fixed` positions against
  * the viewport, so #ui-root's padding does not apply and both insets are added
@@ -2238,18 +2237,28 @@ textarea,
    — and pressing it would do nothing at all. */
 .sm-corner .sm-iconbtn[hidden] { display: none; }
 
+/* BOTH STATES ARE DRAWN; aria-pressed PICKS ONE. The speaker carries its waves
+   and its slash, the screen plate its expand and its contract, and ui.js
+   writes aria-pressed in the same breath as the label — so the picture is
+   read off the very attribute a screen reader announces, and cannot drift
+   from it. `.sm-g-up` is the unpressed drawing (audible, windowed),
+   `.sm-g-down` the pressed one (muted, filling the screen). */
+.sm-iconbtn[aria-pressed="true"] .sm-g-up,
+.sm-iconbtn:not([aria-pressed="true"]) .sm-g-down { display: none; }
+
 /* ===========================================================================
- * THE SOUND PANEL — two levels and a way back
+ * THE MENU, SETTINGS FACE — two levels, the language, Back and the way out
  * ---------------------------------------------------------------------------
- * A modal card with its own backdrop, the same shape as the tester panel
- * below. IT IS NO LONGER INSIDE .sm-start: the speaker that opens it is on
- * every screen now, and a panel that the title overlay's `.sm-start-off` could
- * take down with it would have made that speaker a button that does nothing on
- * six screens out of seven. It is a child of #ui-root, like the cluster.
+ * What the three-bar plate opens anywhere a run is not live (underground it
+ * opens the pause card instead). Still classed `.sm-sound*`, because these
+ * rules also dress the ENGINE / EFFECTS rows wherever they appear — the pause
+ * card's copy included — and renaming them buys nothing. A modal card with
+ * its own backdrop, the same shape as the tester panel below; a child of
+ * #ui-root, not of .sm-start, because the plate is on every screen.
  *
  * Z 28: over the title (20), the toast (19), the pause card (17), the meta
  * screens (14) and the whole in-mine HUD — while it is up it is the only thing
- * on screen. BELOW .sm-corner (30) on purpose, so the speaker that opened it
+ * on screen. BELOW .sm-corner (30) on purpose, so the plate that opened it
  * stays lit above its own scrim and a second press closes it.
  *
  * Still `absolute` rather than `fixed`, so the scrim covers #ui-root's padding
@@ -2437,7 +2446,19 @@ textarea,
    things here that are flavour rather than control, so they are what goes,
    exactly as .sm-mode-blurb does at this same breakpoint above. Control
    heights stop at 38: this fires on a phone, where a finger is the pointer. */
+/* THE WAY OUT, LAST ON THE SETTINGS FACE: the title's door (its look is in
+   style-adventure.css beside .sm-start-quit), full column width, with a little
+   more air above it than BACK has. #ui-root, because the compact and tiny
+   rules for the title's door in style-adventure.css would otherwise win
+   on order and give it the title's fixed width. */
+#ui-root .sm-sound-card .sm-btn.sm-menu-quit {
+  width: 100%;
+  min-width: 0;
+  margin-top: 18px;
+}
+
 @media (max-height: 560px) {
+  #ui-root .sm-sound-card .sm-btn.sm-menu-quit { margin-top: 12px; min-height: 40px; }
   .sm-sound-card { padding: 14px 16px 14px; }
   .sm-sound-kicker { display: none; }
   .sm-sound-title { font-size: 22px; letter-spacing: 4px; text-indent: 4px; margin-bottom: 4px; }
@@ -2448,8 +2469,9 @@ textarea,
 }
 
 /* ---------------------------------------------------------------------------
- * THE LANGUAGE ROW — js/i18n.js langRow(), in the sound panel and on the pause
- * card (hub CLAUDE.md §2, "Two languages, Norwegian first")
+ * THE LANGUAGE ROW — js/i18n.js langRow(), on the title screen itself, on the
+ * menu's settings face and on the pause card (hub CLAUDE.md §2, "Two
+ * languages, Norwegian first")
  * ---------------------------------------------------------------------------
  * Laid out as a third row of the sound panel on purpose: the caption takes the
  * same 78px gutter as ENGINE and EFFECTS, so all three controls start at one x
@@ -2520,6 +2542,17 @@ textarea,
 .sm-tiny .sm-lang-label { flex-basis: 66px; letter-spacing: 1.2px; }
 .sm-tiny .sm-lang { gap: 9px; }
 .sm-tiny .sm-btn.sm-lang-btn { gap: 6px; padding: 6px; letter-spacing: 1px; }
+
+/* ON THE TITLE, as wide as PLAY and the door it sits between (the same
+   min(320px, 74vw)), so the column reads as one: the way in, the language,
+   the way out. Left-aligned inside itself so its caption gutter matches the
+   menu's copies. */
+.sm-lang.sm-start-lang {
+  width: min(320px, 74vw);
+  margin-top: 0;
+}
+.sm-compact .sm-lang.sm-start-lang { width: min(300px, 78vw); }
+.sm-tiny .sm-lang.sm-start-lang { width: min(280px, 84vw); }
 
 /* ---------------------------------------------------------------------------
  * TESTER MODE — revealed by the title-gate cheat code (see ui.js)

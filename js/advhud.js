@@ -50,9 +50,10 @@
  *     BOTTOM EDGE  one line: DEPTH · FUNDS · HULL · HEAT, inside the
  *                  safe-area inset, BELOW where a thumb sits on the stick.
  *     ABOVE IT     the scanner contact, between the rails.
- *     TOP EDGE     nothing but icon plates in the corner: ui.js's permanent
- *                  pair (sound, fullscreen) on the corner itself and this
- *                  HUD's own mute and PAUSE on the row directly beneath them.
+ *     TOP EDGE     nothing but ui.js's three corner plates (menu, sound,
+ *                  fullscreen), the same on every screen. This HUD has no
+ *                  plates of its own up there any more: the menu plate IS
+ *                  pause, and the speaker IS the mute.
  *                  The shaft, and the daylight at the end of it, is clear.
  *
  *   WIDE — THE STACK, UNCHANGED. At 1440x900 the stack is a 560 px column
@@ -74,7 +75,7 @@
  *   2. Never measure. There is not one offsetWidth/getBoundingClientRect read
  *      in this file. Bars are driven by a --var and scaled by the stylesheet.
  *   3. Read-only. This module polls SM.adv and SM.scanner. The only writes are
- *      user actions: the pause button, and a two-tap confirm on a manifest row
+ *      user actions: the pause card, and a two-tap confirm on a manifest row
  *      that calls SM.adv.dump() — "dump the coal" is the decision the manifest
  *      exists to support, and making it from the HUD is the whole point.
  *
@@ -84,7 +85,10 @@
  *   which aborts and then closes the campaign back to the title screen.
  *   Plain words, the hub's glossary (games/CLAUDE.md §2): they were ABORT RUN
  *   and LEAVE EXPEDITION until the languages arrived. The card also carries
- *   the language row (I18N.langRow), and a switch repaints it in place.
+ *   ENGINE and EFFECTS (built by SM.ui.buildVolumes, so they are the same
+ *   control as the settings face's), the language row (I18N.langRow) and the
+ *   way out, last; a language switch repaints it in place. It is what ui.js's
+ *   three-bar plate opens underground — there is no pause plate here.
  *   The simulation is gated with SM.main.setPaused(true/false) as usual.
  * ========================================================================== */
 
@@ -143,8 +147,6 @@ SM.advhud = (function () {
    * file.
    * ------------------------------------------------------------------ */
   var ICONS = {
-    pause: '<rect x="7.2" y="4.6" width="3.7" height="14.8" rx="1.1" fill="currentColor" stroke="none"/>' +
-           '<rect x="13.1" y="4.6" width="3.7" height="14.8" rx="1.1" fill="currentColor" stroke="none"/>',
     play: '<path d="M7.8 4.7 19.4 12 7.8 19.3z" fill="currentColor" stroke="none"/>',
     home: '<path d="M3.4 20.4h17.2"/><path d="M12 3.6v7.2"/>' +
           '<path d="M6.6 10.8h10.8v9.6H6.6z"/><path d="m7.4 3.6 9.2 7.2M16.6 3.6 7.4 10.8"/>',
@@ -156,10 +158,6 @@ SM.advhud = (function () {
      * game (CLAUDE.md §2, "One button..."). It replaced a shaft-and-arrow of
      * our own: this one control is the same object in every cabinet. */
     back: '<path d="M19 12H5m6-6-6 6 6 6"/>',
-    sound_on: '<path d="M4.4 9.4h3.3l4.9-4.1v13.4l-4.9-4.1H4.4z"/>' +
-              '<path d="M15.7 9.2a3.9 3.9 0 0 1 0 5.6"/><path d="M18.3 6.5a7.6 7.6 0 0 1 0 11"/>',
-    sound_off: '<path d="M4.4 9.4h3.3l4.9-4.1v13.4l-4.9-4.1H4.4z"/>' +
-               '<path d="m16.2 9.6 5.2 4.8M21.4 9.6l-5.2 4.8"/>',
     /* The manifest drawer's handle. A stack of lines is the one glyph that
      * reads as "a list of what is in there" at 12 px on a 48 px rail. */
     manifest: '<path d="M4.6 6.4h14.8M4.6 12h14.8M4.6 17.6h14.8"/>',
@@ -701,33 +699,11 @@ SM.advhud = (function () {
     els.rideTitle = el('div', 'sm-ah-ride-title', els.rideInner, '');
     els.rideSub = el('div', 'sm-ah-ride-sub', els.rideInner, '');
 
-    /* --- the RUN's two controls, inboard of the page's two ---------------
-     * ui.js owns the corner itself now: its sound and fullscreen plates are
-     * fixed there on every screen and never leave. These two are different in
-     * kind — silence this instant, and stop the run — and they exist only
-     * while a run does, so they give the corner up and sit inside it. Wide
-     * that means one row of four reading fullscreen, sound, pause, mute from
-     * the right edge inwards; on a phone there is no width for four across the
-     * top, so they drop to the row beneath instead and the page's pair stays
-     * on the corner. Both arrangements are in style-adventure.css. */
-    var btns = el('div', 'sm-ah-btns', root);
-    els.btns = btns;
-    /* Own class names, NOT ui.js's sm-btn-sound / sm-btn-pause: both HUDs are
-     * in the DOM at the same time and a shared class would make
-     * querySelector('.sm-btn-pause') a coin toss for anything that looks. */
-    els.mute = iconButton(btns, 'sm-ah-sound', ICONS.sound_on, 'menu.soundOnOff');
-    els.pauseBtn = iconButton(btns, 'sm-ah-pausebtn', ICONS.pause, 'menu.pause');
-    els.mute.addEventListener('click', function (e) {
-      e.preventDefault();
-      if (SM.sound && SM.sound.toggleMute) SM.sound.toggleMute();
-      refreshMute();
-      els.mute.blur();
-    });
-    els.pauseBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      els.pauseBtn.blur();
-      openPause();
-    });
+    /* NO PLATES OF THIS HUD'S OWN. It used to park a mute and a PAUSE beside
+     * ui.js's corner pair from the first descent — four plates, two speakers
+     * meaning different things. The hub's corner is three plates and nothing
+     * else (CLAUDE.md §2): ui.js's menu plate opens the pause card below, and
+     * its speaker is the mute, on every screen including this one. */
 
     /* --- the adventure pause card ---------------------------------------
      * Deliberately a sibling of the HUD, not a child: the HUD dims behind it
@@ -743,11 +719,18 @@ SM.advhud = (function () {
     els.psFuel = statCell(els.pauseStats, 'pause.fuel', '0%');
     els.psHold = statCell(els.pauseStats, 'pause.hold', '0%');
 
+    /* ENGINE AND EFFECTS, ON THE CARD ITSELF. This is the menu the three-bar
+     * plate opens underground, and the hub puts the volumes behind that plate
+     * and nowhere else — there is no sound panel to go to any more. ui.js
+     * builds them, so they are one control with the settings face's copy;
+     * dragging one auditions it and lifts the mute, as there. */
+    if (SM.ui && SM.ui.buildVolumes) els.pauseVol = SM.ui.buildVolumes(card, 'pause');
+
     /* THE LANGUAGE ROW. The hub wants it behind the menu plate as well as on
      * the way in, and this card is this game's menu. Switching repaints the
      * card in place: it does not close, and the run stays paused. js/i18n.js
-     * builds the row (the second copy is in ui.js's sound panel, hence the
-     * 'pause' id suffix on the flag's clipPaths). */
+     * builds the row (other copies sit on the title and on ui.js's settings
+     * face, hence the 'pause' id suffix on the flag's clipPaths). */
     els.pauseLang = I18N.langRow(card, 'pause');
 
     els.btnResume = menuButton(card, 'sm-btn-primary', ICONS.play, 'menu.resume');
@@ -866,28 +849,28 @@ SM.advhud = (function () {
     btn.smDisarm = disarm;
   }
 
-  function refreshMute() {
-    if (!els.mute) return;
-    var muted = !!(SM.sound && SM.sound.isMuted && SM.sound.isMuted());
-    els.mute.innerHTML = glyph(muted ? ICONS.sound_off : ICONS.sound_on);
-    setClass('mute', els.mute, 'sm-btn-off', muted);
-  }
-
   /* =====================================================================
    * PAUSE
    * ================================================================== */
+  /** -> true when the card is up after the call. ui.js's three-bar plate
+   *  reads that: false means there is no run to pause here, and the plate
+   *  opens the settings face of the menu instead. */
   function openPause() {
-    if (pauseOpen || !visible) return;
+    if (pauseOpen) return true;
+    if (!visible) return false;
     // main.js returns the RESULTING state, so a refused pause is visible on
     // the spot. Only an explicit false is a refusal; a partial merge that
     // returns nothing must still get a working card.
-    if (SM.main && SM.main.setPaused && SM.main.setPaused(true) === false) return;
+    if (SM.main && SM.main.setPaused && SM.main.setPaused(true) === false) return false;
     pauseOpen = true;
     if (SM.joystick && SM.joystick.reset) SM.joystick.reset();   // never freeze mid-push
     if (SM.sound && SM.sound.play) SM.sound.play('ui');
     els.pause.classList.add('sm-ah-pause-on');
     els.root.classList.add('sm-ah-paused');
     paintPauseStats();
+    if (SM.ui && SM.ui.paintVolumes) SM.ui.paintVolumes();
+    if (SM.ui && SM.ui.paintMenuPlate) SM.ui.paintMenuPlate();
+    return true;
   }
 
   function closePause(silent) {
@@ -899,6 +882,7 @@ SM.advhud = (function () {
     if (SM.main && SM.main.setPaused) SM.main.setPaused(false);
     els.pause.classList.remove('sm-ah-pause-on');
     els.root.classList.remove('sm-ah-paused');
+    if (SM.ui && SM.ui.paintMenuPlate) SM.ui.paintMenuPlate();
   }
 
   function paintPauseStats() {
@@ -913,7 +897,8 @@ SM.advhud = (function () {
    * ESCAPE AND P, UNDERGROUND. The hub's rule (CLAUDE.md §2, "Escape goes one
    * step back") in this HUD's states, in the order they stack on screen:
    *
-   *   ui.js's sound panel  -> not ours; ui.js closes it (see below)
+   *   ui.js's settings face -> not ours, and never up underground (the menu
+   *                           plate opens THIS card while a run is live)
    *   pause card open      -> close it, the run carries on
    *   lift panel open      -> its cross: leave the cage, back into the rock.
    *                           The lift is a sub-panel and that cross is its
@@ -937,13 +922,10 @@ SM.advhud = (function () {
     var k = e.key;
     var esc = (k === 'Escape' || k === 'Esc');
     if (!esc && k !== 'p' && k !== 'P') return;
-    /* THE MIXER TAKES THE KEY FIRST. ui.js's sound panel is permanent chrome
-     * and opens over a live descent, so underground one Escape would otherwise
-     * be answered twice: ui.js closing the panel and this handler RESUMING the
-     * run behind it — a mine back in motion under a scrim the player is still
-     * looking at. Opening that panel pauses us on purpose (see ui.js's
-     * openSound); leaving it is not the gesture that undoes that. */
-    if (SM.ui && SM.ui.isSoundOpen && SM.ui.isSoundOpen()) return;
+    /* Belt and braces: ui.js's settings face cannot be open over a live run
+     * (its plate opens this card instead), but if it ever were, its Escape is
+     * ui.js's to answer and must not also resume a run behind it. */
+    if (SM.ui && SM.ui.isMenuOpen && SM.ui.isMenuOpen()) return;
     e.preventDefault();
     if (e.repeat) return;
     if (pauseOpen) { closePause(); return; }
@@ -1953,7 +1935,6 @@ SM.advhud = (function () {
        * other is free. */
       SM.events.on('adv:state', onState);
       SM.events.on('game:paused', onGamePaused);
-      SM.events.on('sound:muted', refreshMute);
       SM.events.on('adv:cargofull', function () {
         alertKind('full', ['hud.holdFull'], ['hud.holdFullSub'], 2.6);
       });
@@ -2137,7 +2118,6 @@ SM.advhud = (function () {
         if (els.btnAbort && els.btnAbort.smDisarm) els.btnAbort.smDisarm();
       }, false);
     }
-    refreshMute();
   }
 
   function onState(p) {
@@ -2171,8 +2151,6 @@ SM.advhud = (function () {
     visible = true;
     reset();
     els.root.classList.add('sm-ah-on');
-    els.btns.classList.add('sm-ah-on');
-    refreshMute();
   }
 
   function hide() {
@@ -2185,7 +2163,6 @@ SM.advhud = (function () {
     hideLift();
     clearRide();
     els.root.classList.remove('sm-ah-on');
-    els.btns.classList.remove('sm-ah-on');
   }
 
   function reset() {

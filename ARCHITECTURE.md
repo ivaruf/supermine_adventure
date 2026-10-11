@@ -96,8 +96,8 @@ between (say) camera and vehicle are fine.
 **Before all of them, in `<head>`: `js/i18n.js` → `window.I18N`** (not on
 `SM`). It is the hub-wide language contract (games/CLAUDE.md §2, "Two
 languages"): `t(key, ...args)`, `getLang()`, `setLang()`, `paintStatic()`,
-plus `langRow()` for the Språk/Language row the sound panel and the pause card
-both carry. Bokmål unless `arcade.lang.v1` says `"en"`. Every word a player
+plus `langRow()` for the Språk/Language row the title screen, the menu's
+settings face and the pause card all carry. Bokmål unless `arcade.lang.v1` says `"en"`. Every word a player
 reads goes through `I18N.t`; a switch repaints `[data-i18n]` nodes and then
 fires `arcade:lang` on `document`, which every module that writes text at
 runtime listens for and re-renders what it is showing — never changing screen,
@@ -504,15 +504,17 @@ SM.ui.showTitle() / leaveAdventure()   // SM.adv.close() calls the latter
 SM.ui.isTitleUp() / getRoot()
 ```
 
-Four jobs now. The **title gate**, which since the corner cluster landed also
-owns the **top-right pair** (a speaker that opens the sound panel, and a plate
-that fills the screen) and the **sound panel** behind the speaker. Both are
-built here because `index.html` is frozen and this file already builds every
-control on that screen; the screen toggle is deliberately not in a file named
-for its API — see the section header for the blocklist that decided that. The
-cluster belongs to the title and leaves with it: from the first descent the
-top-right corner is `advhud`'s `.sm-ah-btns`, and two clusters cannot have one
-corner. Then the **layout switch**
+Four jobs now. The **title gate** (with the language row in its own column,
+above Back to arcade), and with it the **corner** — the hub's three plates,
+menu, a live mute and fullscreen, fixed to the page on every screen including
+underground — and the menu's **settings face** behind the three bars
+(ENGINE, EFFECTS, language, Back, Back to arcade). Underground the three bars
+open `advhud`'s pause card instead, which builds its own copy of the sliders
+through `SM.ui.buildVolumes()`; `advhud` has no plates of its own any more.
+All of it is built here because `index.html` is frozen and this file already
+builds every control on that screen; the screen toggle is deliberately not in
+a file named for its API — see the section header for the blocklist that
+decided that. Then the **layout switch**
 (`applyCompact()` publishes `sm-compact` / `sm-tiny` / `sm-portrait` on
 `#ui-root`, and the entire phone layout hangs off those three classes — nothing
 else sets them), and the **PWA** registration with its opt-in UPDATE READY

@@ -16,19 +16,23 @@
  *    one gesture and then hand the screen to SM.adv.open(). It is deliberately
  *    plain — see buildTitle(), which is where the real splash goes.
  *
- * 1b. THE CORNER CLUSTER AND THE SOUND PANEL are built here and belong to the
- *    PAGE, not to that gate: a speaker that opens two volume sliders (ENGINE
- *    and EFFECTS), and a plate that fills the screen. Both are appended to
- *    #ui-root and fixed above every other layer, so they are in the same place
- *    on the title, in the slot picker, on the map, in the workshop, on the
- *    prep screen, on results and underground. They used to hang off the title
- *    overlay and leave with it, which made fullscreen unreachable on six
- *    screens out of seven. They are in THIS file rather than a module of their
- *    own because index.html is frozen and this file already builds every
- *    control on this screen — and the screen toggle is deliberately NOT in a
- *    file named for its API, which would be blocked across the whole of
- *    github.io by a blocker's default list. See buildCorner() and the FILLING
- *    THE SCREEN section for both arguments in full.
+ * 1b. THE CORNER AND THE MENU PANEL are built here and belong to the PAGE,
+ *    not to that gate. The corner is the hub's three plates, the same in every
+ *    cabinet (CLAUDE.md §2, "The corner: three plates, on every screen, and
+ *    nothing else up there"): MENU (three bars), SOUND (a live mute) and
+ *    FULLSCREEN, left to right, on the title, in the slot picker, on the map,
+ *    in the workshop, on the prep screen, on results and underground. MENU
+ *    opens the game's one menu: underground that is advhud's pause card, which
+ *    stops the run; everywhere else it is this file's SETTINGS face of the same
+ *    menu — ENGINE and EFFECTS, the language, Back, and the way out. Until
+ *    2026-10-11 the corner was a speaker that opened a volume panel, and a
+ *    run added its own mute and PAUSE beside it: four plates, two of them
+ *    speakers meaning different things. They are in THIS file rather than a
+ *    module of their own because index.html is frozen and this file already
+ *    builds every control on this screen — and the screen toggle is
+ *    deliberately NOT in a file named for its API, which would be blocked
+ *    across the whole of github.io by a blocker's default list. See
+ *    buildCorner() and the FILLING THE SCREEN section for both arguments.
  *
  * 2. THE LAYOUT SWITCH.  applyCompact() publishes `sm-compact` / `sm-tiny` /
  *    `sm-portrait` on #ui-root, and style-adventure.css hangs the entire phone
@@ -79,7 +83,7 @@ SM.ui = (function () {
    * behind (v2.8.0 against sw.js's v2.9.1), which only ever shows on a
    * file:// or first-visit load — exactly the two cases where nobody can
    * check it against anything, so a wrong number there is worse than none. */
-  var GAME_VERSION    = 'v2.13.0';
+  var GAME_VERSION    = 'v2.14.0';
 
   /* TESTER MODE — the title-gate cheat code, old-school. Typed on the title
    * screen it reveals the TESTER MODE button; the unlock persists in
@@ -94,29 +98,33 @@ SM.ui = (function () {
   var TESTER_NAME = 'TEST RIG';  // the tester company's fixed name
 
   /* ---------------------------------------------------------------------
-   * GLYPHS — 24x24 line art, the same discipline js/advhud.js uses.
+   * GLYPHS — the hub's corner set, TO THE PATH DATA (CLAUDE.md §2, "The
+   * corner: three plates"), on a 24x24 viewBox, stroked with fill:none.
    * ---------------------------------------------------------------------
-   * They are a COPY of advhud's set rather than a shared one, in the same
-   * direction and for the same reason its own header gives: neither module
-   * exports its icons, and three path strings is a cheaper price than a new
-   * cross-module contract between the title gate and the in-mine HUD. The
-   * speaker below is deliberately byte-identical to advhud's `sound_on` — the
-   * two plates mean different things (that one mutes, this one opens the
-   * panel), but they are the same machine and must not be drawn twice.
+   * They used to be this game's own drawings — a chunkier speaker, corners
+   * cut a little differently — and a player crossing from the next cabinet
+   * was looking at a family resemblance rather than the same object. The
+   * colour, the gold-on-dark plate and the stroke width are still the mine's;
+   * the shapes are everybody's.
+   *
+   * BOTH STATES OF EACH TOGGLE LIVE IN ONE <svg>. The waves and the slash are
+   * both drawn into the speaker, the expand and the contract both into the
+   * screen plate, and style.css picks between them off aria-pressed —
+   * `.sm-g-up` is drawn while the plate is not pressed (audible, windowed),
+   * `.sm-g-down` while it is (muted, filling the screen) — which
+   * the JS writes in the same breath as the label, so what is engraved and
+   * what a screen reader hears cannot drift apart. advhud.js keeps its own
+   * set for the pause card's actions; nothing there draws a corner plate.
    * ------------------------------------------------------------------ */
   var UI_ICONS = {
-    sound_on: '<path d="M4.4 9.4h3.3l4.9-4.1v13.4l-4.9-4.1H4.4z"/>' +
-              '<path d="M15.7 9.2a3.9 3.9 0 0 1 0 5.6"/><path d="M18.3 6.5a7.6 7.6 0 0 1 0 11"/>',
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
 
-    /* Filling the screen, and leaving it: four corners pushing out, and the
-       same four pulled in. The pressed state swaps the glyph rather than only
-       the colour, exactly as the HUD speaker does — colour alone is not a
-       state, and this plate has to be readable on a phone in a dark room. */
-    expand: '<path d="M9.4 3.6H3.6v5.8M14.6 3.6h5.8v5.8"/>' +
-            '<path d="M3.6 14.6v5.8h5.8M20.4 14.6v5.8h-5.8"/>',
+    sound: '<path d="M11 5 6 9H3v6h3l5 4Z"/>' +
+           '<path class="sm-g-up" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>' +
+           '<path class="sm-g-down" d="m15.5 9.5 6 5m0-5-6 5"/>',
 
-    contract: '<path d="M3.6 9.4h5.8V3.6M20.4 9.4h-5.8V3.6"/>' +
-              '<path d="M3.6 14.6h5.8v5.8M20.4 14.6h-5.8v5.8"/>',
+    screen: '<path class="sm-g-up" d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6"/>' +
+            '<path class="sm-g-down" d="M3 9h6V3M21 9h-6V3M3 15h6v6M21 15h-6v6"/>',
 
     /* The way out of the game: the hub's shared back arrow, TO THE PATH DATA
      * (CLAUDE.md §2, "One button, and it looks and behaves the same in every
@@ -154,8 +162,8 @@ SM.ui = (function () {
   var codeAt = 0;               // progress through TESTER_CODE
   var wipeTimer = 0;            // two-tap confirm on WIPE
 
-  /* --- the mixing panel, behind the corner speaker --- */
-  var soundOpen = false;
+  /* --- the settings face of the menu, behind the three-bar plate --- */
+  var menuOpen = false;
 
   var lastStrings = {};
 
@@ -309,17 +317,28 @@ SM.ui = (function () {
 
     els.version = el('div', 'sm-start-version', els.start, GAME_VERSION);
 
+    /* THE LANGUAGE, ON THIS SCREEN AND IN PLAIN SIGHT, directly above the way
+     * out (CLAUDE.md §2, "Two languages", *Where*). It used to live only in
+     * the panel behind the corner speaker, and the owner opened this game,
+     * looked at a title in Norwegian and could not find English at all. The
+     * player who needs this row most is exactly the one who cannot read the
+     * screen it is on, so it cannot be behind anything. `title` keeps this
+     * copy's flag clipPath ids apart from the menu's and the pause card's.
+     * langRow stops its own clicks, so a tap here never starts a descent. */
+    els.startLang = I18N.langRow(sc, 'title');
+    els.startLang.classList.add('sm-start-lang');
+
     buildArcadeExit(sc);
     buildCorner();
     buildTester();
-    /* The cluster and the panel are built HERE, with the rest of this screen's
+    /* The corner and the menu are built HERE, with the rest of this screen's
      * controls, but they are appended to #ui-root rather than to the overlay —
-     * they outlive it now. DOM order no longer decides what paints over what
+     * they outlive it. DOM order no longer decides what paints over what
      * (advhud and advui append to the same root long after this runs), so both
      * carry a real z-index; see .sm-corner and .sm-sound in style.css. The
      * tester card is still a child of the overlay and still never opens
-     * alongside the mixer — each opener closes the other. */
-    buildSoundPanel();
+     * alongside the menu — each opener closes the other. */
+    buildMenuPanel();
 
     /* CLICK, not pointerdown. A pointerdown+click pair on the same element
      * fires twice, and the second one arrived after the overlay had already
@@ -421,86 +440,94 @@ SM.ui = (function () {
     });
   }
 
-  /** The title's way out. The button and Escape on the title both come
-   *  through here, so they are one action and cannot drift apart. */
+  /** The title's way out. The button, Escape on the title and the menu's
+   *  copy all come through here, so they are one action and cannot drift. */
   function startQuit() {
     if (!els.startQuit || els.startQuit.disabled) return;
     window.ArcadeExit.quit().then(function (how) {
       // Refused means the browser would not close a tab it did not open.
-      // Say so where the button is, rather than leaving it looking dead.
+      // Say so where the buttons are, rather than leaving them looking dead —
+      // both of this file's copies, the title's and the menu's.
       if (how !== 'refused') return;
       quitRefused = true;
-      els.startQuitLabel.textContent = T('menu.closeTab');
+      paintQuitLabels();
       els.startQuit.disabled = true;
+      if (els.menuQuit) els.menuQuit.disabled = true;
     });
   }
 
   /* ---------------------------------------------------------------------
-   * THE CORNER CLUSTER — PERMANENT CHROME, FIXED TO THE PAGE
+   * THE CORNER — THREE PLATES, PERMANENT, FIXED TO THE PAGE
    * ---------------------------------------------------------------------
-   * Two square plates: the speaker that opens the sound panel, and the plate
-   * that fills the screen. The two things here that are about the HARDWARE
-   * rather than about the mine, together, in the corner.
+   * MENU, SOUND, FULLSCREEN, reading left to right, so fullscreen is the one
+   * in the actual corner (CLAUDE.md §2). Three kinds of thing, and that is the
+   * whole shape: fullscreen changes the window, sound changes the sound, and
+   * only the menu touches the game.
    *
-   * THE SPEAKER IS NOT A MUTE BUTTON and carries no slash. advhud's speaker
-   * mutes; this one opens a panel, and the two must not look like the same
-   * control doing different things. It reuses `.sm-iconbtn` — the game's own
-   * gold-on-dark plate with the hazard sliver — which is what keeps a 42px
-   * button from reading as generic mobile chrome.
+   *   MENU   opens the one menu. Underground it is advhud's pause card, which
+   *          stops the run and carries RESUME; anywhere else it is the
+   *          settings face below, which has nothing to resume. It IS pause —
+   *          there is no other pause plate in this game any more.
+   *   SOUND  mutes and unmutes, one tap, live: nothing opens, nothing pauses,
+   *          focus does not move. A player silencing the room because
+   *          somebody walked in must not lose the descent they are on.
+   *   SCREEN as described in FILLING THE SCREEN below.
    *
-   * IT USED TO BELONG TO THE TITLE GATE and leave with it, which meant it
-   * existed on exactly one screen out of seven: not in the slot picker, not on
-   * the map, not in the workshop, not on the prep screen, not on results, and
-   * not underground — where filling the glass matters most. A control that
-   * goes away when the screen changes is not a corner; it is a menu item that
-   * happens to sit in one. So it is a CHILD OF #ui-root now, `position: fixed`
-   * and above every layer this game has (see .sm-corner in style.css), and the
-   * same two plates are in the same place on all seven.
+   * WHAT WENT. Until 2026-10-11 this corner held a speaker that OPENED a
+   * volume panel, and from the first descent advhud parked its own mute and
+   * PAUSE beside it — four plates, two of them speakers that meant different
+   * things. The owner's screenshot read it exactly: "one mute and one sound
+   * menu" side by side. The speaker is a mute now, the volumes live in the
+   * menu, and advhud's pair is gone outright, so nothing on this edge changes
+   * between the title and 600 m down.
    *
-   * WHAT IT SHARES THE CORNER WITH. From the first descent, advhud's
-   * `.sm-ah-btns` pair — mute and PAUSE — is in this corner too, and it stays:
-   * those answer different questions (silence this instant; stop the run) and
-   * they exist only while a run does. They move INBOARD instead. Wide, the
-   * four sit in one row and read, from the right edge inwards: fullscreen,
-   * sound, pause, mute — the page's pair outermost. On a phone there is no
-   * room for four across the top without eating the instrument bar, so the
-   * run's pair drops to the row beneath and the reading is top-down instead:
-   * the page's pair on the corner, the run's directly under it. Both
-   * arrangements live in style-adventure.css beside .sm-ah-btns.
+   * IT IS A CHILD OF #ui-root, `position: fixed` and above every layer this
+   * game has (see .sm-corner in style.css), because a control that goes away
+   * when the screen changes is not a corner; it is a menu item that happens
+   * to sit in one. It reuses `.sm-iconbtn` — the game's own gold-on-dark
+   * plate with the hazard sliver — which is what keeps a 42px button from
+   * reading as generic mobile chrome.
    *
-   * SAFE AREAS ARE ARITHMETIC NOW, not inheritance: `fixed` positions against
-   * the viewport, so #ui-root's padding no longer applies and .sm-corner adds
-   * both insets back by hand. It lines up with the run's plates, which is the
-   * row it has to share on six screens out of seven. (The title's door used
-   * to sit in the opposite corner; it is the last row of the title's column
-   * now, see buildArcadeExit().)
+   * SAFE AREAS ARE ARITHMETIC, not inheritance: `fixed` positions against the
+   * viewport, so #ui-root's padding does not apply and .sm-corner adds both
+   * insets back by hand.
    * ------------------------------------------------------------------ */
   function buildCorner() {
     els.corner = el('div', 'sm-corner', root);
-    /* Nothing above this cluster starts a descent any more — it is no longer
-     * inside els.start, and it paints above it — but the crack between the two
-     * plates is still a click on a container, and swallowing it costs one
-     * line. Kept as insurance against whatever ends up under here next. */
+    /* Nothing under this cluster should start a descent: the crack between
+     * two plates is still a click on a container, and swallowing it costs one
+     * line. */
     els.corner.addEventListener('click', function (e) { e.stopPropagation(); });
 
-    els.mixBtn = iconButton(els.corner, 'sm-btn-mix', UI_ICONS.sound_on, 'menu.soundAria');
-    els.mixBtn.setAttribute('aria-expanded', 'false');
-    els.mixBtn.addEventListener('click', function (e) {
+    els.menuBtn = iconButton(els.corner, 'sm-btn-menu', UI_ICONS.menu, 'menu.menu');
+    els.menuBtn.setAttribute('aria-haspopup', 'dialog');
+    els.menuBtn.setAttribute('aria-expanded', 'false');
+    els.menuBtn.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      els.mixBtn.blur();
-      /* A TOGGLE, because the plate now paints ABOVE the panel it opens. It
-       * used to vanish under the sound panel's scrim, so "press it again" was
-       * not a gesture that existed; now it is the obvious one, and
-       * aria-expanded has been claiming it all along. */
-      if (soundOpen) closeSound(); else openSound();
+      els.menuBtn.blur();
+      onMenuPlate();
     });
+
+    /* Its words follow its state, so refreshMute() owns them, not paintStatic. */
+    els.muteBtn = iconButton(els.corner, 'sm-btn-mute', UI_ICONS.sound, 'menu.mute');
+    els.muteBtn.removeAttribute('data-i18n-label');
+    els.muteBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      /* blur, not focus elsewhere: the plate is the thing that was pressed and
+       * nothing else on screen asked for the keyboard. */
+      els.muteBtn.blur();
+      if (SM.sound && SM.sound.toggleMute) SM.sound.toggleMute();
+      refreshMute();
+    });
+    refreshMute();
 
     /* HIDDEN IN THE MARKUP THIS BUILDS, and un-hidden by initScreenToggle()
      * only once a working request/exit PAIR has answered. Safari on iPhone has
      * no element fullscreen at all, and a plate that does nothing when pressed
-     * is worse than no plate. A shrunk cluster is a fine outcome. */
-    els.screen = iconButton(els.corner, 'sm-btn-screen', UI_ICONS.expand, 'menu.fullscreen');
+     * is worse than no plate. A two-plate corner is a fine outcome. */
+    els.screen = iconButton(els.corner, 'sm-btn-screen', UI_ICONS.screen, 'menu.fullscreen');
     /* Its words follow its state, not a fixed key — refreshScreenToggle()
      * owns them, and paintStatic must not put "Fullscreen" back on a plate
      * that is currently offering the way out of it. */
@@ -509,95 +536,191 @@ SM.ui = (function () {
     els.screen.hidden = true;
   }
 
-  /* ---------------------------------------------------------------------
-   * THE SOUND PANEL — two levels and a way back
-   * ---------------------------------------------------------------------
-   * A modal card with its own backdrop. IT IS A CHILD OF #ui-root, NOT OF
-   * .sm-start, and that moved with the speaker: while it lived inside the
-   * title overlay, `.sm-start-off` took it down with the title, so the panel
-   * could only ever be seen from the one screen the old cluster was on. With
-   * the plate on all seven screens that arrangement would have turned the
-   * speaker into a button that silently does nothing on six of them, which is
-   * worse than not having it. It is a sibling of the title and of the meta
-   * screens now, above both (see .sm-sound in style.css).
+  /** The speaker's one writer: aria-pressed (which CSS reads to pick waves or
+   *  slash) and the words, in the same breath, so they cannot drift. Also
+   *  called off `sound:muted`, because the M key and a slider drag both
+   *  change the mute without touching this plate. */
+  function refreshMute() {
+    if (!els.muteBtn) return;
+    var muted = !!(SM.sound && SM.sound.isMuted && SM.sound.isMuted());
+    var label = T(muted ? 'menu.unmute' : 'menu.mute');
+    els.muteBtn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+    els.muteBtn.setAttribute('aria-label', label);
+    els.muteBtn.setAttribute('title', label);
+    els.muteBtn.classList.toggle('sm-btn-off', muted);
+  }
+
+  /**
+   * THE THREE BARS. One plate, one menu, whichever screen it is pressed on.
    *
-   * It still stops click propagation once at its root, which covers every
-   * control inside it, and tapping the backdrop still closes it — exactly as
-   * the tester panel's does.
+   * Underground the menu is advhud's pause card: it pauses (this game is
+   * always yours to pause — there is no network here), and pressing the plate
+   * again closes it, exactly as Escape does. openPause() refuses itself when
+   * the HUD is not up, and says so by returning false, which is how this
+   * knows to fall through to the settings face on every other screen.
+   */
+  function onMenuPlate() {
+    var hud = SM.advhud;
+    if (hud && hud.isPaused && hud.isPaused()) { hud.closePause(); return; }
+    if (menuOpen) { closeMenu(); return; }
+    if (hud && hud.openPause && hud.openPause() === true) return;
+    openMenu();
+  }
+
+  /** advhud tells us when its card opens and closes, so the plate's
+   *  aria-expanded is right whichever face of the menu is up. */
+  function paintMenuPlate() {
+    if (!els.menuBtn) return;
+    var hudOpen = !!(SM.advhud && SM.advhud.isPaused && SM.advhud.isPaused());
+    els.menuBtn.setAttribute('aria-expanded', (menuOpen || hudOpen) ? 'true' : 'false');
+  }
+
+  /* ---------------------------------------------------------------------
+   * THE MENU, SETTINGS FACE — ENGINE, EFFECTS, LANGUAGE, BACK, THE WAY OUT
+   * ---------------------------------------------------------------------
+   * What the three bars open on every screen that is not a live descent: the
+   * title, the slot picker, the map, the workshop, prep, results. It is the
+   * same menu as advhud's pause card with nothing to resume, so it carries the
+   * same settings rows (built by buildVolumes() below for both) and the same
+   * way out, last, with a little more air above it.
+   *
+   * IT IS A CHILD OF #ui-root, NOT OF .sm-start: the plate that opens it is on
+   * every screen, and a panel the title overlay's `.sm-start-off` could take
+   * down with it would make that plate a button that does nothing on six
+   * screens out of seven. It still stops click propagation once at its root,
+   * which covers every control inside it, and tapping the backdrop closes it.
    *
    * WHY TWO SLIDERS AND NOT ONE SWITCH. The mine had a single mute: you could
    * kill the whole thing or live with it, and there was no way to keep the
    * engine down while the rock still answered. ENGINE is the drone and the
    * cutter — the two permanently-running nodes that hum under every second of a
-   * descent. EFFECTS is everything discrete: deposits cracking, collapses, the
-   * refusal, the loot ladder, the cab's own blips. js/sound.js's header carries
-   * the full argument, including why this game's `music` key governs an engine.
+   * descent. EFFECTS is everything discrete. js/sound.js's header carries the
+   * full argument, including why this game's `music` key governs an engine.
    *
-   * DELIBERATELY SILENT TO OPEN AND TO CLOSE, unlike the tester panel and for
-   * the same reason buildArcadeExit() is silent — plus a second one: play()
-   * rate-limits on a clock that only advances inside the fixed step, and the
-   * fixed step is held while the title is up, so a 'ui' blip here would sound
-   * exactly once per session and then stop, which is worse than never. The
-   * sliders make their own noise through SM.sound.preview(), which throttles on
-   * wall time instead and is the one thing on this screen that has to be heard.
+   * DELIBERATELY SILENT TO OPEN AND TO CLOSE: play() rate-limits on a clock
+   * that only advances inside the fixed step, and the fixed step is held while
+   * the title is up, so a 'ui' blip here would sound exactly once per session
+   * and then stop. The sliders make their own noise through SM.sound.preview(),
+   * which throttles on wall time instead.
    * ------------------------------------------------------------------ */
-  function buildSoundPanel() {
-    els.soundPanel = el('div', 'sm-sound', root);
-    els.soundPanel.addEventListener('click', function (e) {
+  function buildMenuPanel() {
+    els.menuPanel = el('div', 'sm-sound', root);
+    els.menuPanel.setAttribute('role', 'dialog');
+    els.menuPanel.setAttribute('aria-modal', 'true');
+    els.menuPanel.addEventListener('click', function (e) {
       e.stopPropagation();          // nothing in here may start the campaign...
-      if (e.target === els.soundPanel) closeSound();   // ...and the backdrop closes
+      if (e.target === els.menuPanel) closeMenu();   // ...and the backdrop closes
     });
 
-    var card = el('div', 'sm-panel sm-sound-card', els.soundPanel);
+    var card = el('div', 'sm-panel sm-sound-card', els.menuPanel);
     el('div', 'sm-stripe', card);
     elT('div', 'sm-sound-kicker', card, 'sound.kicker');
-    elT('div', 'sm-sound-title', card, 'menu.sound');
+    elT('div', 'sm-sound-title', card, 'menu.settings');
 
-    /* ENGINE and EFFECTS, not THE RIG and THE ROCK. A player reaching for a
-     * volume is not reading for flavour — they are looking for which of two
-     * sliders is the one they want — and a label that has to be decoded from
-     * the hint underneath costs them exactly that. The fiction keeps the hint
-     * line, where it explains instead of obstructing.
-     *
-     * The first row is ENGINE and NOT "music", which is the one place this
-     * game departs from every other in the hub. There is no music down here:
-     * the rhythm grid died with the time-attack zones, and the continuous
-     * layer this slider actually governs is the drone and the cutter. A row
-     * labelled MUSIC would be naming something that does not exist, which is
-     * worse than being the odd one out. js/sound.js's header carries the full
-     * argument, including why the stored key is still `vol.music.v1`. */
-    els.volMusic = volumeRow(card, 'sm-vol-rig', 'menu.engine');
-    els.volSfx = volumeRow(card, 'sm-vol-rock', 'menu.effects');
-
+    buildVolumes(card, 'menu');
     elT('div', 'sm-sound-hint', card, 'sound.hint');
 
-    /* THE LANGUAGE ROW. This panel is the one settings surface the title gate
-     * has — the corner speaker opens it before any run — so it is where a
-     * stranger who cannot read the Norwegian the game opened in finds the way
-     * to English (CLAUDE.md §2, "Two languages"). The pause card carries the
-     * second copy; `sound` keeps this one's flag ids apart from it. */
-    I18N.langRow(card, 'sound');
+    /* The menu's copy of the language row; `menu` keeps its flag ids apart
+     * from the title's and the pause card's. */
+    I18N.langRow(card, 'menu');
 
-    els.soundBack = elT('button', 'sm-btn sm-sound-back', card, 'menu.back');
-    els.soundBack.setAttribute('type', 'button');
-    els.soundBack.addEventListener('click', function (e) {
+    els.menuBack = elT('button', 'sm-btn sm-sound-back', card, 'menu.back');
+    els.menuBack.setAttribute('type', 'button');
+    els.menuBack.addEventListener('click', function (e) {
       e.preventDefault();
-      els.soundBack.blur();
-      closeSound();
+      els.menuBack.blur();
+      closeMenu();
     });
 
-    /* Wired here rather than in init() because this file wires every other
-     * control where it builds it — see buildTester(). Only ever on "input",
-     * never on "change": a level you cannot hear until you let go of the thumb
-     * is not a volume control. */
-    wireVolume(els.volMusic, function (v) {
+    buildMenuExit(card);
+  }
+
+  /**
+   * THE WAY OUT, ON THE SETTINGS FACE — the same button as the title's and the
+   * pause card's, last in the column (CLAUDE.md §2, "One button..."). Same
+   * guard (exitOffered), same words (exitWord), same refusal handling.
+   *
+   * ONE CASE ASKS FOR A SECOND TAP: the workshop opened from the lift, where
+   * a run is HELD rather than over (adv.isShopHold()). Leaving there drops the
+   * hold exactly as the pause card's copy warns, so it arms the same way; on
+   * every other screen this face can be open on, the company is already saved
+   * and leaving costs nothing.
+   */
+  var menuQuitArmed = false;
+  var menuQuitTimer = 0;
+  function buildMenuExit(parent) {
+    if (!exitOffered()) return;
+    els.menuQuit = el('button', 'sm-btn sm-start-quit sm-menu-quit', parent, '');
+    els.menuQuit.setAttribute('type', 'button');
+    el('span', 'sm-start-quit-ico', els.menuQuit).innerHTML = glyph(UI_ICONS.back);
+    els.menuQuitLabel = el('span', 'sm-start-quit-label', els.menuQuit, exitWord());
+    els.menuQuit.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      els.menuQuit.blur();
+      if (els.menuQuit.disabled) return;
+      var held = !!(SM.adv && SM.adv.isShopHold && SM.adv.isShopHold());
+      if (held && !menuQuitArmed) {
+        menuQuitArmed = true;
+        els.menuQuit.classList.add('sm-ah-armed');
+        els.menuQuitLabel.textContent = T('pause.confirmLose');
+        menuQuitTimer = setTimeout(disarmMenuQuit, 3200);
+        return;
+      }
+      disarmMenuQuit();
+      if (SM.save && SM.save.flush) { try { SM.save.flush(); } catch (err) { /* best effort */ } }
+      startQuit();
+    });
+  }
+
+  function disarmMenuQuit() {
+    menuQuitArmed = false;
+    if (menuQuitTimer) { clearTimeout(menuQuitTimer); menuQuitTimer = 0; }
+    if (!els.menuQuit) return;
+    els.menuQuit.classList.remove('sm-ah-armed');
+    paintQuitLabels();
+  }
+
+  /** Both of this file's copies of the way out say the same thing, always. */
+  function paintQuitLabels() {
+    if (!window.ArcadeExit) return;
+    var word = quitRefused ? T('menu.closeTab') : exitWord();
+    if (els.startQuitLabel) els.startQuitLabel.textContent = word;
+    if (els.menuQuitLabel && !menuQuitArmed) els.menuQuitLabel.textContent = word;
+  }
+
+  /**
+   * ENGINE AND EFFECTS, for whichever menu asks — this file's settings face
+   * and advhud's pause card both call it, so the two copies are one control
+   * built once and cannot drift. Every copy is remembered, so paintVolumes()
+   * keeps all of them on the level the graph is actually at. `uid` keeps the
+   * input ids (and so the label `for`s) unique per copy.
+   *
+   * ENGINE and EFFECTS, not THE RIG and THE ROCK, and the first row is ENGINE
+   * and NOT "music" — the one place this game departs from every other in the
+   * hub. There is no music down here: the rhythm grid died with the
+   * time-attack zones, and the continuous layer this slider governs is the
+   * drone and the cutter. A row labelled MUSIC would name something that does
+   * not exist. js/sound.js's header says why the stored key is still
+   * `vol.music.v1` (§6: a key that works is not renamed).
+   */
+  var volumeSets = [];
+  function buildVolumes(parent, uid) {
+    var set = {
+      music: volumeRow(parent, 'sm-vol-rig-' + uid, 'menu.engine'),
+      sfx: volumeRow(parent, 'sm-vol-rock-' + uid, 'menu.effects')
+    };
+    /* Only ever on "input", never on "change": a level you cannot hear until
+     * you let go of the thumb is not a volume control. */
+    wireVolume(set.music, function (v) {
       if (SM.sound && SM.sound.setMusicVolume) SM.sound.setMusicVolume(v);
     }, 'music');
-    wireVolume(els.volSfx, function (v) {
+    wireVolume(set.sfx, function (v) {
       if (SM.sound && SM.sound.setSfxVolume) SM.sound.setSfxVolume(v);
     }, 'sfx');
-
+    volumeSets.push(set);
     paintVolumes();
+    return set;
   }
 
   /**
@@ -630,9 +753,8 @@ SM.ui = (function () {
        descent out from under an open menu. Stopping propagation at the input
        is what keeps the key: nothing here calls preventDefault, so the range
        still does its own default thing. */
-    /* ...all but Escape, which is the panel's BACK and must reach onTitleKey
-       from a focused slider too, or the key that closes the panel would be
-       the one key that does nothing while you are using it. */
+    /* ...all but Escape, which is the menu's BACK and must reach the handler
+       that owns it from a focused slider too. */
     input.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape' && e.key !== 'Esc') e.stopPropagation();
     });
@@ -660,21 +782,22 @@ SM.ui = (function () {
     pair.input.style.setProperty('--sm-fill', pct + '%');
   }
 
-  /** Pull both rows from the sound module. Feature-detected like every other
-   *  cross-module call in this file: on a partial merge the panel still opens
+  /** Pull every copy from the sound module. Feature-detected like every other
+   *  cross-module call in this file: on a partial merge the menu still opens
    *  and still reads 100/100 rather than throwing on the way up. */
   function paintVolumes() {
-    if (SM.sound && SM.sound.getMusicVolume) {
-      paintVolume(els.volMusic, SM.sound.getMusicVolume() * 100);
-    }
-    if (SM.sound && SM.sound.getSfxVolume) {
-      paintVolume(els.volSfx, SM.sound.getSfxVolume() * 100);
+    var m = (SM.sound && SM.sound.getMusicVolume) ? SM.sound.getMusicVolume() * 100 : null;
+    var f = (SM.sound && SM.sound.getSfxVolume) ? SM.sound.getSfxVolume() * 100 : null;
+    for (var i = 0; i < volumeSets.length; i++) {
+      if (m !== null) paintVolume(volumeSets[i].music, m);
+      if (f !== null) paintVolume(volumeSets[i].sfx, f);
     }
   }
 
   /** Each tick writes the level (sound.js persists it) and auditions the side
-   *  it just moved — the whole point on a screen where neither side is making
-   *  a sound of its own. */
+   *  it just moved. preview() also LIFTS THE MUTE (see sound.js): a slider
+   *  silently cancelled by a mute elsewhere is not a volume control. The
+   *  corner speaker repaints off the `sound:muted` event that follows. */
   function wireVolume(pair, apply, side) {
     if (!pair) return;
     pair.input.addEventListener('input', function () {
@@ -683,71 +806,53 @@ SM.ui = (function () {
       paintVolume(pair, pct);
       if (apply) apply(pct / 100);
       if (SM.sound && SM.sound.preview) SM.sound.preview(side);
+      /* The other copy of this slider is hidden right now, but it must not be
+       * found at a stale level the next time its menu opens. */
+      paintVolumes();
     });
   }
 
   /**
-   * The mixing panel.
+   * Open the settings face.
    *
-   * NO STATE GUARD, and that is the point of this release. The speaker used to
-   * exist on the title gate alone, so "where can this be opened from" never
-   * had to be asked; now the plate is on all seven screens and a guard that
-   * let it fire from one of them would make it a button that silently does
-   * nothing on the other six.
-   *
-   * WHERE "BACK" GOES NEEDS NO BOOKKEEPING. The panel is an overlay with its
-   * own scrim, not a screen in a state machine, so closing it reveals whatever
-   * it was opened over, by construction. Escape and BACK both route through
-   * closeSound(), so they cannot leave by different doors. What does have to
-   * be arranged is the state underneath it:
-   *
-   * UNDERGROUND, THE MINE STOPS. Opening a panel over a live descent would
-   * leave the rig driving into rock behind the scrim on a tank that keeps
-   * burning, and closing it would drop the player back into a machine they
-   * have not been watching. So a run is PAUSED on the way in — through
-   * advhud's own card, not a bare setPaused(), so what is revealed when the
-   * scrim goes is PAUSED with RESUME under the thumb rather than a mine that
-   * looks live and is not. openPause() refuses itself when the HUD is not
-   * visible or a pause is already up, so this is safe on the title gate, on
-   * every meta screen, and from the pause card itself.
-   *
-   * IT DOES NOT RESUME ON THE WAY OUT, deliberately. Coming back to a paused
-   * mine is the asymmetry; coming back to a moving one would be the bug.
+   * NEVER OVER A LIVE DESCENT: onMenuPlate() sends the plate to advhud's pause
+   * card whenever the HUD is up, so this only ever opens over a screen where
+   * nothing is moving. WHERE "BACK" GOES NEEDS NO BOOKKEEPING: the panel is an
+   * overlay with its own scrim, not a screen in a state machine, so closing it
+   * reveals whatever it was opened over. Escape, BACK, the backdrop and a
+   * second press of the plate all route through closeMenu().
    */
-  function openSound() {
-    if (!els.soundPanel || soundOpen) return;
+  function openMenu() {
+    if (!els.menuPanel || menuOpen) return;
     closeTester();               // one menu at a time over the title
-    if (SM.advhud && SM.advhud.openPause) SM.advhud.openPause();
-    soundOpen = true;
-    /* The panel is built once and reopened many times, so it repaints from the
-     * module on the way up rather than trusting whatever the DOM was last left
-     * showing: the thumb can then never sit at a level the graph is not at. */
+    menuOpen = true;
+    /* Built once and reopened many times, so it repaints from the module on
+     * the way up rather than trusting whatever the DOM was last left showing. */
     paintVolumes();
-    els.soundPanel.classList.add('sm-sound-on');
-    if (els.mixBtn) els.mixBtn.setAttribute('aria-expanded', 'true');
+    els.menuPanel.classList.add('sm-sound-on');
+    paintMenuPlate();
     // Put focus inside the thing that just appeared rather than leaving it on
     // a plate behind a scrim.
-    try { els.soundBack.focus(); } catch (e) { /* focus is optional */ }
+    try { els.menuBack.focus(); } catch (e) { /* focus is optional */ }
   }
 
-  /** DELIBERATELY DOES NOT RESUME — see openSound(). If a descent was paused
-   *  on the way in, the pause card is what appears when this scrim goes. */
-  function closeSound() {
-    if (!els.soundPanel || !soundOpen) return;
-    soundOpen = false;
-    els.soundPanel.classList.remove('sm-sound-on');
-    if (els.mixBtn) {
-      els.mixBtn.setAttribute('aria-expanded', 'false');
+  function closeMenu() {
+    if (!els.menuPanel || !menuOpen) return;
+    menuOpen = false;
+    disarmMenuQuit();
+    els.menuPanel.classList.remove('sm-sound-on');
+    paintMenuPlate();
+    if (els.menuBtn) {
       // Hand focus back to the plate that opened it, or a keyboard player is
       // dropped on the body with nothing selected.
-      try { els.mixBtn.focus(); } catch (e) { /* focus is optional */ }
+      try { els.menuBtn.focus(); } catch (e) { /* focus is optional */ }
     }
   }
 
   /* ---------------------------------------------------------------------
    * FILLING THE SCREEN
    * ---------------------------------------------------------------------
-   * The second plate in the corner cluster. It lives in THIS file rather than
+   * The third plate in the corner, the one in the actual corner. It lives in THIS file rather than
    * in a js/screen.js of its own because index.html is frozen — every script
    * tag in it is accounted for and documented in dependency order — and ui.js
    * already builds every control on this screen. What it must NOT be called is
@@ -761,8 +866,9 @@ SM.ui = (function () {
    * request/exit PAIR has answered here.
    *
    * Escape and the browser's own chrome leave fullscreen without ever touching
-   * this plate, so the glyph and aria-pressed repaint from the CHANGE EVENT and
-   * not only from the click handler.
+   * this plate, so aria-pressed — which CSS reads to draw expand or contract —
+   * and the words repaint from the CHANGE EVENT and not only from the click
+   * handler.
    *
    * It works inside the arcade's iframe: the launcher's allow list already
    * grants fullscreen to every game it frames.
@@ -782,7 +888,6 @@ SM.ui = (function () {
      * something the browser does, not something the game does; it has one name
      * everywhere and the player already knows it. */
     var label = T(on ? 'menu.exitFullscreen' : 'menu.fullscreen');
-    els.screen.innerHTML = glyph(on ? UI_ICONS.contract : UI_ICONS.expand);
     els.screen.setAttribute('aria-pressed', on ? 'true' : 'false');
     els.screen.setAttribute('aria-label', label);
     els.screen.setAttribute('title', label);
@@ -932,7 +1037,7 @@ SM.ui = (function () {
 
   function openTester() {
     if (!els.tester) return;
-    closeSound();                // one menu at a time over the title
+    closeMenu();                 // one menu at a time over the title
     testerOpen = true;
     paintTester();
     els.tester.classList.add('sm-tester-on');
@@ -1046,23 +1151,24 @@ SM.ui = (function () {
   function onTitleKey(e) {
     if (!e) return;
     var k = e.key;
-    /* THE SOUND PANEL OWNS THE KEYBOARD WHILE IT IS UP, AND IT TAKES IT BEFORE
-     * THE `titleUp` GATE. That gate is the first line of this handler because
-     * everything below it is the title's business — but the panel is not the
-     * title's any more, it opens from all seven screens, and behind the gate
-     * its Escape key was simply never delivered on six of them. Underground it
-     * was worse than lost: advhud's own Escape handler would have taken it and
-     * RESUMED the run with the mixer still over it, which is why that handler
-     * now asks isSoundOpen() before it acts. One key, one meaning, wherever
-     * the panel is.
+    /* THE SETTINGS FACE OWNS THE KEYBOARD WHILE IT IS UP, AND IT TAKES IT
+     * BEFORE THE `titleUp` GATE. That gate is the first line of this handler
+     * because everything below it is the title's business — but the menu is
+     * not the title's, it opens from every screen, and behind the gate its
+     * Escape key would never be delivered on six of them. advui.js's handler
+     * asks isMenuOpen() and checks defaultPrevented before it acts, so one
+     * Escape closes the menu and does not also walk a meta screen back.
      *
      * The rest of the reason this block comes early has not changed: Enter and
      * Space must not start a descent out from under an open menu when focus is
      * on BACK, and the arrows a player nudges a slider with must not be
      * quietly feeding the cheat tracker while they do it. The sliders stop
      * propagation one level lower for input.js's sake — see volumeRow(). */
-    if (soundOpen) {
-      if (k === 'Escape' || k === 'Esc') { e.preventDefault(); closeSound(); }
+    if (menuOpen) {
+      if (k === 'Escape' || k === 'Esc') {
+        e.preventDefault();
+        if (!e.repeat) closeMenu();
+      }
       return;
     }
     if (!titleUp) return;
@@ -1146,16 +1252,15 @@ SM.ui = (function () {
   function showTitle() {
     titleUp = true;
     closeTester();               // never resurface the title with a stale panel
-    closeSound();                // ...and the mixer is a panel like any other
+    closeMenu();                 // ...and the menu is a panel like any other
     if (els.start) els.start.classList.remove('sm-start-off');
   }
 
   function hideTitle() {
-    /* THE PANEL IS NO LONGER A CHILD OF THE OVERLAY, so the fade does not take
-     * it away any more — this call is what does, and it is now the only thing
-     * that does. Without it the mixer would still be over the screen when the
-     * first descent began underneath it. */
-    closeSound();
+    /* THE MENU IS NOT A CHILD OF THE OVERLAY, so the fade does not take it
+     * away — this call is what does. Without it the settings face would still
+     * be over the screen when the first descent began underneath it. */
+    closeMenu();
     if (els.start) els.start.classList.add('sm-start-off');
   }
 
@@ -1221,9 +1326,9 @@ SM.ui = (function () {
     lastStrings = {};
     paintUpdate();
     refreshScreenToggle();
-    if (els.startQuit && window.ArcadeExit) {
-      els.startQuitLabel.textContent = quitRefused ? T('menu.closeTab') : exitWord();
-    }
+    refreshMute();
+    paintQuitLabels();
+    if (menuQuitArmed && els.menuQuitLabel) els.menuQuitLabel.textContent = T('pause.confirmLose');
     if (els.testerWipe && !wipeTimer) els.testerWipe.textContent = T('tester.wipe');
     if (els.testerName) paintTester();
   }
@@ -1243,6 +1348,9 @@ SM.ui = (function () {
        * is idempotent) but this is the file's existing discipline. */
       window.addEventListener('keydown', onTitleKey, false);
       document.addEventListener('arcade:lang', onLang, false);
+      /* The M key and a slider drag change the mute without touching the
+       * corner speaker; it repaints off the event, so the two cannot disagree. */
+      if (SM.events && SM.events.on) SM.events.on('sound:muted', refreshMute);
     }
     initPWA();
   }
@@ -1396,11 +1504,16 @@ SM.ui = (function () {
     showTitle: showTitle,
     leaveAdventure: leaveAdventure,
     isTitleUp: function () { return titleUp; },
-    /* Asked by js/advhud.js's Escape handler, which shares the key with this
-     * file's. The mixer is permanent chrome and opens over a live descent, so
-     * underground both handlers would otherwise answer one Escape: this one
-     * closing the panel, that one resuming the run behind it. */
-    isSoundOpen: function () { return soundOpen; },
+    /* Asked by advhud.js's and advui.js's Escape handlers, which share the
+     * key with this file's: while the settings face is up, its Escape is this
+     * file's to answer, and nobody else may act on the same press. */
+    isMenuOpen: function () { return menuOpen; },
+    /* advhud's pause card is the in-run face of the same menu: it builds its
+     * sliders through here, and tells us when it opens and closes so the
+     * three-bar plate's aria-expanded is right. */
+    buildVolumes: buildVolumes,
+    paintVolumes: paintVolumes,
+    paintMenuPlate: paintMenuPlate,
     getRoot: function () { return root; }
   };
 })();

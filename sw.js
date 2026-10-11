@@ -152,7 +152,7 @@
 //         on request, switched live from a language row in the sound panel and
 //         on the pause card (js/i18n.js, new and precached below, storing the
 //         hub-wide arcade.lang.v1). Menus use the hub's plain words.
-const VERSION = 'v2.13.0'; // one way out like every cabinet's: Back to arcade last in the title's column and the pause card, and Escape walks one step back from every screen
+const VERSION = 'v2.14.0'; // the hub's three corner plates on every screen (menu, a live mute, fullscreen) in place of four, the volumes inside the one menu, and the language on the title screen itself
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 

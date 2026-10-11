@@ -41,9 +41,9 @@
  * arcade card reads it), console output and storage keys. Numbers keep the
  * game's own '$1 000 000' formatting, which is not locale-driven and never was.
  *
- * The language row (langRow) is built here rather than in the two places that
- * show it — the sound panel (reachable from the title, before any run) and the
- * pause card — so the two copies cannot drift. Its flags are the hub's art,
+ * The language row (langRow) is built here rather than in the three places
+ * that show it — the title screen itself, the menu's settings face and the
+ * pause card — so the copies cannot drift. Its flags are the hub's art,
  * copied path for path from kitchens/index.html, never emoji.
  * ========================================================================== */
 
@@ -73,10 +73,13 @@ var I18N = (function () {
       'menu.play': 'SPILL',
       'menu.resume': 'FORTSETT',
       'menu.paused': 'PAUSE',
-      'menu.pause': 'Pause',
       'menu.back': 'TILBAKE',
-      'menu.sound': 'LYD',
-      'menu.soundAria': 'Lyd',
+      'menu.settings': 'INNSTILLINGER',
+      /* The three corner plates' words (CLAUDE.md §2, "The corner"). Sentence
+         case, because they are spoken and shown as tooltips, never engraved. */
+      'menu.menu': 'Meny',
+      'menu.mute': 'Slå av lyden',
+      'menu.unmute': 'Slå på lyden',
       'menu.engine': 'MOTOR',
       'menu.effects': 'EFFEKTER',
       'menu.language': 'SPRÅK',
@@ -93,14 +96,13 @@ var I18N = (function () {
       'menu.workshop': 'VERKSTED',
       'menu.level': 'NIVÅ',
       'menu.confirm': 'BEKREFT',
-      'menu.soundOnOff': 'Lyd av / på',
 
       // --- js/ui.js: the title gate, the sound panel, tester mode, updates --
       'title.pick': 'DRIV DITT EGET GRUVEFIRMA',
       'title.tag': 'GRAV DYPT\u00a0· FYLL LASTEROMMET\u00a0· KOM DEG TILBAKE TIL HEISEN',
       'title.keysDesk': 'W A S D / PILTASTER — KJØR   ·   M — LYD AV   ·   ENTER — SPILL',
       'title.keysTouch': 'DRA HVOR SOM HELST FOR Å KJØRE',
-      'sound.kicker': 'HØYTTALERNE I FØRERHUSET',
+      'sound.kicker': 'I FØRERHUSET',
       'sound.hint': 'MOTOR ER DUREN OG BORET — LYDEN SOM ALDRI STOPPER MENS DU ' +
         'KJØRER. EFFEKTER ER ALT DU KNUSER, OG HVER BIT MALM SOM HAVNER I ' +
         'LASTEROMMET. DRA I EN AV DEM, SÅ HØRER DU DET.',
@@ -641,10 +643,11 @@ var I18N = (function () {
       'menu.play': 'PLAY',
       'menu.resume': 'RESUME',
       'menu.paused': 'PAUSED',
-      'menu.pause': 'Pause',
       'menu.back': 'BACK',
-      'menu.sound': 'SOUND',
-      'menu.soundAria': 'Sound',
+      'menu.settings': 'SETTINGS',
+      'menu.menu': 'Menu',
+      'menu.mute': 'Mute',
+      'menu.unmute': 'Unmute',
       'menu.engine': 'ENGINE',
       'menu.effects': 'EFFECTS',
       'menu.language': 'LANGUAGE',
@@ -658,14 +661,13 @@ var I18N = (function () {
       'menu.workshop': 'WORKSHOP',
       'menu.level': 'LEVEL',
       'menu.confirm': 'CONFIRM',
-      'menu.soundOnOff': 'Sound on / off',
 
       // --- js/ui.js: the title gate, the sound panel, tester mode, updates --
       'title.pick': 'RUN A MINING COMPANY',
       'title.tag': 'DIG DEEP\u00a0· FILL THE HOLD\u00a0· GET BACK TO THE LIFT',
       'title.keysDesk': 'W A S D / ARROWS — DRIVE   ·   M — MUTE   ·   ENTER — PLAY',
       'title.keysTouch': 'DRAG ANYWHERE TO DRIVE',
-      'sound.kicker': 'CAB SPEAKERS',
+      'sound.kicker': 'IN THE CAB',
       'sound.hint': 'ENGINE IS THE DRONE AND THE CUTTER — THE NOISE THAT NEVER STOPS WHILE ' +
         'YOU DRIVE. EFFECTS IS EVERYTHING IT BREAKS, AND EVERY ORE THAT GOES IN ' +
         'THE HOLD. DRAG EITHER ONE AND YOU WILL HEAR IT.',
