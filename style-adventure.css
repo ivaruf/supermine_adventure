@@ -2386,6 +2386,40 @@
   .sm-adv .sm-ah-manifest { max-height: 84px; overflow-y: auto; }
 }
 
+/* THE COMPANY SLOTS ON A PHONE ON ITS SIDE (hub CLAUDE.md §2: a menu must not
+   scroll on a landscape phone). Stacked, three companies come to ~420px of
+   rows against the ~280 a 390px-tall phone leaves between title and footer,
+   so the third company sat half under the fold and was reached only by a
+   scroll nobody expects on a picker. Sideways there is width to spare and no
+   height, so this is maxgear's shape: the same three cards stood side by side
+   as three equal columns, nothing moved in the DOM. The cards are peers, so
+   they share one size (the equal rule); their four figures go two by two to
+   fit a third of the glass. Placed after the wide block on purpose — at
+   844x390 both match, and this must undo its centring auto margins and its
+   720px cap, or the three columns would huddle in the middle of the screen.
+   The body's overflow stays behind it as the safety net, not the plan. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .sm-adv .sm-av-slots > .sm-av-body {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    align-content: start;
+  }
+  /* :first-child and :last-child named outright, because the wide block's
+     auto margins carry them and would otherwise win the specificity tie —
+     leaving the third card at its natural height beside two stretched ones. */
+  .sm-adv .sm-av-slots > .sm-av-body > .sm-av-slot,
+  .sm-adv .sm-av-slots > .sm-av-body > .sm-av-slot:first-child,
+  .sm-adv .sm-av-slots > .sm-av-body > .sm-av-slot:last-child {
+    max-width: none;
+    margin: 0;
+  }
+  .sm-adv .sm-av-slots > .sm-av-foot { max-width: none; }
+  .sm-adv .sm-av-slot-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sm-adv .sm-av-slot-acts .sm-btn { flex: 1 1 0; }
+  .sm-adv .sm-av-slot-acts .sm-av-quiet { flex: 0 0 88px; }
+}
+
 /* --- PORTRAIT (the default phone case) --------------------------------- */
 .sm-adv.sm-portrait .sm-ah { max-width: none; }
 /* The plate itself needs the height floor: .sm-av-map is the absolutely
