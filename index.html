@@ -65,6 +65,12 @@
 </head>
 <body>
 
+<!-- The three-second opening sting: the rig's lamp sweeps the dark rock and
+     the name rises into the light. Its own canvas, created and removed by the
+     script; any tap or key skips it. Async and first in <body>, so it plays
+     while every SM script below loads, and nothing in SM knows it exists. -->
+<script src="js/intro.js" async></script>
+
 <!-- Everything is drawn here. -->
 <canvas id="game"></canvas>
 

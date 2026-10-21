@@ -104,6 +104,14 @@ runtime listens for and re-renders what it is showing — never changing screen,
 closing a panel or unpausing. Data-table text (mine, part and ore names) is
 resolved through getters, so call sites read `.name` exactly as before.
 
+**First in `<body>`, `async`: `js/intro.js`** — the three-second opening
+sting (the rig's lamp sweeps the dark rock, the name rises into the light
+and lands on the title gate's wordmark). Not on `SM`, reads nothing from it,
+creates and removes its own `<canvas id="intro">`, and skips on any tap or
+key — swallowed in the capture phase on `window`, so the skipping press
+never reaches the title's Enter/Escape. If it fails, the game is exactly as
+it was without it.
+
 Two stylesheets, both required: `style.css` is the base layer (palette,
 `.sm-panel`, `.sm-btn`, `.sm-cell`, `.sm-stripe`, the title overlay, every
 `--sm-*` custom property) and `style-adventure.css` is everything above it.

@@ -152,7 +152,7 @@
 //         on request, switched live from a language row in the sound panel and
 //         on the pause card (js/i18n.js, new and precached below, storing the
 //         hub-wide arcade.lang.v1). Menus use the hub's plain words.
-const VERSION = 'v2.15.1'; // the company slots stand side by side on a sideways phone, so the third is no longer under the fold
+const VERSION = 'v2.16.0'; // an opening sting (js/intro.js): the rig's lamp sweeps the rock and the name lands on the title gate
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 
@@ -187,6 +187,7 @@ const ASSETS = [
   './js/adv.js',
   './js/main.js',
   './js/touch-guard.js',
+  './js/intro.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
