@@ -157,6 +157,9 @@ SM.camera = (function () {
   var SHAKE_EVENT_HEAVY    = 16;     // FLOOR at impact:heavy strength 1
   var SHAKE_EVENT_HEAVY_MIN = 2.2;
   var SHAKE_GRIND_GAIN     = 5.0;    // continuous rumble from cutter resistance
+  // Someone who has asked for less motion gets no shake at all. Both doors
+  // below check it, so every caller (vehicle.js, adv.js) is covered.
+  var REDUCED_MOTION = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
 
   /* =====================================================================
    * FRAMING TUNABLES
@@ -475,14 +478,14 @@ SM.camera = (function () {
   /** Additive trauma. Multiple hits in one frame stack, then saturate.
    *  For DISCRETE events only — see the note by the tunables. */
   function shake(strength) {
-    if (!(strength > 0)) return;
+    if (!(strength > 0) || (REDUCED_MOTION && REDUCED_MOTION.matches)) return;
     trauma += strength / C.CAM_SHAKE_MAX;
     if (trauma > SHAKE_TRAUMA_CAP) trauma = SHAKE_TRAUMA_CAP;
   }
 
   /** Raise trauma TO a level without accumulating. For repeating sources. */
   function shakeFloor(strength) {
-    if (!(strength > 0)) return;
+    if (!(strength > 0) || (REDUCED_MOTION && REDUCED_MOTION.matches)) return;
     var t = strength / C.CAM_SHAKE_MAX;
     if (t > SHAKE_TRAUMA_CAP) t = SHAKE_TRAUMA_CAP;
     if (trauma < t) trauma = t;

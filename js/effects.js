@@ -165,6 +165,8 @@ SM.effects = (function () {
   var GRIND_SPARK_RATE = 52;    // sparks/s at full cutter resistance
 
   var SCREEN_FLASH_MAX = 0.52;
+  // Under reduced motion the full-screen flash keeps about a third of its alpha.
+  var REDUCED_MOTION = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
 
   /* =====================================================================
    * Storage
@@ -1273,7 +1275,7 @@ SM.effects = (function () {
     if (flashAmt > 0.002) {
       var b = SM.camera.getViewBounds();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = flashAmt;
+      ctx.globalAlpha = flashAmt * (REDUCED_MOTION && REDUCED_MOTION.matches ? 0.3 : 1);
       ctx.fillStyle = 'rgb(' + flashR + ',' + flashG + ',' + flashB + ')';
       ctx.fillRect(b.minX, b.minY, b.maxX - b.minX, b.maxY - b.minY);
       ctx.globalCompositeOperation = 'source-over';

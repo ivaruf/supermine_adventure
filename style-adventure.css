@@ -546,10 +546,12 @@
   background: radial-gradient(ellipse at center, rgba(4, 6, 9, 0.6), rgba(2, 3, 5, 0.92));
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.22s ease;
+  /* Hidden too once faded, so a closed card's buttons leave the tab order. */
+  visibility: hidden;
+  transition: opacity 0.22s ease, visibility 0s 0.22s;
   z-index: 17;
 }
-.sm-ah-pause.sm-ah-pause-on { opacity: 1; pointer-events: auto; }
+.sm-ah-pause.sm-ah-pause-on { opacity: 1; pointer-events: auto; visibility: visible; transition-delay: 0s; }
 .sm-ah-pause-card {
   width: min(340px, 86vw);
   padding: 20px 20px 18px;
@@ -1010,10 +1012,11 @@
   padding: max(8px, var(--sm-top-y)) var(--sm-gutter) 10px;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.26s ease;
+  visibility: hidden;              /* see .sm-ah-pause */
+  transition: opacity 0.26s ease, visibility 0s 0.26s;
   z-index: 14;
 }
-.sm-av.sm-av-on { opacity: 1; pointer-events: auto; }
+.sm-av.sm-av-on { opacity: 1; pointer-events: auto; visibility: visible; transition-delay: 0s; }
 
 /* --- the ledger strip -------------------------------------------------- */
 .sm-av-ledger {

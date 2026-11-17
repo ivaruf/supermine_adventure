@@ -57,10 +57,10 @@
  *   SM.sound.preview('music' | 'sfx')  -- audition one side while dragging
  *
  * PAUSE
- *   Subscribes to `game:paused` and ducks the engine and grinder BUSES to
- *   zero, then back on resume. Those two are the only nodes in here that keep
- *   sounding without update() feeding them, so that single hook is the whole
- *   of it — see setPaused() for why it is not master that gets ducked.
+ *   Subscribes to `game:paused` and `adv:state` and ducks the engine and
+ *   grinder BUSES to zero whenever paused or off a descent, then back. Those
+ *   two are the only nodes in here that keep sounding without update()
+ *   feeding them — see setPaused() for why it is not master that gets ducked.
  * ========================================================================== */
 
 var SM = SM || {};
@@ -141,6 +141,7 @@ SM.sound = (function () {
   var sfxVol = DEFAULT_SFX;
   var previewLast = { music: -999, sfx: -999 };
   var paused = false;
+  var advState = 'off';            // js/adv.js's state, from adv:state
   var unlocked = false;
   var voices = 0;
 
@@ -248,10 +249,11 @@ SM.sound = (function () {
    * the session should not outrank that. advhud's speaker repaints itself off
    * the `sound:muted` event, so the two can never disagree.
    *
-   * The RIG audition goes out on engineBus and grindBus — the two buses that
-   * slider governs — and not on musicGain directly, so what you hear is the
-   * real path. Those two are the buses setPaused() ducks, which is harmless
-   * here: the panel only opens from the title, where nothing is paused.
+   * The RIG audition goes straight to musicGain, the gain that slider sets,
+   * and not through engineBus and grindBus: those are ducked whenever no
+   * descent is running, and the pause card has this slider too, so the
+   * audition would be silent exactly where it is dragged. Both buses sit at
+   * unity when live, so it is the same loudness.
    */
   function preview(which) {
     unlock();
@@ -267,9 +269,9 @@ SM.sound = (function () {
     if (which === 'music') {
       // The grinder's own two bands and one chug of the drone: this is the
       // machine, on the machine's buses, rather than a beep standing in for it.
-      noiseBurst(0.26, 880, 1.1, 0.30, 'bandpass', 0, grindBus);
-      noiseBurst(0.20, 3200, 7.0, 0.10, 'bandpass', 0, grindBus);
-      tone(66, 52, 0.28, 0.26, 'sawtooth', 0, engineBus);
+      noiseBurst(0.26, 880, 1.1, 0.30, 'bandpass', 0, musicGain);
+      noiseBurst(0.20, 3200, 7.0, 0.10, 'bandpass', 0, musicGain);
+      tone(66, 52, 0.28, 0.26, 'sawtooth', 0, musicGain);
     } else {
       // A deposit cracking: the noise this game makes for a living. The 'break'
       // recipe, with the randomness pinned so a drag is a steady rhythm rather
@@ -752,8 +754,16 @@ SM.sound = (function () {
     p = !!p;
     if (p === paused) return;      // main.js emits on change, but say it here too
     paused = p;
-    rampBus(engineBus, paused ? 0 : 1);
-    rampBus(grindBus, paused ? 0 : 1);
+    duckBeds();
+  }
+
+  /* Not only on pause: off a descent (results, the garage, the map) update()
+   * stops too, and the drone would hum on under those screens. So the beds
+   * sound only while paused is false AND adv.js says 'mine'. */
+  function duckBeds() {
+    var quiet = paused || advState !== 'mine';
+    rampBus(engineBus, quiet ? 0 : 1);
+    rampBus(grindBus, quiet ? 0 : 1);
   }
 
   function reset() {
@@ -768,8 +778,10 @@ SM.sound = (function () {
 
   function unlock() {
     if (!ensureContext()) return;
-    if (actx.state === 'suspended') {
-      try { actx.resume(); } catch (e) { /* ignore */ }
+    // Not only 'suspended': iOS parks a context in 'interrupted' after a call
+    // or a lock, and only a later gesture brings it back.
+    if (actx.state !== 'running') {
+      try { var r = actx.resume(); if (r && r.catch) r.catch(function () {}); } catch (e) { /* ignore */ }
     }
   }
 
@@ -779,15 +791,21 @@ SM.sound = (function () {
 
     // Browsers block audio until a user gesture.
     SM.events.on('input:firstgesture', unlock);
-    var kick = function () {
-      unlock();
-      window.removeEventListener('pointerdown', kick, true);
-      window.removeEventListener('keydown', kick, true);
-      window.removeEventListener('touchstart', kick, true);
-    };
+    // Every gesture, not just the first, so a context iOS has interrupted
+    // mid-session wakes on the next tap.
+    var kick = function () { unlock(); };
     window.addEventListener('pointerdown', kick, true);
     window.addEventListener('keydown', kick, true);
     window.addEventListener('touchstart', kick, true);
+    // A hidden tab goes quiet: the drone and the grinder are held on their
+    // last note when the frames stop, and would play on behind it.
+    document.addEventListener('visibilitychange', function () {
+      if (!actx) return;
+      try {
+        var r = document.hidden ? actx.suspend() : actx.resume();
+        if (r && r.catch) r.catch(function () {});
+      } catch (e) { /* ignore */ }
+    }, false);
 
     // Hot events: counters only.
     SM.events.on('material:destroyed', onDestroyed);
@@ -809,6 +827,7 @@ SM.sound = (function () {
 
     SM.events.on('input:mutetoggle', function () { toggleMute(); });
     SM.events.on('game:paused', function (p) { setPaused(p && p.paused); });
+    SM.events.on('adv:state', function (p) { advState = (p && p.state) || ''; duckBeds(); });
   }
 
   return {
