@@ -2005,6 +2005,15 @@
   background: var(--sm-hazard);
   opacity: 0.9;
 }
+/* The language pair: gold is the chosen one, so the other goes back to the
+ * dark panel. Under the rule above both wore gold and neither read as chosen. */
+.sm-adv .sm-btn.sm-lang-btn[aria-pressed="false"] {
+  color: var(--sm-dim);
+  background: var(--sm-panel);
+  border-color: var(--sm-border);
+  text-shadow: none;
+}
+.sm-adv .sm-btn.sm-lang-btn[aria-pressed="false"]::before { content: none; }
 
 /* --- UNAVAILABLE = GREYED OUT, never renamed ----------------------------
  * There was no disabled styling in this mode at all, which is exactly why
