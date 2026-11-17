@@ -1026,13 +1026,14 @@
   gap: 10px;
   min-height: 40px;
   padding: 6px 12px 7px;
-  /* THE CORNER CLUSTER LANDS HERE. ui.js's sound and fullscreen plates are
-     fixed to the page at the same inset this strip's own right edge uses, and
-     the cash balance is pinned to that edge by .sm-av-led-right's auto margin
-     — so without this the two most-read characters on five screens would sit
-     under a button. One plate pair plus air, measured off the plate size so it
+  /* THE CORNER CLUSTER LANDS HERE. ui.js's three plates (menu, sound,
+     fullscreen, since 2026-10-11) are fixed to the page at the same inset
+     this strip's own right edge uses, and the cash balance is pinned to that
+     edge by .sm-av-led-right's auto margin — so without this the two
+     most-read characters on five screens would sit under a button. Three
+     plates, their two 8px gaps and air, measured off the plate size so it
      tracks the compact breakpoint by itself. */
-  padding-right: calc(var(--sm-btn-size) * 2 + 20px);
+  padding-right: calc(var(--sm-btn-size) * 3 + 28px);
 }
 .sm-av.sm-av-noledger .sm-av-ledger { display: none; }
 .sm-av-led-co {
@@ -2378,7 +2379,7 @@
 .sm-adv.sm-compact .sm-av-ledger {
   min-height: 34px;
   padding: 4px 10px 5px;
-  padding-right: calc(var(--sm-btn-size) * 2 + 18px);
+  padding-right: calc(var(--sm-btn-size) * 3 + 26px);
 }
 .sm-adv.sm-compact .sm-av-led-cash { font-size: 15px; }
 .sm-adv.sm-compact .sm-av-slot { padding: 8px 10px 9px; }
