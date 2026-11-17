@@ -632,6 +632,8 @@ SM.advui = (function () {
     r.input.addEventListener('keydown', function (e) {
       e.stopPropagation();
       if (e.key === 'Enter') { e.preventDefault(); startCompany(r); }
+      // Escape in a text field only leaves the field (CLAUDE.md §2).
+      else if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); r.input.blur(); }
     }, false);
     r.input.addEventListener('keyup', function (e) { e.stopPropagation(); }, false);
     r.input.addEventListener('keypress', function (e) { e.stopPropagation(); }, false);

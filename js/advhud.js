@@ -878,6 +878,7 @@ SM.advhud = (function () {
     pauseOpen = false;
     if (els.btnAbort && els.btnAbort.smDisarm) els.btnAbort.smDisarm();
     if (els.btnLeave && els.btnLeave.smDisarm) els.btnLeave.smDisarm();
+    if (els.btnQuit && els.btnQuit.smDisarm) els.btnQuit.smDisarm();
     if (silent !== true && SM.sound && SM.sound.play) SM.sound.play('ui');
     if (SM.main && SM.main.setPaused) SM.main.setPaused(false);
     els.pause.classList.remove('sm-ah-pause-on');

@@ -90,7 +90,7 @@ var I18N = (function () {
          (CLAUDE.md §2, "One button..."). */
       'menu.exitArcade': 'Tilbake til arkaden',
       'menu.close': 'Lukk',
-      'menu.closeTab': 'Lukk fanen selv',
+      'menu.closeTab': 'Lukk vinduet selv',
       'menu.titleScreen': 'STARTSKJERMEN',
       'menu.map': 'KART',
       'menu.workshop': 'VERKSTED',
@@ -655,7 +655,7 @@ var I18N = (function () {
       'menu.exitFullscreen': 'Exit fullscreen',
       'menu.exitArcade': 'Back to arcade',
       'menu.close': 'Close',
-      'menu.closeTab': 'Close this tab yourself',
+      'menu.closeTab': 'Close the window yourself',
       'menu.titleScreen': 'TITLE SCREEN',
       'menu.map': 'MAP',
       'menu.workshop': 'WORKSHOP',

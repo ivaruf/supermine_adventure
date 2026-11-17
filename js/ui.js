@@ -83,7 +83,7 @@ SM.ui = (function () {
    * behind (v2.8.0 against sw.js's v2.9.1), which only ever shows on a
    * file:// or first-visit load — exactly the two cases where nobody can
    * check it against anything, so a wrong number there is worse than none. */
-  var GAME_VERSION    = 'v2.15.0';
+  var GAME_VERSION    = 'v2.16.1';
 
   /* TESTER MODE — the title-gate cheat code, old-school. Typed on the title
    * screen it reveals the TESTER MODE button; the unlock persists in
@@ -1436,6 +1436,10 @@ SM.ui = (function () {
     paintUpdate();
     els.update.disabled = true;
     swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
+    // controllerchange never comes after a hard refresh (uncontrolled page) or
+    // from a waiting worker gone redundant, so reload anyway: a stuck pill
+    // costs the update, a spare reload costs a title screen.
+    setTimeout(function () { location.reload(); }, 3000);
   }
 
   /**

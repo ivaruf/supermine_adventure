@@ -152,7 +152,7 @@
 //         on request, switched live from a language row in the sound panel and
 //         on the pause card (js/i18n.js, new and precached below, storing the
 //         hub-wide arcade.lang.v1). Menus use the hub's plain words.
-const VERSION = 'v2.16.0'; // an opening sting (js/intro.js): the rig's lamp sweeps the rock and the name lands on the title gate
+const VERSION = 'v2.16.1'; // the update button reloads even when controllerchange never comes; a closed pause card disarms the way out; Escape leaves the name field; a refused close says window
 const CACHE = `supermine-adventure-${VERSION}`;
 const CACHE_PREFIX = 'supermine-adventure-';
 
